@@ -1,0 +1,330 @@
+/* ============================================================
+   CC RACKS CRM — Design system sobre Tailwind v4
+   - Tokens de diseño en variables CSS (mutables → modo oscuro / acento / densidad).
+   - @theme inline expone esas variables como utilidades Tailwind (bg-bg-2, text-tx-1…).
+   - Las clases de componente se construyen con @apply.
+   - Preflight (reset de Tailwind) DESACTIVADO a propósito: ya tenemos resets propios
+     y así los <svg> en línea no se rompen. Por eso importamos solo theme + utilities.
+   ============================================================ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+/* ---- Tokens reales (modo claro por defecto) ---- */
+:root {
+  /* Surfaces */
+  --bg-0: #eef0f3; --bg-1: #f6f7f9; --bg-2: #ffffff; --bg-3: #f1f3f6; --bg-4: #e6e9ee;
+  /* Lines */
+  --line: #e7e9ee; --line-1: #e7e9ee; --line-2: #dce0e6; --line-soft: #eef0f3;
+  /* Text */
+  --tx-0: #1b2230; --tx-1: #495261; --tx-2: #6b7480; --tx-3: #9aa2ad;
+  /* Accent (lo sobreescribe el JS según Tweaks) */
+  --acc: #2f6feb; --acc-bright: #4a83f4; --acc-dim: #1f57c9;
+  --acc-ghost: rgba(47, 111, 235, 0.12); --acc-ghost-2: rgba(47, 111, 235, 0.20);
+  --acc-tx: #ffffff;
+  /* Stage hues */
+  --st-1: #8a94a6; --st-2: #3b82f6; --st-3: #8b5cf6; --st-4: #2f6feb; --st-5: #0ea5e9;
+  --st-6: #16a34a; --st-7: #f97316; --st-8: #6366f1; --st-9: #10b981;
+  --st-10: #db2777;
+  /* Semantic */
+  --ok: #16a34a; --warn: #d97706; --danger: #e5484d; --info: #3b82f6;
+  /* Geometry */
+  --r-0: 0px; --r-1: 6px; --r-2: 8px; --r-3: 12px;
+  /* Density (overridden by Tweaks) */
+  --pad: 20px; --row-h: 44px; --gap: 16px;
+  /* Fonts */
+  --f-display: "Archivo", system-ui, -apple-system, sans-serif;
+  --f-data: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, monospace;
+  /* Blueprint (desactivada) */
+  --grid-a: 0; --grid-size: 26px;
+  --shadow-1: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.06);
+  --shadow-2: 0 12px 40px rgba(16,24,40,0.14), 0 2px 8px rgba(16,24,40,0.06);
+}
+
+/* ---- Mapea las variables a tokens de Tailwind (inline = referencia directa) ---- */
+@theme inline {
+  --color-bg-0: var(--bg-0);
+  --color-bg-1: var(--bg-1);
+  --color-bg-2: var(--bg-2);
+  --color-bg-3: var(--bg-3);
+  --color-bg-4: var(--bg-4);
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-line-soft: var(--line-soft);
+  --color-tx-0: var(--tx-0);
+  --color-tx-1: var(--tx-1);
+  --color-tx-2: var(--tx-2);
+  --color-tx-3: var(--tx-3);
+  --color-acc: var(--acc);
+  --color-acc-bright: var(--acc-bright);
+  --color-acc-dim: var(--acc-dim);
+  --color-acc-ghost: var(--acc-ghost);
+  --color-acc-ghost-2: var(--acc-ghost-2);
+  --color-acc-tx: var(--acc-tx);
+  --color-st-1: var(--st-1);
+  --color-st-2: var(--st-2);
+  --color-st-3: var(--st-3);
+  --color-st-4: var(--st-4);
+  --color-st-5: var(--st-5);
+  --color-st-6: var(--st-6);
+  --color-st-7: var(--st-7);
+  --color-st-8: var(--st-8);
+  --color-st-9: var(--st-9);
+  --color-st-10: var(--st-10);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --font-display: var(--f-display);
+  --font-data: var(--f-data);
+  --font-mono: var(--f-mono);
+}
+
+/* ============================================================
+   BASE (resets propios — sin Preflight)
+   ============================================================ */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-0);
+  color: var(--tx-0);
+  font-family: var(--f-data);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root { height: 100%; }
+
+::selection { background: var(--acc-ghost-2); color: var(--tx-0); }
+
+/* Scrollbars — finas y discretas */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #cfd4db;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background: #b6bcc6; background-clip: content-box; }
+
+h1,h2,h3,h4 { font-family: var(--f-display); font-weight: 700; margin: 0; letter-spacing: -0.015em; }
+button { font-family: inherit; }
+input, select, textarea { font-family: var(--f-data); }
+
+.mono { @apply font-mono; font-feature-settings: "tnum" 1; }
+
+/* ============================================================
+   COMPONENTES — en la capa "components" para que las utilidades
+   Tailwind escritas en el JSX puedan sobreescribirlas.
+   ============================================================ */
+@layer components {
+
+/* ---- APP SHELL ---- */
+.app { @apply grid grid-cols-[248px_1fr] h-full overflow-hidden bg-bg-0; }
+.app.collapsed { @apply grid-cols-[72px_1fr]; }
+
+.blueprint { @apply bg-none; }
+
+/* ---- Sidebar ---- */
+.sidebar { @apply bg-bg-2 border-r border-line flex flex-col overflow-hidden relative; }
+.brand { @apply flex items-center gap-3 pt-5 px-[18px] pb-[18px] min-h-[70px]; }
+.brand-mark {
+  @apply w-9 h-9 shrink-0 grid place-items-center bg-acc text-acc-tx font-display font-extrabold text-base rounded-[8px];
+  box-shadow: 0 2px 6px var(--acc-ghost-2);
+}
+.brand-name { @apply font-display font-extrabold text-[15px] tracking-[0.01em] leading-none whitespace-nowrap; }
+.brand-sub { @apply text-[11px] text-tx-3 tracking-[0.02em] mt-1 whitespace-nowrap; }
+
+.nav { @apply py-2 px-3 flex-1 overflow-y-auto; }
+.nav-sec { @apply text-[10.5px] font-semibold tracking-[0.08em] uppercase text-tx-3 pt-4 px-[10px] pb-2; }
+.nav-item {
+  @apply flex items-center gap-[11px] py-[9px] px-[11px] my-0.5 text-tx-1 cursor-pointer rounded-[8px] relative select-none whitespace-nowrap;
+  transition: background .14s, color .14s;
+}
+.nav-item:hover { @apply bg-bg-3 text-tx-0; }
+.nav-item.active { @apply bg-acc-ghost text-acc-dim; }
+.nav-item.active svg { @apply opacity-100; }
+.nav-item svg { @apply w-[18px] h-[18px] shrink-0 opacity-70; }
+.nav-item .nav-label { @apply text-[13.5px] font-medium flex-1; }
+.nav-item.active .nav-label { @apply font-semibold; }
+.nav-item .nav-count { @apply text-[11px] font-semibold bg-bg-4 text-tx-2 px-2 py-px rounded-full; }
+.nav-item.active .nav-count { @apply bg-acc text-acc-tx; }
+.app.collapsed .nav-label, .app.collapsed .nav-count, .app.collapsed .nav-sec, .app.collapsed .brand-text { @apply hidden; }
+.app.collapsed .brand { @apply justify-center pt-5 px-0 pb-[18px]; }
+.app.collapsed .nav-item { @apply justify-center; }
+
+.sidebar-foot { @apply p-3 border-t border-line; }
+.user-chip { @apply flex items-center gap-2.5 p-1.5 rounded-[8px]; }
+.avatar { @apply w-8 h-8 shrink-0 bg-bg-4 text-tx-1 grid place-items-center font-display font-bold text-[12px] rounded-full; }
+
+/* ---- Main column ---- */
+.main { @apply flex flex-col overflow-hidden min-w-0; }
+.topbar {
+  @apply h-[70px] shrink-0 flex items-center gap-4 px-7 border-b border-line z-[5];
+  background: rgba(255,255,255,0.78);
+  backdrop-filter: blur(10px);
+}
+.topbar h1 { @apply text-[20px] font-bold tracking-[-0.02em]; }
+.crumb { @apply text-[12px] text-tx-2 mt-0.5; }
+.icon-btn {
+  @apply w-[38px] h-[38px] grid place-items-center bg-transparent border border-line text-tx-2 cursor-pointer rounded-[8px];
+  transition: .14s;
+}
+.icon-btn:hover { @apply bg-bg-3 text-tx-0 border-line-2; }
+.icon-btn svg { @apply w-[18px] h-[18px]; }
+
+.content { @apply flex-1 overflow-y-auto p-7 min-h-0; }
+.content-inner { @apply max-w-[1440px] mx-auto; }
+
+/* ============================================================
+   PRIMITIVES
+   ============================================================ */
+.card { @apply bg-bg-2 border border-line rounded-[12px]; box-shadow: var(--shadow-1); }
+.card-h { @apply flex items-center gap-3 px-5 py-4 border-b border-line; }
+.card-h .ttl { @apply font-display font-bold text-[14.5px] tracking-[-0.01em]; }
+.card-h .sub { @apply text-[11.5px] text-tx-2; }
+.card-b { @apply p-5; }
+
+/* Buttons */
+.btn {
+  @apply inline-flex items-center gap-2 py-[9px] px-[15px] border border-line-2 bg-bg-2 text-tx-0 text-[13px] font-semibold cursor-pointer rounded-[8px] whitespace-nowrap font-data;
+  transition: .14s;
+}
+.btn:hover { @apply bg-bg-3 border-[#cfd4db]; }
+.btn svg { @apply w-[15px] h-[15px]; }
+.btn-primary { @apply bg-acc border-acc text-acc-tx; box-shadow: 0 1px 2px var(--acc-ghost-2); }
+.btn-primary:hover { @apply bg-acc-bright border-acc-bright; }
+.btn-ghost { @apply bg-transparent border-line text-tx-1; }
+.btn-ghost:hover { @apply bg-bg-3 text-tx-0; }
+.btn-sm { @apply py-1.5 px-[11px] text-[12px]; }
+.btn-danger { @apply bg-transparent text-danger; border-color: rgba(229,72,77,0.35); }
+.btn-danger:hover { background: rgba(229,72,77,0.08); }
+
+/* Badge */
+.badge {
+  @apply inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.01em] py-[3px] px-[9px] rounded-full border border-current whitespace-nowrap;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+.badge .dot { @apply w-1.5 h-1.5 rounded-full bg-current; }
+.badge-solid { @apply rounded-full; color: var(--acc-tx) !important; }
+
+/* Segmented control */
+.seg { @apply inline-flex border border-line bg-bg-1 rounded-[8px] p-[3px] gap-0.5; }
+.seg button { @apply py-1.5 px-[13px] bg-transparent border-none text-tx-2 text-[12.5px] font-semibold cursor-pointer rounded-[6px]; transition: .12s; }
+.seg button.on { @apply bg-bg-2 text-tx-0; box-shadow: var(--shadow-1); }
+.seg button:hover:not(.on) { @apply text-tx-0; }
+
+/* Inputs */
+.field { @apply flex flex-col gap-[7px]; }
+.field label { @apply text-[11.5px] font-semibold text-tx-2; }
+.input, .select, .textarea {
+  @apply bg-bg-2 border border-line-2 text-tx-0 py-[9px] px-3 text-[13.5px] w-full outline-none rounded-[8px];
+  transition: border .14s, box-shadow .14s;
+}
+.input:focus, .select:focus, .textarea:focus { @apply border-acc; box-shadow: 0 0 0 3px var(--acc-ghost); }
+.input::placeholder, .textarea::placeholder { @apply text-tx-3; }
+.textarea { @apply resize-y min-h-[76px] leading-[1.55]; }
+select.select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%236b7480' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
+
+/* Table */
+.tbl { @apply w-full border-collapse; }
+.tbl th { @apply text-left text-[11px] tracking-[0.02em] text-tx-2 font-semibold py-3 px-4 border-b border-line bg-bg-1 sticky top-0 cursor-default whitespace-nowrap; }
+.tbl th.sortable { @apply cursor-pointer; }
+.tbl th.sortable:hover { @apply text-tx-0; }
+.tbl td { @apply py-[13px] px-4 border-b border-line-soft text-[13px] align-middle; }
+.tbl tr { transition: background .1s; }
+.tbl tbody tr:hover { @apply bg-bg-3 cursor-pointer; }
+.tbl .num { @apply font-mono; font-feature-settings: "tnum" 1; }
+
+/* KPI */
+.kpi { @apply bg-bg-2 border border-line p-5 relative overflow-hidden rounded-[12px]; box-shadow: var(--shadow-1); }
+.kpi-accent { border-color: color-mix(in srgb, var(--acc) 35%, var(--line)); }
+.kpi-accent::before { content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background: var(--acc); }
+.kpi .k-label { @apply text-[12px] font-semibold text-tx-2 flex items-center gap-2; }
+.kpi .k-val { @apply font-display font-extrabold text-[31px] leading-[1.05] mt-2.5 tracking-[-0.025em] text-tx-0; }
+.kpi .k-val .unit { @apply text-[15px] text-tx-2 font-semibold ml-[3px]; }
+.kpi .k-foot { @apply text-[12px] text-tx-2 mt-[9px] flex items-center gap-1.5; }
+.kpi .k-ic { @apply absolute right-4 top-4 text-tx-3 opacity-50; }
+.kpi .k-ic svg { @apply w-[22px] h-[22px]; }
+.trend-up { @apply text-ok font-semibold; }
+.trend-dn { @apply text-danger font-semibold; }
+
+/* Modal */
+.modal-scrim {
+  @apply fixed inset-0 z-[100] flex items-start justify-center py-14 px-5 overflow-y-auto;
+  background: rgba(20,28,42,0.35);
+  backdrop-filter: blur(4px);
+  animation: fade .15s ease;
+}
+.modal {
+  @apply bg-bg-2 border border-line w-full rounded-[12px] overflow-hidden;
+  box-shadow: var(--shadow-2);
+  animation: pop .18s cubic-bezier(.2,.9,.3,1.2);
+}
+.modal-h { @apply flex items-center gap-3 px-6 py-5 border-b border-line; }
+.modal-h .m-ttl { @apply font-display font-bold text-[17px] flex-1 tracking-[-0.01em]; }
+.modal-b { @apply p-6; }
+.modal-f { @apply flex gap-2.5 justify-end px-6 py-4 border-t border-line bg-bg-1; }
+@keyframes fade { from { opacity: 0; } }
+@keyframes pop { from { opacity: 0; transform: translateY(-10px) scale(.98); } }
+
+/* Layout helpers */
+.grid { @apply grid; gap: var(--gap); }
+.row { @apply flex items-center; }
+.spread { @apply flex items-center justify-between gap-3; }
+.stack { @apply flex flex-col; }
+
+/* Section title */
+.sec-title { @apply flex items-baseline gap-3 mb-4; }
+.sec-title h2 { @apply text-[17px] tracking-[-0.015em]; }
+.sec-title .sub { @apply text-[12px] text-tx-2; }
+
+.empty { @apply text-center text-tx-2 py-14 px-5 text-[13.5px]; }
+.empty svg { @apply w-10 h-10 opacity-30 mb-3.5; }
+
+.divider { @apply h-px bg-line my-4; }
+
+/* doc chip */
+.doc-chip { @apply inline-flex items-center gap-[7px] py-[7px] px-[11px] bg-bg-1 border border-line-2 text-[12px] text-tx-1 rounded-[8px] max-w-full; }
+.doc-chip svg { @apply w-[14px] h-[14px] shrink-0 text-tx-2; }
+.doc-chip .nm { @apply overflow-hidden text-ellipsis whitespace-nowrap; }
+.doc-missing { @apply text-tx-3 border-dashed bg-transparent; }
+
+/* tiny meta + label */
+.meta { @apply text-[11.5px] text-tx-2; }
+.label-k { @apply text-[11px] font-semibold text-tx-2; }
+
+/* Progress bar */
+.bar { @apply h-[7px] bg-bg-4 border-none rounded-full overflow-hidden; }
+.bar > i { @apply block h-full bg-acc rounded-full; }
+
+} /* @layer components */
+
+/* ============================================================
+   DARK MODE (toggle "Modo oscuro" → body.light)
+   ============================================================ */
+body.light {
+  --bg-0: #0d1117; --bg-1: #11161f; --bg-2: #161c27; --bg-3: #1d2533; --bg-4: #283142;
+  --line: #232c3a; --line-2: #2e3949; --line-soft: #1b2330;
+  --tx-0: #e9edf3; --tx-1: #b3bdcc; --tx-2: #828c9c; --tx-3: #5d6776;
+  --acc-tx: #ffffff;
+  --shadow-1: 0 1px 2px rgba(0,0,0,0.25), 0 1px 3px rgba(0,0,0,0.3);
+  --shadow-2: 0 16px 48px rgba(0,0,0,0.5);
+  color-scheme: dark;
+}
+body.light .sidebar,
+body.light .topbar { background: var(--bg-2); }
+body.light .topbar { background: rgba(22,28,39,0.8); }
+body.light ::-webkit-scrollbar-thumb { background: #2e3949; background-clip: content-box; }
+
+/* Entrance animation */
+@keyframes slideup { from { transform: translateY(9px); } }
+.animate-in { animation: slideup .32s cubic-bezier(.2,.7,.3,1) both; }
+@media (prefers-reduced-motion: reduce) { .animate-in { animation: none; } }
