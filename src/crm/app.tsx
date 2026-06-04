@@ -20,11 +20,11 @@ type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'client
 
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard' },
-  { id: 'projects',    label: 'Proyectos',    icon: 'kanban', countKey: 'activeProjects' },
-  { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers', countKey: 'suppliers' },
-  { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders', countKey: 'orders' },
-  { id: 'payments',    label: 'Pagos',        icon: 'money', countKey: 'payments' },
-  { id: 'clients',     label: 'Clientes',     icon: 'clients', countKey: 'clients' },
+  { id: 'projects',    label: 'Proyectos',    icon: 'kanban' },
+  { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers'},
+  { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders'},
+  { id: 'payments',    label: 'Pagos',        icon: 'money' },
+  { id: 'clients',     label: 'Clientes',     icon: 'clients' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions' },
 ]
 const TITLES: Record<Route, string> = {

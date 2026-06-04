@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, daysBetween, docNo } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, daysBetween, docNo, docCount, DOC_LABELS } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, FileField, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
@@ -15,6 +15,7 @@ type ProjectFormState = {
   client: string
   seller: string
   city: string
+  sistemaVendido?: string
   freight: number | string
   install: number | string
   weeks: number | string
@@ -122,6 +123,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
         <div>
           <div className="label-k mb-2">Datos generales</div>
           <InfoRow k="Cliente">{client ? client.name : '—'}</InfoRow>
+          <InfoRow k="Sistema vendido">{p.sistemaVendido || '—'}</InfoRow>
           <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}</InfoRow>
           <InfoRow k="Vendedor"><span className="inline-flex items-center gap-1.5"><Avatar name={seller ? seller.name : ''} size={20} /> {seller ? seller.name : '—'}</span></InfoRow>
           <InfoRow k="Semanas de entrega"><span className="mono">{p.weeks} sem</span></InfoRow>
@@ -158,12 +160,9 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
 
       {/* documents */}
       <div className="mt-5">
-        <div className="label-k mb-2">Documentos</div>
+        <div className="label-k mb-2">Documentos ({docCount(p).done}/7)</div>
         <div className="flex flex-wrap gap-2">
-          <DocChip doc={p.docs.quote} label="Cotización" />
-          <DocChip doc={p.docs.layout} label="Layout final" />
-          <DocChip doc={p.docs.advance} label="Comprobante anticipo" />
-          <DocChip doc={p.docs.completion} label="Carta fin de obra" />
+          {DOC_LABELS.map(d => <DocChip key={d.key} doc={p.docs[d.key]} label={d.label} />)}
         </div>
       </div>
 
@@ -190,9 +189,9 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
 /* ---------- Create / edit form ---------- */
 const blank = (): ProjectFormState => ({
   code: 'PRY-2026-' + String(Math.floor(Math.random()*900)+100), stage: 'registro',
-  client: '', seller: '', city: '', freight: '', install: '', weeks: '', obs: '',
+  client: '', seller: '', city: '', sistemaVendido: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending',
-  docs: { quote: docNo(), layout: docNo(), advance: docNo(), completion: docNo() },
+  docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: docNo(), finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
 })
 
 export function ProjectForm({ project, onClose }: { project?: Project; onClose: () => void }) {
@@ -201,7 +200,6 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
   const isNew = !project
   const set = (k: keyof ProjectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   const setDoc = (k: keyof ProjectDocs, name: string) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name, ok: !!name } } }))
-  const toggleSupplier = (id: string) => setP(s => ({ ...s, suppliers: s.suppliers.includes(id) ? s.suppliers.filter(x => x !== id) : [...s.suppliers, id] }))
 
   const valid = p.client && p.city && p.seller
   const save = () => {
@@ -229,6 +227,7 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
           </Select>
         </Field>
         <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey, N.L." /></Field>
+        <Field label="Sistema vendido"><Input value={p.sistemaVendido || ''} onChange={e => set('sistemaVendido', e.target.value)} placeholder="Ej. Rack selectivo" /></Field>
 
         <Field label="Vendedor">
           <Select value={p.seller} onChange={e => set('seller', e.target.value)}>
@@ -255,22 +254,12 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
       </div>
 
       <div className="mt-4">
-        <div className="label-k mb-2">Proveedores asignados</div>
-        <div className="flex flex-wrap gap-2">
-          {state.suppliers.filter(s => s.active).map(s => (
-            <button key={s.id} type="button" onClick={() => toggleSupplier(s.id)}
-              className="btn btn-sm" style={{ background: p.suppliers.includes(s.id) ? 'var(--acc-ghost-2)' : 'var(--bg-1)', borderColor: p.suppliers.includes(s.id) ? 'var(--acc)' : 'var(--line)', color: p.suppliers.includes(s.id) ? 'var(--acc-bright)' : 'var(--tx-1)' }}>
-              {p.suppliers.includes(s.id) && <Icon name="check" size={13} />} {s.name}
-            </button>
+        <div className="label-k mb-2">Documentos</div>
+        <div className="grid grid-cols-2 gap-3.5">
+          {DOC_LABELS.map(d => (
+            <FileField key={d.key} label={d.label} value={p.docs[d.key].name} onChange={n => setDoc(d.key, n)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
           ))}
         </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-2 gap-3.5">
-        <FileField label="Cotización (PDF/Excel)" value={p.docs.quote.name} onChange={n => setDoc('quote', n)} accept=".pdf,.xlsx,.xls" />
-        <FileField label="Layout final" value={p.docs.layout.name} onChange={n => setDoc('layout', n)} accept=".pdf,.dwg,.png" />
-        <FileField label="Comprobante de anticipo" value={p.docs.advance.name} onChange={n => setDoc('advance', n)} accept=".pdf,.jpg,.png" />
-        <FileField label="Carta fin de obra" value={p.docs.completion.name} onChange={n => setDoc('completion', n)} accept=".pdf,.jpg" />
       </div>
     </Modal>
   )

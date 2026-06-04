@@ -65,15 +65,37 @@ export const ago = (d: string) => {
 let _id = 1000
 export const uid = (p = 'id') => `${p}-${++_id}`
 
+/** Abreviación de estado a partir de la ciudad ("Monterrey, N.L." → "N.L."). */
+const CITY_ABBR: Record<string, string> = {
+  'Ciudad de México': 'CDMX',
+  'Estado de México': 'Edo. Méx.',
+}
+export const cityAbbr = (city?: string) => {
+  if (!city) return '—'
+  if (city.includes(',')) return city.split(',').pop()!.trim()
+  return CITY_ABBR[city.trim()] || city.trim()
+}
+
 /* ---- Document helpers ---- */
 export const docOK = (name: string) => ({ name, ok: true })
 export const docNo = () => ({ name: '', ok: false })
 
-/** Conteo de documentos completos de un proyecto. */
+/** Etiquetas de los 7 documentos de un proyecto, en orden. */
+export const DOC_LABELS: { key: keyof Project['docs']; label: string }[] = [
+  { key: 'cotizacion', label: 'Cotización' },
+  { key: 'layout', label: 'Lay out' },
+  { key: 'anticipo', label: 'Anticipo' },
+  { key: 'ordenCompra', label: 'Orden de compra' },
+  { key: 'finiquito', label: 'Finiquito' },
+  { key: 'remision', label: 'Remisión de salida' },
+  { key: 'cartaFin', label: 'Carta fin de obra' },
+]
+
+/** Conteo de documentos completos de un proyecto (de 7). */
 export function docCount(p: Project) {
   const d = p.docs
-  const all = [d.quote, d.layout, d.advance, d.completion]
-  return { done: all.filter(x => x.ok).length, total: 4 }
+  const all = [d.cotizacion, d.layout, d.anticipo, d.ordenCompra, d.finiquito, d.remision, d.cartaFin]
+  return { done: all.filter(x => x.ok).length, total: 7 }
 }
 
 /* ---- Catálogo de Régimen Fiscal (SAT) ---- */
@@ -129,13 +151,13 @@ const SUPPLIERS: Supplier[] = [
 /* ---- Órdenes de Compra (modelo "Control OC" del Excel) ---- */
 const ORDERS: Order[] = [
   // OCs vinculadas a proyectos del CRM (convertidas al nuevo modelo)
-  { id: 'oc1', number: 'OC-2026-0041', date: '2026-04-28', supplierId: 's1', projectId: 'p1', description: 'Racks selectivos · PRY-2026-001', conditions: 'Parcialidades', amount: 486000, responsible: 'Administración', file: 'OC-2026-0041_RacksBajio.pdf' },
-  { id: 'oc2', number: 'OC-2026-0047', date: '2026-05-19', supplierId: 's1', projectId: 'p2', description: 'Racks anticorrosivos · PRY-2026-002', conditions: 'Parcialidades', amount: 312000, responsible: 'Administración', file: 'OC-2026-0047_RacksBajio.pdf' },
-  { id: 'oc3', number: 'OC-2026-0052', date: '2026-05-26', supplierId: 's2', projectId: 'p4', description: 'Flete Monterrey · PRY-2026-004', conditions: 'Contado', amount: 58000, responsible: 'Logística', file: 'OC-2026-0052_Flete_TFN.pdf' },
-  { id: 'oc4', number: 'OC-2026-0038', date: '2026-03-30', supplierId: 's1', projectId: 'p6', description: 'Racks · PRY-2026-006', conditions: 'Contado', amount: 540000, responsible: 'Administración', file: 'OC-2026-0038_RacksBajio.pdf' },
-  { id: 'oc5', number: 'OC-2026-0039', date: '2026-04-02', supplierId: 's3', projectId: 'p6', description: 'Instalación · PRY-2026-006', conditions: 'Contado', amount: 72000, responsible: 'Logística', file: 'OC-2026-0039_Instalacion_Vega.pdf' },
-  { id: 'oc6', number: 'OC-2026-0033', date: '2026-03-12', supplierId: 's1', projectId: 'p7', description: 'Racks · PRY-2026-007', conditions: 'Contado', amount: 398000, responsible: 'Administración', file: 'OC-2026-0033_RacksBajio.pdf' },
-  { id: 'oc7', number: 'OC-2026-0055', date: '2026-05-29', supplierId: 's1', projectId: 'p5', description: 'Racks · PRY-2026-005', conditions: 'Parcialidades', amount: 268000, responsible: 'Administración', file: '' },
+  { id: 'oc1', number: 'OC-2026-0041', date: '2026-04-28', supplierId: 's1', projectId: 'p1', description: 'Racks selectivos · PRY-2026-001', conditions: '50% anticipo - 50% contra entrega', amount: 486000, responsible: 'Ana Robles', file: 'OC-2026-0041_RacksBajio.pdf' },
+  { id: 'oc2', number: 'OC-2026-0047', date: '2026-05-19', supplierId: 's1', projectId: 'p2', description: 'Racks anticorrosivos · PRY-2026-002', conditions: '50% anticipo - 50% finiquito', amount: 312000, responsible: 'Carlos Méndez', file: 'OC-2026-0047_RacksBajio.pdf' },
+  { id: 'oc3', number: 'OC-2026-0052', date: '2026-05-26', supplierId: 's2', projectId: 'p4', description: 'Flete Monterrey · PRY-2026-004', conditions: 'Contado', amount: 58000, responsible: 'Ana Robles', file: 'OC-2026-0052_Flete_TFN.pdf' },
+  { id: 'oc4', number: 'OC-2026-0038', date: '2026-03-30', supplierId: 's1', projectId: 'p6', description: 'Racks · PRY-2026-006', conditions: 'Contado', amount: 540000, responsible: 'Diana Fuentes', file: 'OC-2026-0038_RacksBajio.pdf' },
+  { id: 'oc5', number: 'OC-2026-0039', date: '2026-04-02', supplierId: 's3', projectId: 'p6', description: 'Instalación · PRY-2026-006', conditions: 'Contado', amount: 72000, responsible: 'Diana Fuentes', file: 'OC-2026-0039_Instalacion_Vega.pdf' },
+  { id: 'oc6', number: 'OC-2026-0033', date: '2026-03-12', supplierId: 's1', projectId: 'p7', description: 'Racks · PRY-2026-007', conditions: 'Contado', amount: 398000, responsible: 'Ana Robles', file: 'OC-2026-0033_RacksBajio.pdf' },
+  { id: 'oc7', number: 'OC-2026-0055', date: '2026-05-29', supplierId: 's1', projectId: 'p5', description: 'Racks · PRY-2026-005', conditions: '50% anticipo - 30 días finiquito', amount: 268000, responsible: 'Carlos Méndez', file: '' },
   // OCs reales del Excel (Control OC) — sin proyecto
   { id: 'oc-stock5', number: 'OC-STOCK 5', date: '2024-06-24', supplierId: 'rs1', description: 'Stock / compra general', conditions: 'Parcialidades', amount: 967150, responsible: 'Administración', file: 'OC-STOCK 5.pdf' },
   { id: 'oc-2103', number: 'OC-2103', date: '2025-01-31', supplierId: 'rs2', description: 'Orden de compra OC-2103', conditions: 'Parcialidades', amount: 2610000, responsible: 'Administración', file: 'OC-2103.pdf' },
@@ -170,55 +192,61 @@ const PAYMENTS: Payment[] = [
 ]
 
 /* ---- Projects (each project = one sale) ---- */
+const allDocs = (...flags: boolean[]): Project['docs'] => {
+  const k: (keyof Project['docs'])[] = ['cotizacion', 'layout', 'anticipo', 'ordenCompra', 'finiquito', 'remision', 'cartaFin']
+  const d = {} as Project['docs']
+  k.forEach((key, i) => { d[key] = flags[i] ? docOK(`${key}.pdf`) : docNo() })
+  return d
+}
 const PROJECTS: Project[] = [
   {
     id: 'p1', code: 'PRY-2026-001', stage: 'fabricacion', client: 'c1', seller: 'v1',
-    city: 'Ciudad de México', freight: 38000, install: 64000, weeks: 6,
+    city: 'Ciudad de México', sistemaVendido: 'Rack selectivo', freight: 38000, install: 64000, weeks: 6,
     obs: 'Cambio de color a gris RAL 7016 en parcales. Cliente solicita refuerzo en niveles bajos.',
-    docs: { quote: docOK('Cotizacion_DLC_CDMX.xlsx'), layout: docOK('Layout_final_DLC.pdf'), advance: docOK('Comprobante_anticipo_DLC.pdf'), completion: docNo() },
+    docs: allDocs(true, true, true, true, false, false, false),
     suppliers: ['s1'], eta: '2026-06-24', finiquito: 'pending', created: '2026-04-20', updated: '2026-05-28',
   },
   {
     id: 'p2', code: 'PRY-2026-002', stage: 'asignacion', client: 'c2', seller: 'v2',
-    city: 'Hermosillo, Son.', freight: 52000, install: 41000, weeks: 8,
+    city: 'Hermosillo, Son.', sistemaVendido: 'Rack selectivo anticorrosivo', freight: 52000, install: 41000, weeks: 8,
     obs: 'Almacén refrigerado — requiere acabado anticorrosivo especial. Validar con fabricante.',
-    docs: { quote: docOK('Cotizacion_ARS_Hermosillo.pdf'), layout: docOK('Layout_ARS.pdf'), advance: docOK('Anticipo_ARS.jpg'), completion: docNo() },
+    docs: allDocs(true, true, true, true, false, false, false),
     suppliers: ['s1'], eta: '', finiquito: 'pending', created: '2026-05-12', updated: '2026-05-19',
   },
   {
     id: 'p3', code: 'PRY-2026-003', stage: 'registro', client: 'c3', seller: 'v3',
-    city: 'Guadalajara, Jal.', freight: 21000, install: 33000, weeks: 5,
+    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack selectivo', freight: 21000, install: 33000, weeks: 5,
     obs: 'Venta recién registrada por el vendedor. Pendiente captura completa por admin.',
-    docs: { quote: docOK('Cotizacion_GCA_GDL.pdf'), layout: docNo(), advance: docNo(), completion: docNo() },
+    docs: allDocs(true, false, false, false, false, false, false),
     suppliers: [], eta: '', finiquito: 'pending', created: '2026-05-30', updated: '2026-05-30',
   },
   {
     id: 'p4', code: 'PRY-2026-004', stage: 'coordinacion', client: 'c1', seller: 'v1',
-    city: 'Monterrey, N.L.', freight: 47000, install: 58000, weeks: 7,
+    city: 'Monterrey, N.L.', sistemaVendido: 'Rack selectivo + cantilever', freight: 47000, install: 58000, weeks: 7,
     obs: 'Pago completo recibido. Coordinar flete con TFN y cuadrilla de instalación. Generar remisión.',
-    docs: { quote: docOK('Cotizacion_DLC_MTY.pdf'), layout: docOK('Layout_DLC_MTY.pdf'), advance: docOK('Anticipo_DLC_MTY.pdf'), completion: docNo() },
+    docs: allDocs(true, true, true, true, true, true, false),
     suppliers: ['s1', 's2'], eta: '2026-06-10', finiquito: 'paid', created: '2026-04-02', updated: '2026-05-27', remision: 'REM-2026-019',
   },
   {
     id: 'p5', code: 'PRY-2026-005', stage: 'entrega_est', client: 'c2', seller: 'v2',
-    city: 'Culiacán, Sin.', freight: 44000, install: 39000, weeks: 6,
+    city: 'Culiacán, Sin.', sistemaVendido: 'Rack selectivo', freight: 44000, install: 39000, weeks: 6,
     obs: 'Proveedor confirmó ETA 18 jun. Cliente notificado, en espera de finiquito antes de embarque.',
-    docs: { quote: docOK('Cotizacion_ARS_Culiacan.pdf'), layout: docOK('Layout_ARS_Culiacan.pdf'), advance: docOK('Anticipo_ARS_Cul.jpg'), completion: docNo() },
+    docs: allDocs(true, true, true, true, false, false, false),
     suppliers: ['s1'], eta: '2026-06-18', finiquito: 'pending', created: '2026-04-25', updated: '2026-05-29',
   },
   /* completed this month → commissions */
   {
     id: 'p6', code: 'PRY-2026-006', stage: 'finalizado', client: 'c3', seller: 'v3',
-    city: 'Guadalajara, Jal.', freight: 56000, install: 72000, weeks: 7,
+    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack de penetración (drive-in)', freight: 56000, install: 72000, weeks: 7,
     obs: 'Obra concluida y carta de fin de obra firmada. Entra a comisiones de junio.',
-    docs: { quote: docOK('Cotizacion_GCA_GDL2.pdf'), layout: docOK('Layout_GCA.pdf'), advance: docOK('Anticipo_GCA.pdf'), completion: docOK('Carta_fin_obra_GCA.pdf') },
+    docs: allDocs(true, true, true, true, true, true, true),
     suppliers: ['s1', 's3'], eta: '2026-05-22', finiquito: 'paid', created: '2026-03-20', updated: '2026-05-30', closedOn: '2026-05-30',
   },
   {
     id: 'p7', code: 'PRY-2026-007', stage: 'finalizado', client: 'c1', seller: 'v1',
-    city: 'Puebla, Pue.', freight: 33000, install: 48000, weeks: 6,
+    city: 'Puebla, Pue.', sistemaVendido: 'Rack selectivo', freight: 33000, install: 48000, weeks: 6,
     obs: 'Proyecto cerrado. Cliente satisfecho, posible recompra Q3.',
-    docs: { quote: docOK('Cotizacion_DLC_Puebla.pdf'), layout: docOK('Layout_DLC_Pue.pdf'), advance: docOK('Anticipo_DLC_Pue.pdf'), completion: docOK('Carta_fin_obra_DLC_Pue.pdf') },
+    docs: allDocs(true, true, true, true, true, true, true),
     suppliers: ['s1'], eta: '2026-05-08', finiquito: 'paid', created: '2026-03-05', updated: '2026-05-14', closedOn: '2026-05-14',
   },
 ]

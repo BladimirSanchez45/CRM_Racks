@@ -2,8 +2,9 @@
 //  PROJECTS — Kanban board (drag + menu) + Table view
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount } from '../../core/data'
-import { StageBadge, Seg, Empty, PayBadge, Avatar, Select } from '../../core/ui'
+import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr } from '../../core/data'
+import type { AppState } from '../../core/types'
+import { StageBadge, Seg, Empty, Badge, Avatar, Select } from '../../core/ui'
 import { ProjectDetail, ProjectForm } from './project_views'
 import { Icon } from '../../core/icons'
 import type { Project, StageId } from '../../core/types'
@@ -112,21 +113,47 @@ export function Kanban({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
 }
 
 /* ---------- Table view ---------- */
+const provName = (state: AppState, p: Project) =>
+  p.suppliers.map(id => sel.supplier(state, id)?.name).filter(Boolean).join(', ') || 'Sin asignar'
+
 function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: Project) => void }) {
   const { state } = useStore()
   const [sort, setSort] = React.useState<{ key: string; dir: number }>({ key: 'updated', dir: -1 })
-  const th = (key: string, label: string, cls?: string) => (
+  const [cf, setCf] = React.useState({ proyecto: '', cliente: '', sistema: '', ciudad: '', etapa: '', proveedor: '', liquidado: '' })
+
+  const sortBtn = (key: string, label: string, cls?: string) => (
     <th className={'sortable ' + (cls || '')} onClick={() => setSort(s => ({ key, dir: s.key === key ? -s.dir : 1 }))}>
       {label}{sort.key === key && <span className="text-acc"> {sort.dir > 0 ? '▲' : '▼'}</span>}
     </th>
   )
-  const rows = [...projects].sort((a, b) => {
-    let va, vb
+  // celda de filtro (no sticky, para no encimar el encabezado)
+  const fth = (k?: keyof typeof cf) => (
+    <th style={{ position: 'static' }}>
+      {k && <input value={cf[k]} onChange={e => setCf(s => ({ ...s, [k]: e.target.value }))} placeholder="buscar…"
+        className="w-full bg-bg-2 border border-line-2 rounded-[6px] px-2 py-1 text-[11.5px] font-normal outline-none focus:border-acc" />}
+    </th>
+  )
+
+  const liquidado = (p: Project) => (p.finiquito === 'paid' ? 'Liquidado' : 'Pendiente')
+  const has = (val: string, q: string) => !q || val.toLowerCase().includes(q.toLowerCase())
+
+  const rows = projects.filter(p =>
+    has(p.code, cf.proyecto) &&
+    has(sel.clientName(state, p.client), cf.cliente) &&
+    has(p.sistemaVendido || '', cf.sistema) &&
+    has(cityAbbr(p.city) + ' ' + p.city, cf.ciudad) &&
+    has(STAGE_MAP[p.stage]?.label || '', cf.etapa) &&
+    has(provName(state, p), cf.proveedor) &&
+    has(liquidado(p), cf.liquidado),
+  ).sort((a, b) => {
+    let va: string | number, vb: string | number
     switch (sort.key) {
-      case 'budget': va = sel.budget(a); vb = sel.budget(b); break
       case 'client': va = sel.clientName(state, a.client); vb = sel.clientName(state, b.client); break
       case 'stage': va = stageIndex(a.stage); vb = stageIndex(b.stage); break
       case 'eta': va = a.eta || '9999'; vb = b.eta || '9999'; break
+      case 'sistema': va = a.sistemaVendido || ''; vb = b.sistemaVendido || ''; break
+      case 'freight': va = a.freight; vb = b.freight; break
+      case 'install': va = a.install; vb = b.install; break
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       default: va = (a as any)[sort.key] || ''; vb = (b as any)[sort.key] || ''
     }
@@ -139,29 +166,39 @@ function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
         <table className="tbl">
           <thead>
             <tr>
-              {th('code', 'Proyecto')}
-              {th('client', 'Cliente')}
+              {sortBtn('code', 'Proyecto')}
+              {sortBtn('client', 'Cliente')}
+              {sortBtn('sistema', 'Sistema vendido')}
               <th>Ciudad</th>
-              {th('stage', 'Etapa')}
-              {th('budget', 'Presupuesto', 'num')}
-              {th('eta', 'ETA')}
-              <th>Finiquito</th>
+              {sortBtn('stage', 'Estatus / Etapa')}
+              <th>Proveedor</th>
+              {sortBtn('freight', 'Pres. flete', 'num')}
+              {sortBtn('install', 'Pres. instalación', 'num')}
+              {sortBtn('eta', 'Entrega est.')}
+              <th>Liquidado</th>
               <th>Docs</th>
-              {th('updated', 'Actualizado')}
+              {sortBtn('updated', 'Actualizado', 'num')}
+            </tr>
+            <tr>
+              {fth('proyecto')}{fth('cliente')}{fth('sistema')}{fth('ciudad')}{fth('etapa')}{fth('proveedor')}
+              {fth()}{fth()}{fth()}{fth('liquidado')}{fth()}{fth()}
             </tr>
           </thead>
           <tbody>
             {rows.map(p => {
-              const eta = daysBetween(p.eta) as number; const dc = docCount(p)
+              const eta = daysBetween(p.eta) as number; const dc = docCount(p); const prov = provName(state, p)
               return (
                 <tr key={p.id} onClick={() => onOpen(p)}>
                   <td><span className="mono text-acc font-semibold">{p.code}</span></td>
                   <td>{sel.clientName(state, p.client)}</td>
-                  <td className="text-tx-1">{p.city}</td>
+                  <td className="text-tx-1 text-[12.5px]">{p.sistemaVendido || '—'}</td>
+                  <td className="text-tx-1"><span title={p.city}>{cityAbbr(p.city)}</span></td>
                   <td><StageBadge stage={p.stage} size="sm" /></td>
-                  <td className="num">{fmtMoney(sel.budget(p))}</td>
+                  <td className="text-[12.5px]" style={prov === 'Sin asignar' ? { color: 'var(--tx-3)' } : undefined}>{prov}</td>
+                  <td className="num">{fmtMoney(p.freight)}</td>
+                  <td className="num">{fmtMoney(p.install)}</td>
                   <td className="num">{p.eta ? <span style={{ color: eta < 0 ? 'var(--danger)' : eta < 7 ? 'var(--warn)' : 'var(--tx-1)' }}>{fmtDateShort(p.eta)}</span> : <span className="text-tx-3">—</span>}</td>
-                  <td><PayBadge status={p.finiquito} /></td>
+                  <td>{p.finiquito === 'paid' ? <Badge color="var(--ok)">Liquidado</Badge> : <Badge color="var(--warn)">Pendiente</Badge>}</td>
                   <td><span className="mono text-[11px]" style={{ color: dc.done === dc.total ? 'var(--ok)' : 'var(--tx-2)' }}>{dc.done}/{dc.total}</span></td>
                   <td className="num text-tx-2 text-[12px]">{fmtDateShort(p.updated)}</td>
                 </tr>

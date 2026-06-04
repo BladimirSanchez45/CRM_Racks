@@ -73,7 +73,12 @@ export function PaymentsPage() {
   const [fStatus, setFStatus] = React.useState('')
 
   const rows = state.payments
-    .map(p => ({ p, order: sel.order(state, p.orderId), supplier: (() => { const o = sel.order(state, p.orderId); return o ? sel.supplier(state, o.supplierId) : undefined })() }))
+    .map(p => {
+      const order = sel.order(state, p.orderId)
+      const supplier = order ? sel.supplier(state, order.supplierId) : undefined
+      const project = order && order.projectId ? state.projects.find(x => x.id === order.projectId) : undefined
+      return { p, order, supplier, project }
+    })
     .filter(r => r.order)
     .filter(r => !fStatus || r.p.status === fStatus)
     .sort((a, b) => (a.p.date < b.p.date ? 1 : -1))
@@ -106,11 +111,12 @@ export function PaymentsPage() {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>OC</th><th className="num">No.</th><th>Fecha</th><th className="num">Importe</th><th>Método / Ref.</th><th>Estado</th><th>Proveedor</th><th>Comentarios</th></tr></thead>
+            <thead><tr><th>OC</th><th>Proyecto</th><th className="num">No.</th><th>Fecha</th><th className="num">Importe</th><th>Método / Ref.</th><th>Estado</th><th>Proveedor</th><th>Comentarios</th></tr></thead>
             <tbody>
-              {rows.map(({ p, order, supplier }) => (
+              {rows.map(({ p, order, supplier, project }) => (
                 <tr key={p.id} onClick={() => setForm(p)}>
                   <td><span className="mono text-acc font-semibold">{order!.number}</span></td>
+                  <td className="text-[12px]">{project ? <><span className="mono text-tx-1">{project.code}</span><div className="meta">{sel.clientName(state, project.client)}</div></> : <span className="text-tx-3">—</span>}</td>
                   <td className="num mono">{p.n}</td>
                   <td className="num text-tx-1 text-[12px]">{fmtDateShort(p.date)}</td>
                   <td className="num font-semibold">{fmtMoney2(p.amount)}</td>

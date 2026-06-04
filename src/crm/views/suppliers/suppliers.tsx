@@ -58,6 +58,8 @@ function SupplierDetail({ supplier, onClose, onEdit }: { supplier: Supplier; onC
   const { state } = useStore()
   const ocs = sel.ordersForSupplier(state, supplier.id)
   const total = ocs.reduce((a, o) => a + o.amount, 0)
+  const pagado = ocs.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
+  const adeudado = ocs.reduce((a, o) => a + sel.ocBalance(state, o), 0)
   return (
     <Modal width={680} onClose={onClose} icon="suppliers"
       title={supplier.name}
@@ -76,11 +78,19 @@ function SupplierDetail({ supplier, onClose, onEdit }: { supplier: Supplier; onC
         <div className="grid grid-cols-2 gap-2.5">
           <div className="bg-bg-1 border border-line p-3">
             <div className="label-k">OCs totales</div>
-            <div className="font-display font-extrabold text-[24px] mt-1">{ocs.length}</div>
+            <div className="font-display font-extrabold text-[20px] mt-1">{ocs.length}</div>
           </div>
           <div className="bg-bg-1 border border-line p-3">
-            <div className="label-k">Monto acumulado</div>
+            <div className="label-k">Monto total</div>
             <div className="font-display font-extrabold text-[20px] mt-1">{fmtK(total)}</div>
+          </div>
+          <div className="bg-bg-1 border border-line p-3">
+            <div className="label-k">Monto pagado</div>
+            <div className="font-display font-extrabold text-[20px] mt-1 text-ok">{fmtK(pagado)}</div>
+          </div>
+          <div className="bg-bg-1 border border-line p-3">
+            <div className="label-k">Monto adeudado</div>
+            <div className="font-display font-extrabold text-[20px] mt-1" style={{ color: adeudado > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtK(adeudado)}</div>
           </div>
         </div>
       </div>

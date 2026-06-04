@@ -95,6 +95,15 @@ export type OcStatus =
 /** Estado de cada abono/pago (Config!C). */
 export type PaymentStatus = 'Pagado' | 'Programado' | 'Cancelado'
 
+/** Partida de material dentro de una OC (lista que sube el vendedor). */
+export interface OcItem {
+  id: string
+  description: string       // material / concepto
+  qty: number               // cantidad
+  unitPrice: number         // costo unitario
+  supplierId?: string       // proveedor de esta partida (puede diferir del de la OC)
+}
+
 /** Orden de Compra (hoja "Control OC"). */
 export interface Order {
   id: string
@@ -102,11 +111,12 @@ export interface Order {
   date: string              // Fecha OC
   supplierId: string        // Proveedor
   description: string       // Descripción
-  conditions: Condicion     // Condiciones
-  amount: number            // Monto Total
-  responsible: string       // Responsable
+  conditions: string        // Condiciones (texto libre, p.ej. "50% anticipo - 30 días finiquito")
+  amount: number            // Monto Total (con IVA si hay materiales)
+  responsible: string       // Responsable (vendedor)
   file: string              // archivo adjunto (OC firmada)
-  projectId?: string        // vínculo opcional con un proyecto del CRM
+  projectId?: string        // proyecto asociado
+  items?: OcItem[]          // lista de materiales (opcional)
   cancelled?: boolean       // override manual → Estatus "Cancelada"
 }
 
@@ -129,10 +139,13 @@ export interface DocRef {
 }
 
 export interface ProjectDocs {
-  quote: DocRef
-  layout: DocRef
-  advance: DocRef
-  completion: DocRef
+  cotizacion: DocRef        // Cotización
+  layout: DocRef            // Lay out
+  anticipo: DocRef          // Comprobante de anticipo
+  ordenCompra: DocRef       // Orden de compra
+  finiquito: DocRef         // Comprobante de finiquito
+  remision: DocRef          // Remisión de salida
+  cartaFin: DocRef          // Carta fin de obra
 }
 
 /** Estado de pago / finiquito. */
@@ -145,6 +158,7 @@ export interface Project {
   client: string
   seller: string
   city: string
+  sistemaVendido?: string   // Sistema vendido (tipo de rack/solución)
   freight: number
   install: number
   weeks: number
