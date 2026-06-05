@@ -201,35 +201,35 @@ const allDocs = (...flags: boolean[]): Project['docs'] => {
 const PROJECTS: Project[] = [
   {
     id: 'p1', code: 'PRY-2026-001', stage: 'fabricacion', client: 'c1', seller: 'v1',
-    city: 'Ciudad de México', sistemaVendido: 'Rack selectivo', freight: 38000, install: 64000, weeks: 6,
+    city: 'Ciudad de México', sistemaVendido: 'Rack selectivo', ventaSubtotal: 520000, freight: 38000, install: 64000, weeks: 6,
     obs: 'Cambio de color a gris RAL 7016 en parcales. Cliente solicita refuerzo en niveles bajos.',
     docs: allDocs(true, true, true, true, false, false, false),
     suppliers: ['s1'], eta: '2026-06-24', finiquito: 'pending', created: '2026-04-20', updated: '2026-05-28',
   },
   {
     id: 'p2', code: 'PRY-2026-002', stage: 'asignacion', client: 'c2', seller: 'v2',
-    city: 'Hermosillo, Son.', sistemaVendido: 'Rack selectivo anticorrosivo', freight: 52000, install: 41000, weeks: 8,
+    city: 'Hermosillo, Son.', sistemaVendido: 'Rack selectivo anticorrosivo', ventaSubtotal: 410000, freight: 52000, install: 41000, weeks: 8,
     obs: 'Almacén refrigerado — requiere acabado anticorrosivo especial. Validar con fabricante.',
     docs: allDocs(true, true, true, true, false, false, false),
     suppliers: ['s1'], eta: '', finiquito: 'pending', created: '2026-05-12', updated: '2026-05-19',
   },
   {
     id: 'p3', code: 'PRY-2026-003', stage: 'registro', client: 'c3', seller: 'v3',
-    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack selectivo', freight: 21000, install: 33000, weeks: 5,
+    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack selectivo', ventaSubtotal: 240000, freight: 21000, install: 33000, weeks: 5,
     obs: 'Venta recién registrada por el vendedor. Pendiente captura completa por admin.',
     docs: allDocs(true, false, false, false, false, false, false),
     suppliers: [], eta: '', finiquito: 'pending', created: '2026-05-30', updated: '2026-05-30',
   },
   {
     id: 'p4', code: 'PRY-2026-004', stage: 'coordinacion', client: 'c1', seller: 'v1',
-    city: 'Monterrey, N.L.', sistemaVendido: 'Rack selectivo + cantilever', freight: 47000, install: 58000, weeks: 7,
+    city: 'Monterrey, N.L.', sistemaVendido: 'Rack selectivo + cantilever', ventaSubtotal: 560000, freight: 47000, install: 58000, weeks: 7,
     obs: 'Pago completo recibido. Coordinar flete con TFN y cuadrilla de instalación. Generar remisión.',
     docs: allDocs(true, true, true, true, true, true, false),
     suppliers: ['s1', 's2'], eta: '2026-06-10', finiquito: 'paid', created: '2026-04-02', updated: '2026-05-27', remision: 'REM-2026-019',
   },
   {
     id: 'p5', code: 'PRY-2026-005', stage: 'entrega_est', client: 'c2', seller: 'v2',
-    city: 'Culiacán, Sin.', sistemaVendido: 'Rack selectivo', freight: 44000, install: 39000, weeks: 6,
+    city: 'Culiacán, Sin.', sistemaVendido: 'Rack selectivo', ventaSubtotal: 430000, freight: 44000, install: 39000, weeks: 6,
     obs: 'Proveedor confirmó ETA 18 jun. Cliente notificado, en espera de finiquito antes de embarque.',
     docs: allDocs(true, true, true, true, false, false, false),
     suppliers: ['s1'], eta: '2026-06-18', finiquito: 'pending', created: '2026-04-25', updated: '2026-05-29',
@@ -237,14 +237,14 @@ const PROJECTS: Project[] = [
   /* completed this month → commissions */
   {
     id: 'p6', code: 'PRY-2026-006', stage: 'finalizado', client: 'c3', seller: 'v3',
-    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack de penetración (drive-in)', freight: 56000, install: 72000, weeks: 7,
+    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack de penetración (drive-in)', ventaSubtotal: 690000, freight: 56000, install: 72000, weeks: 7,
     obs: 'Obra concluida y carta de fin de obra firmada. Entra a comisiones de junio.',
     docs: allDocs(true, true, true, true, true, true, true),
     suppliers: ['s1', 's3'], eta: '2026-05-22', finiquito: 'paid', created: '2026-03-20', updated: '2026-05-30', closedOn: '2026-05-30',
   },
   {
     id: 'p7', code: 'PRY-2026-007', stage: 'finalizado', client: 'c1', seller: 'v1',
-    city: 'Puebla, Pue.', sistemaVendido: 'Rack selectivo', freight: 33000, install: 48000, weeks: 6,
+    city: 'Puebla, Pue.', sistemaVendido: 'Rack selectivo', ventaSubtotal: 480000, freight: 33000, install: 48000, weeks: 6,
     obs: 'Proyecto cerrado. Cliente satisfecho, posible recompra Q3.',
     docs: allDocs(true, true, true, true, true, true, true),
     suppliers: ['s1'], eta: '2026-05-08', finiquito: 'paid', created: '2026-03-05', updated: '2026-05-14', closedOn: '2026-05-14',

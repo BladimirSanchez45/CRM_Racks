@@ -159,6 +159,7 @@ export interface Project {
   seller: string
   city: string
   sistemaVendido?: string   // Sistema vendido (tipo de rack/solución)
+  ventaSubtotal?: number    // Subtotal de la venta (YA incluye flete e instalación). IVA y total se calculan de aquí.
   freight: number
   install: number
   weeks: number

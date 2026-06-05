@@ -16,6 +16,7 @@ type ProjectFormState = {
   seller: string
   city: string
   sistemaVendido?: string
+  ventaSubtotal?: number | string
   freight: number | string
   install: number | string
   weeks: number | string
@@ -93,7 +94,9 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
   const seller = sel.seller(state, p.seller)
   const ocs = sel.ordersForProject(state, p.id)
   const eta = daysBetween(p.eta)
-  const budget = sel.budget(p)
+  const ventaSub = p.ventaSubtotal || 0
+  const ventaIva = ventaSub * 0.16
+  const ventaTotal = ventaSub * 1.16
 
   return (
     <Modal width={760} onClose={onClose}
@@ -133,12 +136,14 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
         </div>
 
         <div>
-          <div className="label-k mb-2">Presupuesto</div>
+          <div className="label-k mb-2">Venta</div>
           <div className="bg-bg-1 border border-line p-3.5 mb-3.5">
-            <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Flete</span><span className="mono">{fmtMoney(p.freight)}</span></div>
-            <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Instalación</span><span className="mono">{fmtMoney(p.install)}</span></div>
+            <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Presupuesto flete</span><span className="mono">{fmtMoney(p.freight)}</span></div>
+            <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Presupuesto instalación</span><span className="mono">{fmtMoney(p.install)}</span></div>
             <div className="h-px bg-line my-2"></div>
-            <div className="flex justify-between items-baseline"><span className="label-k">Total</span><span className="font-display font-extrabold text-[19px]">{fmtMoney(budget)}</span></div>
+            <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Subtotal de la venta</span><span className="mono">{fmtMoney(ventaSub)}</span></div>
+            <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>IVA 16%</span><span className="mono">{fmtMoney(ventaIva)}</span></div>
+            <div className="flex justify-between items-baseline mt-1"><span className="label-k">Total con IVA</span><span className="font-display font-extrabold text-[19px]">{fmtMoney(ventaTotal)}</span></div>
           </div>
           <div className="label-k mb-2">Proveedores asignados</div>
           <div className="flex flex-col gap-1.5">
@@ -189,7 +194,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
 /* ---------- Create / edit form ---------- */
 const blank = (): ProjectFormState => ({
   code: 'PRY-2026-' + String(Math.floor(Math.random()*900)+100), stage: 'registro',
-  client: '', seller: '', city: '', sistemaVendido: '', freight: '', install: '', weeks: '', obs: '',
+  client: '', seller: '', city: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending',
   docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: docNo(), finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
 })
@@ -202,8 +207,11 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
   const setDoc = (k: keyof ProjectDocs, name: string) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name, ok: !!name } } }))
 
   const valid = p.client && p.city && p.seller
+  const ventaSub = +(p.ventaSubtotal || 0)
+  const ventaIva = ventaSub * 0.16
+  const ventaTotal = ventaSub * 1.16
   const save = () => {
-    dispatch({ type: 'SAVE_PROJECT', project: { ...p, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } })
+    dispatch({ type: 'SAVE_PROJECT', project: { ...p, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } })
     onClose()
   }
 
@@ -245,6 +253,15 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
         <Field label="Presupuesto flete (MXN)"><Input type="number" value={p.freight} onChange={e => set('freight', e.target.value)} placeholder="0" /></Field>
         <Field label="Presupuesto instalación (MXN)"><Input type="number" value={p.install} onChange={e => set('install', e.target.value)} placeholder="0" /></Field>
         <Field label="ETA proveedor"><Input type="date" value={p.eta} onChange={e => set('eta', e.target.value)} /></Field>
+      </div>
+
+      {/* venta: subtotal (ya incluye flete e instalación) → IVA → total */}
+      <div className="mt-4 bg-bg-1 border border-line rounded-[8px] p-3.5">
+        <div className="grid grid-cols-[1fr_auto_auto] gap-5 items-end">
+          <Field label="Subtotal de la venta (incluye flete e instalación)"><Input type="number" value={p.ventaSubtotal ?? ''} onChange={e => set('ventaSubtotal', e.target.value)} placeholder="0" /></Field>
+          <div className="text-right"><div className="label-k">IVA 16%</div><div className="mono mt-1">{fmtMoney(ventaIva)}</div></div>
+          <div className="text-right"><div className="label-k">Total con IVA</div><div className="font-display font-extrabold text-[18px] mt-1">{fmtMoney(ventaTotal)}</div></div>
+        </div>
       </div>
 
       <div className="mt-4">
