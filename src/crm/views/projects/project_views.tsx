@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, daysBetween, docNo, docCount, DOC_LABELS } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, FileField, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
@@ -250,15 +250,15 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
         </Field>
         <Field label="Semanas de entrega"><Input type="number" value={p.weeks} onChange={e => set('weeks', e.target.value)} placeholder="6" /></Field>
 
-        <Field label="Presupuesto flete (MXN)"><Input type="number" value={p.freight} onChange={e => set('freight', e.target.value)} placeholder="0" /></Field>
-        <Field label="Presupuesto instalación (MXN)"><Input type="number" value={p.install} onChange={e => set('install', e.target.value)} placeholder="0" /></Field>
+        <Field label="Presupuesto flete (MXN)"><MoneyInput value={p.freight} onChange={v => set('freight', v)} placeholder="0" /></Field>
+        <Field label="Presupuesto instalación (MXN)"><MoneyInput value={p.install} onChange={v => set('install', v)} placeholder="0" /></Field>
         <Field label="ETA proveedor"><Input type="date" value={p.eta} onChange={e => set('eta', e.target.value)} /></Field>
       </div>
 
       {/* venta: subtotal (ya incluye flete e instalación) → IVA → total */}
       <div className="mt-4 bg-bg-1 border border-line rounded-[8px] p-3.5">
         <div className="grid grid-cols-[1fr_auto_auto] gap-5 items-end">
-          <Field label="Subtotal de la venta (incluye flete e instalación)"><Input type="number" value={p.ventaSubtotal ?? ''} onChange={e => set('ventaSubtotal', e.target.value)} placeholder="0" /></Field>
+          <Field label="Subtotal de la venta (incluye flete e instalación)"><MoneyInput value={p.ventaSubtotal ?? ''} onChange={v => set('ventaSubtotal', v)} placeholder="0" /></Field>
           <div className="text-right"><div className="label-k">IVA 16%</div><div className="mono mt-1">{fmtMoney(ventaIva)}</div></div>
           <div className="text-right"><div className="label-k">Total con IVA</div><div className="font-display font-extrabold text-[18px] mt-1">{fmtMoney(ventaTotal)}</div></div>
         </div>

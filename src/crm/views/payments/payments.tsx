@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort } from '../../core/data'
-import { Modal, Field, Input, Select, PaymentBadge, Empty, KPI } from '../../core/ui'
+import { Modal, Field, Input, Select, MoneyInput, PaymentBadge, Empty, KPI } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Payment, PaymentInput, PaymentStatus } from '../../core/types'
 
@@ -54,7 +54,7 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
         </Field>
         <Field label="No. Abono"><Input type="number" value={p.n} onChange={e => set('n', e.target.value)} /></Field>
         <Field label="Fecha de pago"><Input type="date" value={p.date} onChange={e => set('date', e.target.value)} /></Field>
-        <Field label="Importe (MXN)"><Input type="number" value={p.amount} onChange={e => set('amount', e.target.value)} /></Field>
+        <Field label="Importe (MXN)"><MoneyInput value={p.amount} onChange={v => set('amount', v)} /></Field>
         <Field label="Estado">
           <Select value={p.status} onChange={e => set('status', e.target.value)}>
             {PAY_STATES.map(s => <option key={s} value={s}>{s}</option>)}

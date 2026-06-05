@@ -5,7 +5,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween, MESES, uid } from '../../core/data'
-import { Modal, Field, Input, Select, FileField, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg } from '../../core/ui'
+import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { AppState, OcItem, Order, OrderInput, Payment, PaymentInput, PaymentStatus, Project } from '../../core/types'
 
@@ -97,7 +97,7 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="No. Abono"><Input type="number" value={a.n} onChange={e => set('n', e.target.value)} /></Field>
         <Field label="Fecha de pago"><Input type="date" value={a.date} onChange={e => set('date', e.target.value)} /></Field>
-        <Field label="Importe (MXN)"><Input type="number" value={a.amount} onChange={e => set('amount', e.target.value)} /></Field>
+        <Field label="Importe (MXN)"><MoneyInput value={a.amount} onChange={v => set('amount', v)} /></Field>
         <Field label="Estado"><Select value={a.status} onChange={e => set('status', e.target.value)}>{PAY_STATES.map(s => <option key={s} value={s}>{s}</option>)}</Select></Field>
         <Field label="Método / Ref." span={2}><Input value={a.method} onChange={e => set('method', e.target.value)} placeholder="Transferencia, cheque, folio…" /></Field>
         <Field label="Comentarios" span={2}><Input value={a.comments} onChange={e => set('comments', e.target.value)} /></Field>
@@ -282,7 +282,7 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
         </Field>
         {hasItems
           ? <Field label="Monto total (con IVA)"><div className="input mono flex items-center">{fmtMoney2(total)}</div></Field>
-          : <Field label="Monto total (MXN)"><Input type="number" value={o.amount} onChange={e => set('amount', e.target.value)} /></Field>}
+          : <Field label="Monto total (MXN)"><MoneyInput value={o.amount} onChange={v => set('amount', v)} /></Field>}
         <Field label="Responsable (vendedor)"><Input value={o.responsible} onChange={e => set('responsible', e.target.value)} /></Field>
       </div>
 

@@ -133,6 +133,43 @@ export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) { retu
 export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) { return <textarea className="textarea" {...props} /> }
 export function Select({ children, className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) { return <select className={'select' + (className ? ' ' + className : '')} {...props}>{children}</select> }
 
+/* ---- Campo de dinero: muestra el número con comas y "$"; devuelve el número ---- */
+const moneyClean = (s: string) => {
+  let r = s.replace(/[^\d.]/g, '')
+  const i = r.indexOf('.')
+  if (i !== -1) r = r.slice(0, i + 1) + r.slice(i + 1).replace(/\./g, '') // un solo punto decimal
+  return r
+}
+const moneyFormat = (raw: string) => {
+  if (raw === '' || raw === '.') return raw
+  const [int, dec] = raw.split('.')
+  const intFmt = (int || '0').replace(/^0+(?=\d)/, '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return dec !== undefined ? `${intFmt}.${dec}` : intFmt
+}
+const moneyDisp = (v: number | string) => {
+  if (v === '' || v == null) return ''
+  const n = typeof v === 'number' ? v : parseFloat(String(v))
+  return isNaN(n) ? '' : moneyFormat(moneyClean(String(v)))
+}
+export function MoneyInput({ value, onChange, placeholder, className }: { value: number | string; onChange: (n: number) => void; placeholder?: string; className?: string }) {
+  const [disp, setDisp] = React.useState(() => moneyDisp(value))
+  React.useEffect(() => {
+    if (value === '' || value == null) { if (disp !== '') setDisp('') ; return }
+    const ext = typeof value === 'number' ? value : parseFloat(String(value))
+    const cur = parseFloat(moneyClean(disp) || 'x')
+    if (!isNaN(ext) && ext !== cur) setDisp(moneyDisp(value))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-tx-3 text-[13px] pointer-events-none">$</span>
+      <input className={'input pl-7' + (className ? ' ' + className : '')} inputMode="decimal" placeholder={placeholder}
+        value={disp}
+        onChange={e => { const c = moneyClean(e.target.value); setDisp(moneyFormat(c)); onChange(c === '' || c === '.' ? 0 : parseFloat(c) || 0) }} />
+    </div>
+  )
+}
+
 /* ---- Modal ---- */
 export function Modal({ title, sub, icon, onClose, children, footer, width = 640 }: {
   title: React.ReactNode
