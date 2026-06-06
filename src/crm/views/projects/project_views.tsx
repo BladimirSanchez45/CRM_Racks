@@ -2,10 +2,72 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, daysBetween, docNo, docCount, DOC_LABELS } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus } from '../../core/ui'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS } from '../../core/data'
+import { Modal, Field, Input, TextArea, Select, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
-import type { PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
+import type { ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
+
+/* ---- badge de estado de cobro + formulario de cobro del cliente ---- */
+const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)', Programado: 'var(--warn)', Cancelado: 'var(--tx-3)' }
+const cobroBadge = (s: ClientPaymentStatus) => <Badge color={COBRO_COLOR[s]}>{s}</Badge>
+
+type CobroFormState = { id?: string; projectId: string; n: number | string; date: string; amount: number | string; concept: string; method: string; status: ClientPaymentStatus; comments: string }
+export function CobroForm({ project, cobro, onClose }: { project?: Project; cobro?: ClientPayment; onClose: () => void }) {
+  const { state, dispatch } = useStore()
+  const nextN = (pid: string) => Math.max(0, ...sel.clientPaymentsForProject(state, pid).map(c => c.n)) + 1
+  const initPid = project?.id || cobro?.projectId || ''
+  const [c, setC] = React.useState<CobroFormState>(() => cobro ? { ...cobro } : {
+    projectId: initPid, n: initPid ? nextN(initPid) : 1, date: '2026-06-05', amount: '', concept: '', method: '', status: 'Programado', comments: '',
+  })
+  const set = (k: keyof CobroFormState, v: unknown) => setC(s => ({ ...s, [k]: v }))
+  const onPickProject = (pid: string) => setC(s => ({ ...s, projectId: pid, n: cobro ? s.n : (pid ? nextN(pid) : 1) }))
+  const valid = c.projectId && c.date && c.amount
+  const save = () => { dispatch({ type: 'SAVE_CLIENT_PAYMENT', payment: { ...c, n: +c.n || 1, amount: +c.amount || 0 } as ClientPaymentInput }); onClose() }
+  const proj = state.projects.find(x => x.id === c.projectId)
+  const total = proj ? sel.projectTotalConIva(proj) : 0
+  const abonadoAntes = state.clientPayments.filter(x => x.projectId === c.projectId && x.status === 'Cobrado' && x.id !== c.id).reduce((a, x) => a + x.amount, 0)
+  const abonado = abonadoAntes + (c.status === 'Cobrado' ? (+c.amount || 0) : 0)
+  const saldoRestante = total - abonado
+  return (
+    <Modal width={500} icon={cobro ? 'edit' : 'plus'} title={cobro ? 'Editar cobro' : 'Registrar cobro del cliente'} sub={proj ? `${proj.code} · ${sel.clientName(state, proj.client)}` : undefined} onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar cobro</button>
+      </>}>
+      {proj && (
+        <div className="bg-bg-1 border border-line rounded-[8px] p-3 mb-3.5 grid grid-cols-3 gap-2 text-center">
+          <div><div className="label-k">Total venta</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(total)}</div></div>
+          <div><div className="label-k">Abonado</div><div className="font-display font-bold text-[15px] mt-0.5 text-ok">{fmtMoney(abonado)}</div></div>
+          <div><div className="label-k">Saldo restante</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: saldoRestante > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldoRestante)}</div></div>
+        </div>
+      )}
+      <div className="grid grid-cols-2 gap-3.5">
+        {!project && (
+          <Field label="Proyecto" span={2}>
+            <Select value={c.projectId} onChange={e => onPickProject(e.target.value)}>
+              <option value="">Selecciona…</option>
+              {state.projects.map(p => <option key={p.id} value={p.id}>{p.code} · {sel.clientName(state, p.client)}</option>)}
+            </Select>
+          </Field>
+        )}
+        <Field label="No. de cobro"><Input type="number" value={c.n} onChange={e => set('n', e.target.value)} /></Field>
+        <Field label="Fecha"><Input type="date" value={c.date} onChange={e => set('date', e.target.value)} /></Field>
+        <Field label="Importe (MXN)"><MoneyInput value={c.amount} onChange={v => set('amount', v)} /></Field>
+        <Field label="Estado">
+          <Select value={c.status} onChange={e => set('status', e.target.value)}>
+            {(['Cobrado', 'Programado', 'Cancelado'] as ClientPaymentStatus[]).map(s => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </Field>
+        <Field label="Concepto" span={2}>
+          <Input list="cobro-concepts" value={c.concept} onChange={e => set('concept', e.target.value)} placeholder="Anticipo, Finiquito…" />
+          <datalist id="cobro-concepts"><option value="Anticipo 50%" /><option value="Finiquito" /><option value="Abono" /><option value="Pago de contado" /></datalist>
+        </Field>
+        <Field label="Forma de pago / Ref." span={2}><Input value={c.method} onChange={e => set('method', e.target.value)} placeholder="Transferencia, cheque…" /></Field>
+        <Field label="Comentarios" span={2}><Input value={c.comments} onChange={e => set('comments', e.target.value)} /></Field>
+      </div>
+    </Modal>
+  )
+}
 
 /** Estado editable del formulario de proyecto (campos numéricos admiten texto mientras se escribe). */
 type ProjectFormState = {
@@ -88,7 +150,7 @@ function InfoRow({ k, children }: { k: React.ReactNode; children: React.ReactNod
 
 /* ---------- Project detail drawer ---------- */
 export function ProjectDetail({ project, onClose, onEdit }: { project: Project; onClose: () => void; onEdit: () => void }) {
-  const { state } = useStore()
+  const { state, dispatch } = useStore()
   const p = state.projects.find(x => x.id === project.id) || project
   const client = sel.client(state, p.client)
   const seller = sel.seller(state, p.seller)
@@ -97,6 +159,10 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
   const ventaSub = p.ventaSubtotal || 0
   const ventaIva = ventaSub * 0.16
   const ventaTotal = ventaSub * 1.16
+  const cobros = sel.clientPaymentsForProject(state, p.id)
+  const cobrado = sel.projectCobrado(state, p.id)
+  const saldoCli = sel.projectSaldoCliente(state, p)
+  const [cobro, setCobro] = React.useState<ClientPayment | {} | null>(null)
 
   return (
     <Modal width={760} onClose={onClose}
@@ -187,6 +253,46 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
           </div>
         </div>
       )}
+
+      {/* cobros del cliente (ingresos del proyecto) */}
+      <div className="mt-5">
+        <div className="spread mb-2">
+          <span className="label-k">Cobros del cliente</span>
+          <button className="btn btn-ghost btn-sm" onClick={() => setCobro({})}><Icon name="plus" size={13} /> Registrar cobro</button>
+        </div>
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Total venta (c/IVA)</div><div className="font-display font-bold text-[16px] mt-0.5">{fmtMoney(ventaTotal)}</div></div>
+          <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Cobrado</div><div className="font-display font-bold text-[16px] mt-0.5 text-ok">{fmtMoney(cobrado)}</div></div>
+          <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Saldo por cobrar</div><div className="font-display font-bold text-[16px] mt-0.5" style={{ color: saldoCli > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldoCli)}</div></div>
+        </div>
+        {cobros.length === 0 ? <Empty icon="money">Sin cobros registrados</Empty> : (
+          <div className="border border-line rounded-[8px] overflow-hidden">
+            <table className="tbl">
+              <thead><tr><th>#</th><th>Fecha</th><th>Concepto</th><th className="num">Importe</th><th className="num">Acum.</th><th>Estado</th><th></th></tr></thead>
+              <tbody>
+                {cobros.map(c => {
+                  const acum = cobros.filter(x => x.status !== 'Cancelado' && x.n <= c.n).reduce((a, x) => a + x.amount, 0)
+                  return (
+                  <tr key={c.id} style={{ cursor: 'default' }}>
+                    <td className="mono">{c.n}</td>
+                    <td className="num text-tx-1 text-[12px]">{fmtDateShort(c.date)}</td>
+                    <td className="text-[12.5px]">{c.concept || '—'}{c.method ? <div className="meta mt-px">{c.method}</div> : null}</td>
+                    <td className="num">{fmtMoney(c.amount)}</td>
+                    <td className="num text-[12px]">{fmtMoney(acum)}<div className="meta">de {fmtMoney(ventaTotal)}</div></td>
+                    <td>{cobroBadge(c.status)}</td>
+                    <td><div className="flex gap-1 justify-end">
+                      <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setCobro(c)}><Icon name="edit" size={13} /></button>
+                      <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => dispatch({ type: 'DELETE_CLIENT_PAYMENT', id: c.id })}><Icon name="trash" size={13} /></button>
+                    </div></td>
+                  </tr>
+                ) })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {cobro && <CobroForm project={p} cobro={'id' in cobro ? cobro : undefined} onClose={() => setCobro(null)} />}
     </Modal>
   )
 }

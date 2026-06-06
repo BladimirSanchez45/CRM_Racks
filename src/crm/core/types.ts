@@ -34,6 +34,20 @@ export interface Seller {
   rate: number
 }
 
+/** Roles de acceso. Por ahora todos ven todo; a futuro 'ventas' se limitará. */
+export type Role = 'admin' | 'ventas'
+
+export interface User {
+  id: string
+  name: string
+  email: string
+  password: string        // demo: texto plano, sin backend
+  role: Role
+  initials: string
+  title?: string          // puesto / cargo
+  active: boolean
+}
+
 export interface Client {
   id: string
   name: string              // Nombre comercial
@@ -120,6 +134,22 @@ export interface Order {
   cancelled?: boolean       // override manual → Estatus "Cancelada"
 }
 
+/** Estado de un cobro al cliente. */
+export type ClientPaymentStatus = 'Cobrado' | 'Programado' | 'Cancelado'
+
+/** Cobro que el CLIENTE nos hace por un proyecto (ingreso). */
+export interface ClientPayment {
+  id: string
+  projectId: string         // proyecto al que pertenece el cobro
+  n: number                 // No. de cobro
+  date: string              // Fecha
+  amount: number            // Importe
+  concept: string           // Concepto (Anticipo, Finiquito, Abono…)
+  method: string            // Forma de pago / Ref.
+  status: ClientPaymentStatus
+  comments: string
+}
+
 /** Abono / pago de una OC (hoja "Pagos"). */
 export interface Payment {
   id: string
@@ -201,10 +231,13 @@ export interface AppState {
   suppliers: Supplier[]
   orders: Order[]
   payments: Payment[]
+  clientPayments: ClientPayment[]
   clients: Client[]
   sellers: Seller[]
   commissions: Commission[]
   activity: Activity[]
+  users: User[]
+  currentUser: User | null
 }
 
 // ---- Payloads de creación/edición (el reducer rellena id/fechas) ----
@@ -216,10 +249,12 @@ export type ProjectInput = Omit<Project, 'id' | 'created' | 'updated'> & {
 export type SupplierInput = Omit<Supplier, 'id'> & { id?: string }
 export type OrderInput = Omit<Order, 'id'> & { id?: string }
 export type PaymentInput = Omit<Payment, 'id'> & { id?: string }
+export type ClientPaymentInput = Omit<ClientPayment, 'id'> & { id?: string }
 export type ClientInput = Omit<Client, 'id' | 'since'> & {
   id?: string
   since?: string
 }
+export type UserInput = Omit<User, 'id'> & { id?: string }
 
 /** Acciones del store. */
 export type Action =
@@ -232,5 +267,12 @@ export type Action =
   | { type: 'DELETE_ORDER'; id: string }
   | { type: 'SAVE_PAYMENT'; payment: PaymentInput }
   | { type: 'DELETE_PAYMENT'; id: string }
+  | { type: 'SAVE_CLIENT_PAYMENT'; payment: ClientPaymentInput }
+  | { type: 'DELETE_CLIENT_PAYMENT'; id: string }
   | { type: 'SAVE_CLIENT'; client: ClientInput }
   | { type: 'TOGGLE_COMMISSION'; id: string }
+  | { type: 'LOGIN'; user: User }
+  | { type: 'LOGOUT' }
+  | { type: 'SAVE_USER'; user: UserInput }
+  | { type: 'DELETE_USER'; id: string }
+  | { type: 'TOGGLE_USER'; id: string }

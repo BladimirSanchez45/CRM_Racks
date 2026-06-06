@@ -7,6 +7,7 @@ import type {
   Activity,
   AppState,
   Client,
+  ClientPayment,
   Commission,
   OcStatus,
   Order,
@@ -16,6 +17,7 @@ import type {
   Stage,
   StageId,
   Supplier,
+  User,
 } from './types'
 import { SEED_CLIENTS } from './seed-clients'
 import { SEED_SUPPLIERS } from './seed-suppliers'
@@ -131,6 +133,13 @@ const SELLERS: Seller[] = [
   { id: 'v3', name: 'Diana Fuentes', initials: 'DF', rate: 0.04 },
 ]
 
+/* ---- Usuarios del sistema (login + roles) ---- */
+const USERS: User[] = [
+  { id: 'u1', name: 'Bladimir Sanchez', email: 'admin@ccracks.mx',  password: 'admin123',  role: 'admin',  initials: 'BS', title: 'Administrador',     active: true },
+  { id: 'u2', name: 'Carlos Méndez',    email: 'carlos@ccracks.mx', password: 'ventas123', role: 'ventas', initials: 'CM', title: 'Ejecutivo de ventas', active: true },
+  { id: 'u3', name: 'Diana Fuentes',    email: 'diana@ccracks.mx',  password: 'ventas123', role: 'ventas', initials: 'DF', title: 'Ejecutiva de ventas', active: true },
+]
+
 /* ---- Clients ---- */
 const CLIENTS: Client[] = [
   { id: 'c1', name: 'Distribuidora Logística del Centro', city: 'Ciudad de México', contact: 'Ing. Patricia Lozano', phone: '55 1842 3390', email: 'compras@dlc.mx', since: '2023-02-11' },
@@ -189,6 +198,19 @@ const PAYMENTS: Payment[] = [
   { id: 'pg18', orderId: 'oc-2103', n: 4, date: '2025-10-13', amount: 500000,  method: '', status: 'Programado', comments: '' },
   { id: 'pg19', orderId: 'oc-2103', n: 5, date: '2025-11-28', amount: 200000,  method: '', status: 'Programado', comments: '' },
   // oc-iwp1 → sin abonos (Pendiente);  oc-lmp1 → Cancelada
+]
+
+/* ---- Cobros del cliente (lo que el cliente nos paga por cada proyecto) ---- */
+const CLIENT_PAYMENTS: ClientPayment[] = [
+  { id: 'cp1', projectId: 'p1', n: 1, date: '2026-04-22', amount: 301600, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
+  { id: 'cp2', projectId: 'p1', n: 2, date: '2026-06-30', amount: 301600, concept: 'Finiquito',    method: '',              status: 'Programado', comments: '' },
+  { id: 'cp3', projectId: 'p4', n: 1, date: '2026-04-05', amount: 324800, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
+  { id: 'cp4', projectId: 'p4', n: 2, date: '2026-05-27', amount: 324800, concept: 'Finiquito',    method: 'Transferencia', status: 'Cobrado',   comments: '' },
+  { id: 'cp5', projectId: 'p5', n: 1, date: '2026-04-25', amount: 249400, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
+  { id: 'cp6', projectId: 'p5', n: 2, date: '2026-06-18', amount: 249400, concept: 'Finiquito',    method: '',              status: 'Programado', comments: '' },
+  { id: 'cp7', projectId: 'p6', n: 1, date: '2026-03-25', amount: 400200, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
+  { id: 'cp8', projectId: 'p6', n: 2, date: '2026-05-30', amount: 400200, concept: 'Finiquito',    method: 'Transferencia', status: 'Cobrado',   comments: '' },
+  { id: 'cp9', projectId: 'p7', n: 1, date: '2026-03-10', amount: 556800, concept: 'Pago de contado', method: 'Transferencia', status: 'Cobrado', comments: '' },
 ]
 
 /* ---- Projects (each project = one sale) ---- */
@@ -271,9 +293,18 @@ const ACTIVITY: Activity[] = [
 // ============================================================
 //  STORE — context + reducer
 // ============================================================
+const SESSION_KEY = 'strakk-session'
+function loadSession(users: User[]): User | null {
+  try {
+    const id = localStorage.getItem(SESSION_KEY)
+    return id ? (users.find(u => u.id === id) ?? null) : null
+  } catch { return null }
+}
+
 const initial: AppState = {
-  projects: PROJECTS, suppliers: SUPPLIERS, orders: ORDERS, payments: PAYMENTS,
+  projects: PROJECTS, suppliers: SUPPLIERS, orders: ORDERS, payments: PAYMENTS, clientPayments: CLIENT_PAYMENTS,
   clients: CLIENTS, sellers: SELLERS, commissions: COMMISSIONS, activity: ACTIVITY,
+  users: USERS, currentUser: loadSession(USERS),
 }
 
 function pushActivity(state: AppState, a: Omit<Activity, 'id' | 't'>): Activity[] {
@@ -302,7 +333,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, projects, activity: exists ? state.activity : pushActivity(state, { icon: 'flag', who: 'Tú', txt: 'registró nueva venta', tgt: action.project.code, kind: 'new' }) }
     }
     case 'DELETE_PROJECT':
-      return { ...state, projects: state.projects.filter(p => p.id !== action.id) }
+      return { ...state, projects: state.projects.filter(p => p.id !== action.id), clientPayments: state.clientPayments.filter(c => c.projectId !== action.id) }
     case 'SAVE_SUPPLIER': {
       const exists = state.suppliers.some(s => s.id === action.supplier.id)
       const suppliers = exists
@@ -330,6 +361,15 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'DELETE_PAYMENT':
       return { ...state, payments: state.payments.filter(p => p.id !== action.id) }
+    case 'SAVE_CLIENT_PAYMENT': {
+      const exists = state.clientPayments.some(c => c.id === action.payment.id)
+      const clientPayments = exists
+        ? state.clientPayments.map(c => c.id === action.payment.id ? action.payment as ClientPayment : c)
+        : [...state.clientPayments, { ...action.payment, id: uid('cp') } as ClientPayment]
+      return { ...state, clientPayments }
+    }
+    case 'DELETE_CLIENT_PAYMENT':
+      return { ...state, clientPayments: state.clientPayments.filter(c => c.id !== action.id) }
     case 'SAVE_CLIENT': {
       const exists = state.clients.some(c => c.id === action.client.id)
       const clients = exists
@@ -339,6 +379,28 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'TOGGLE_COMMISSION':
       return { ...state, commissions: state.commissions.map(c => c.id === action.id ? { ...c, status: c.status === 'paid' ? 'pending' : 'paid' } : c) }
+    case 'LOGIN':
+      try { localStorage.setItem(SESSION_KEY, action.user.id) } catch { /* ignore */ }
+      return { ...state, currentUser: action.user }
+    case 'LOGOUT':
+      try { localStorage.removeItem(SESSION_KEY) } catch { /* ignore */ }
+      return { ...state, currentUser: null }
+    case 'SAVE_USER': {
+      const exists = state.users.some(u => u.id === action.user.id)
+      const saved = exists
+        ? { ...action.user } as User
+        : { ...action.user, id: uid('u') } as User
+      const users = exists
+        ? state.users.map(u => u.id === saved.id ? saved : u)
+        : [...state.users, saved]
+      // si edité al usuario en sesión, refresca currentUser
+      const currentUser = state.currentUser && state.currentUser.id === saved.id ? saved : state.currentUser
+      return { ...state, users, currentUser }
+    }
+    case 'DELETE_USER':
+      return { ...state, users: state.users.filter(u => u.id !== action.id) }
+    case 'TOGGLE_USER':
+      return { ...state, users: state.users.map(u => u.id === action.id ? { ...u, active: !u.active } : u) }
     default:
       return state
   }
@@ -406,4 +468,15 @@ export const sel = {
     if (sel.ocPaid(state, oc.id) > 0) return 'Parcial'
     return 'Pendiente'
   },
+
+  /* ---- Cobros del cliente (ingresos por proyecto) ---- */
+  clientPaymentsForProject: (state: AppState, pid: string) =>
+    state.clientPayments.filter(c => c.projectId === pid).sort((a, b) => a.n - b.n),
+  /** Total de la venta con IVA (subtotal × 1.16), redondeado a centavos. */
+  projectTotalConIva: (p: { ventaSubtotal?: number }) => Math.round((p.ventaSubtotal || 0) * 1.16 * 100) / 100,
+  /** Cobrado = suma de cobros con estado "Cobrado". */
+  projectCobrado: (state: AppState, pid: string) =>
+    state.clientPayments.filter(c => c.projectId === pid && c.status === 'Cobrado').reduce((a, c) => a + c.amount, 0),
+  /** Saldo por cobrar = total con IVA − cobrado. */
+  projectSaldoCliente: (state: AppState, p: Project) => sel.projectTotalConIva(p) - sel.projectCobrado(state, p.id),
 }

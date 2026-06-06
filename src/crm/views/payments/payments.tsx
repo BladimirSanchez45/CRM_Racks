@@ -37,6 +37,11 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
     dispatch({ type: 'SAVE_PAYMENT', payment: pay })
     onClose()
   }
+  const order = sel.order(state, p.orderId)
+  const total = order ? order.amount : 0
+  const pagadoAntes = state.payments.filter(x => x.orderId === p.orderId && x.status === 'Pagado' && x.id !== p.id).reduce((acc, x) => acc + x.amount, 0)
+  const pagado = pagadoAntes + (p.status === 'Pagado' ? (+p.amount || 0) : 0)
+  const saldoRestante = total - pagado
   return (
     <Modal width={520} icon={payment ? 'edit' : 'plus'} title={payment ? 'Editar abono' : 'Nuevo abono'} onClose={onClose}
       footer={<>
@@ -45,6 +50,13 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
         <div className="flex-1"></div>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
       </>}>
+      {order && (
+        <div className="bg-bg-1 border border-line rounded-[8px] p-3 mb-3.5 grid grid-cols-3 gap-2 text-center">
+          <div><div className="label-k">Monto OC</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(total)}</div></div>
+          <div><div className="label-k">Pagado</div><div className="font-display font-bold text-[15px] mt-0.5 text-ok">{fmtMoney(pagado)}</div></div>
+          <div><div className="label-k">Saldo restante</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: saldoRestante > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldoRestante)}</div></div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="Orden de compra (OC)" span={2}>
           <Select value={p.orderId} onChange={e => onPickOrder(e.target.value)}>
@@ -82,9 +94,11 @@ export function PaymentsPage() {
     .filter(r => r.order)
     .filter(r => !fStatus || r.p.status === fStatus)
     .sort((a, b) => (a.p.date < b.p.date ? 1 : -1))
-
   const totalProg = state.payments.filter(p => p.status === 'Programado').reduce((a, p) => a + p.amount, 0)
   const totalPaid = state.payments.filter(p => p.status === 'Pagado').reduce((a, p) => a + p.amount, 0)
+  // acumulado de la OC hasta este abono (por No., sin contar cancelados)
+  const acumOf = (p: Payment) =>
+    state.payments.filter(x => x.orderId === p.orderId && x.status !== 'Cancelado' && x.n <= p.n).reduce((a, x) => a + x.amount, 0)
 
   return (
     <div>
@@ -111,21 +125,25 @@ export function PaymentsPage() {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>OC</th><th>Proyecto</th><th className="num">No.</th><th>Fecha</th><th className="num">Importe</th><th>Método / Ref.</th><th>Estado</th><th>Proveedor</th><th>Comentarios</th></tr></thead>
+            <thead><tr><th>OC</th><th>Proyecto</th><th className="num">No.</th><th>Fecha</th><th className="num">Importe</th><th className="num">Acumulado</th><th className="num">Saldo</th><th>Método / Ref.</th><th>Estado</th><th>Proveedor</th><th>Comentarios</th></tr></thead>
             <tbody>
-              {rows.map(({ p, order, supplier, project }) => (
+              {rows.map(({ p, order, supplier, project }) => {
+                const total = order!.amount; const acum = acumOf(p); const saldo = total - acum
+                return (
                 <tr key={p.id} onClick={() => setForm(p)}>
                   <td><span className="mono text-acc font-semibold">{order!.number}</span></td>
                   <td className="text-[12px]">{project ? <><span className="mono text-tx-1">{project.code}</span><div className="meta">{sel.clientName(state, project.client)}</div></> : <span className="text-tx-3">—</span>}</td>
                   <td className="num mono">{p.n}</td>
                   <td className="num text-tx-1 text-[12px]">{fmtDateShort(p.date)}</td>
                   <td className="num font-semibold">{fmtMoney2(p.amount)}</td>
+                  <td className="num text-[12px]">{fmtMoney(acum)}<div className="meta">de {fmtMoney(total)}</div></td>
+                  <td className="num text-[12px]" style={{ color: saldo > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldo)}</td>
                   <td className="text-tx-1 text-[12px]">{p.method || '—'}</td>
                   <td><PaymentBadge status={p.status} /></td>
                   <td className="text-[12.5px]">{supplier ? supplier.name : '—'}</td>
                   <td className="text-tx-2 text-[12px]">{p.comments || '—'}</td>
                 </tr>
-              ))}
+              ) })}
             </tbody>
           </table>
         </div>

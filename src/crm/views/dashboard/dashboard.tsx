@@ -90,7 +90,7 @@ export function DashboardPage({ onNavigate, onOpenProject }: { onNavigate: (rout
 
   return (
     <div>
-      <SecTitle title="Panel general" sub="Junio 2026 · Operación de venta de racks industriales" />
+      <SecTitle title="Panel general"  />
 
       {/* KPIs */}
       <div className="grid grid-cols-4 gap-3.5 mb-5">

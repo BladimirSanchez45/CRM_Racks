@@ -11,25 +11,33 @@ import { ProjectsPage } from './views/projects/projects'
 import { SuppliersPage } from './views/suppliers/suppliers'
 import { OrdersPage } from './views/orders/orders'
 import { PaymentsPage } from './views/payments/payments'
+import { CobranzaPage } from './views/cobranza/cobranza'
 import { ClientsPage } from './views/clients/clients'
 import { CommissionsPage } from './views/commissions/commissions'
+import { AdminPage } from './views/admin/admin'
+import { LoginPage } from './views/login/login'
 import type { Project } from './core/types'
+import strakkLogo from '../assets/logos/strakk_logo.png'
+import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
+import nebulaiLogo from '../assets/logos/nebulai_logo.png'
 
-type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'payments' | 'clients' | 'commissions'
+type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
-const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey }[] = [
+const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban' },
   { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers'},
   { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders'},
   { id: 'payments',    label: 'Pagos',        icon: 'money' },
+  { id: 'cobranza',    label: 'Cobranza',     icon: 'download' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions' },
 ]
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', projects: 'Proyectos', suppliers: 'Proveedores',
-  orders: 'Órdenes de Compra', payments: 'Pagos', clients: 'Clientes', commissions: 'Comisiones',
+  orders: 'Órdenes de Compra', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
+  admin: 'Administración',
 }
 
 /* ---- accent helpers ---- */
@@ -45,11 +53,15 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "#2f6feb",
   "density": "cómodo",
   "blueprint": 0,
-  "light": false
+  "light": true
 }/*EDITMODE-END*/
 
+type Tweaks = typeof TWEAK_DEFAULTS
+type SetTweak = (keyOrEdits: keyof Tweaks | Partial<Tweaks>, val?: Tweaks[keyof Tweaks]) => void
+
 function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => void }) {
-  const { state } = useStore()
+  const { state, dispatch } = useStore()
+  const me = state.currentUser
   const counts: Record<CountKey, number> = {
     activeProjects: state.projects.filter(p => p.stage !== 'finalizado').length,
     suppliers: state.suppliers.filter(s => s.active).length,
@@ -57,18 +69,18 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
     payments: state.payments.length,
     clients: state.clients.length,
   }
+  const nav = NAV.filter(n => !n.adminOnly || me?.role === 'admin')
   return (
     <aside className="sidebar">
-      <div className="brand">
-        <div className="brand-mark">CC</div>
-        <div className="brand-text">
-          <div className="brand-name">CC RACKS</div>
-          <div className="brand-sub">Operaciones · CRM</div>
+      <div className="brand flex-col items-stretch gap-2">
+        <div className="flex items-center justify-center px-1.5 pt-1">
+          <img src={strakkLogo} alt="STRAKK CRM" className="brand-logo brand-logo-dark" />
+          <img src={strakkLogoBlanco} alt="STRAKK CRM" className="brand-logo brand-logo-light" />
         </div>
       </div>
       <nav className="nav">
         <div className="nav-sec">Operación</div>
-        {NAV.map(n => (
+        {nav.map(n => (
           <div key={n.id} className={'nav-item' + (route === n.id ? ' active' : '')} onClick={() => setRoute(n.id)} title={n.label}>
             <Icon name={n.icon} size={18} />
             <span className="nav-label">{n.label}</span>
@@ -78,45 +90,25 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
       </nav>
       <div className="sidebar-foot">
         <div className="user-chip">
-          <span className="avatar">BS</span>
+          <span className="avatar">{me?.initials ?? '?'}</span>
           <div className="brand-text flex-1 min-w-0">
-            <div className="text-[12.5px] font-semibold">Bladimir Sanchez</div>
-            <div className="meta text-[10.5px]">Coord. Logística</div>
+            <div className="text-[12.5px] font-semibold truncate">{me?.name ?? 'Invitado'}</div>
+            <div className="meta text-[10.5px] truncate">{me?.title || (me?.role === 'admin' ? 'Administrador' : 'Ventas')}</div>
           </div>
+          <button className="icon-btn shrink-0" title="Cerrar sesión" onClick={() => dispatch({ type: 'LOGOUT' })}><Icon name="logout" size={16} /></button>
         </div>
       </div>
     </aside>
   )
 }
 
-function Shell() {
+function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
+  const { state } = useStore()
+  const me = state.currentUser
   const [route, setRoute] = React.useState<Route>('dashboard')
   const [collapsed, setCollapsed] = React.useState(false)
   const [openProj, setOpenProj] = React.useState<Project | null>(null)
   const [editProj, setEditProj] = React.useState<Project | null>(null)
-  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS)
-
-  // apply tweaks
-  React.useEffect(() => {
-    const r = document.documentElement.style
-    r.setProperty('--acc', t.accent)
-    r.setProperty('--acc-bright', adjust(t.accent, 22))
-    r.setProperty('--acc-dim', adjust(t.accent, -40))
-    r.setProperty('--acc-ghost', t.accent + alphaHex(0.12))
-    r.setProperty('--acc-ghost-2', t.accent + alphaHex(0.22))
-    r.setProperty('--st-4', t.accent)
-  }, [t.accent])
-  React.useEffect(() => {
-    const r = document.documentElement.style
-    if (t.density === 'compacto') { r.setProperty('--pad', '14px'); r.setProperty('--gap', '11px'); r.setProperty('--row-h', '38px'); document.body.style.fontSize = '13px' }
-    else { r.setProperty('--pad', '20px'); r.setProperty('--gap', '16px'); r.setProperty('--row-h', '44px'); document.body.style.fontSize = '14px' }
-  }, [t.density])
-  React.useEffect(() => {
-    document.documentElement.style.setProperty('--grid-a', (t.blueprint / 100 + 0.005).toFixed(3))
-  }, [t.blueprint])
-  React.useEffect(() => {
-    document.body.classList.toggle('light', !!t.light)
-  }, [t.light])
 
   const onOpenProject = (p: Project) => { setOpenProj(p); setEditProj(null) }
 
@@ -127,8 +119,10 @@ function Shell() {
       case 'suppliers':   return <SuppliersPage />
       case 'orders':      return <OrdersPage />
       case 'payments':    return <PaymentsPage />
+      case 'cobranza':    return <CobranzaPage />
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
       case 'commissions': return <CommissionsPage />
+      case 'admin':       return me?.role === 'admin' ? <AdminPage /> : <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
       default: return null
     }
   }
@@ -144,10 +138,15 @@ function Shell() {
             <div className="crumb">CC Racks Industriales</div>
           </div>
           <div className="flex-1"></div>
+          {me && <span className={'badge-role mr-1 ' + (me.role === 'admin' ? 'role-admin' : 'role-ventas')}>{me.role === 'admin' ? 'Admin' : 'Ventas'}</span>}
+          {me?.role === 'admin' && (
+            <button className={'icon-btn' + (route === 'admin' ? ' active' : '')} onClick={() => setRoute('admin')} title="Administración">
+              <Icon name="shield" size={17} />
+            </button>
+          )}
           <button className="icon-btn" onClick={() => setTweak('light', !t.light)} title={t.light ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
             <Icon name={t.light ? 'sun' : 'moon'} size={17} />
           </button>
-          <button className="icon-btn" title="Buscar"><Icon name="search" size={17} /></button>
           <button className="icon-btn relative" title="Notificaciones">
             <Icon name="bell" size={17} />
             <span className="absolute top-[7px] right-[7px] w-1.5 h-1.5 rounded-full bg-danger"></span>
@@ -175,6 +174,35 @@ function Shell() {
   )
 }
 
+function Root() {
+  const { state } = useStore()
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS)
+
+  // aplica el tema/tweaks a nivel global (login y app)
+  React.useEffect(() => {
+    const r = document.documentElement.style
+    r.setProperty('--acc', t.accent)
+    r.setProperty('--acc-bright', adjust(t.accent, 22))
+    r.setProperty('--acc-dim', adjust(t.accent, -40))
+    r.setProperty('--acc-ghost', t.accent + alphaHex(0.12))
+    r.setProperty('--acc-ghost-2', t.accent + alphaHex(0.22))
+    r.setProperty('--st-4', t.accent)
+  }, [t.accent])
+  React.useEffect(() => {
+    const r = document.documentElement.style
+    if (t.density === 'compacto') { r.setProperty('--pad', '14px'); r.setProperty('--gap', '11px'); r.setProperty('--row-h', '38px'); document.body.style.fontSize = '13px' }
+    else { r.setProperty('--pad', '20px'); r.setProperty('--gap', '16px'); r.setProperty('--row-h', '44px'); document.body.style.fontSize = '14px' }
+  }, [t.density])
+  React.useEffect(() => {
+    document.documentElement.style.setProperty('--grid-a', (t.blueprint / 100 + 0.005).toFixed(3))
+  }, [t.blueprint])
+  React.useEffect(() => {
+    document.body.classList.toggle('light', !!t.light)
+  }, [t.light])
+
+  return state.currentUser ? <Shell t={t} setTweak={setTweak} /> : <LoginPage />
+}
+
 export default function App() {
-  return <StoreProvider><Shell /></StoreProvider>
+  return <StoreProvider><Root /></StoreProvider>
 }

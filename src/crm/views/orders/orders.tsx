@@ -68,7 +68,7 @@ function printOC(state: AppState, o: Order, items: OcItem[]) {
       <tr><td>IVA 16%</td><td class="r">${m(iva)}</td></tr>
       <tr class="g"><td>Total</td><td class="r">${m(total)}</td></tr>
     </table>
-    <div class="foot">Documento generado por el CRM de CC Racks.</div>
+    <div class="foot">Generado con STRAKK CRM</div>
     <button class="noprint" onclick="window.print()" style="margin-top:24px;padding:10px 22px;background:#2f6feb;color:#fff;border:0;border-radius:8px;cursor:pointer">Imprimir / Guardar PDF</button>
   </body></html>`)
   w.document.close()
@@ -88,12 +88,21 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
   const set = (k: keyof AbonoFormState, v: unknown) => setA(s => ({ ...s, [k]: v }))
   const valid = a.date && a.amount
   const save = () => { dispatch({ type: 'SAVE_PAYMENT', payment: { ...a, n: +a.n || 1, amount: +a.amount || 0 } as PaymentInput }); onClose() }
+  const total = order.amount
+  const pagadoAntes = state.payments.filter(x => x.orderId === order.id && x.status === 'Pagado' && x.id !== a.id).reduce((acc, x) => acc + x.amount, 0)
+  const pagado = pagadoAntes + (a.status === 'Pagado' ? (+a.amount || 0) : 0)
+  const saldoRestante = total - pagado
   return (
     <Modal width={480} icon={payment ? 'edit' : 'plus'} title={payment ? 'Editar abono' : 'Nuevo abono'} sub={order.number} onClose={onClose}
       footer={<>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar abono</button>
       </>}>
+      <div className="bg-bg-1 border border-line rounded-[8px] p-3 mb-3.5 grid grid-cols-3 gap-2 text-center">
+        <div><div className="label-k">Monto OC</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(total)}</div></div>
+        <div><div className="label-k">Pagado</div><div className="font-display font-bold text-[15px] mt-0.5 text-ok">{fmtMoney(pagado)}</div></div>
+        <div><div className="label-k">Saldo restante</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: saldoRestante > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldoRestante)}</div></div>
+      </div>
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="No. Abono"><Input type="number" value={a.n} onChange={e => set('n', e.target.value)} /></Field>
         <Field label="Fecha de pago"><Input type="date" value={a.date} onChange={e => set('date', e.target.value)} /></Field>
@@ -179,13 +188,16 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
       {abonos.length === 0 ? <Empty icon="money">Sin abonos registrados</Empty> : (
         <div className="border border-line rounded-[8px] overflow-hidden">
           <table className="tbl">
-            <thead><tr><th>#</th><th>Fecha</th><th className="num">Importe</th><th>Método / Ref.</th><th>Estado</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Fecha</th><th className="num">Importe</th><th className="num">Acum.</th><th>Método / Ref.</th><th>Estado</th><th></th></tr></thead>
             <tbody>
-              {abonos.map(p => (
+              {abonos.map(p => {
+                const acum = abonos.filter(x => x.status !== 'Cancelado' && x.n <= p.n).reduce((a, x) => a + x.amount, 0)
+                return (
                 <tr key={p.id} style={{ cursor: 'default' }}>
                   <td className="mono">{p.n}</td>
                   <td className="num text-tx-1 text-[12px]">{fmtDateShort(p.date)}</td>
                   <td className="num">{fmtMoney2(p.amount)}</td>
+                  <td className="num text-[12px]">{fmtMoney(acum)}<div className="meta">de {fmtMoney(o.amount)}</div></td>
                   <td className="text-tx-1 text-[12px]">{p.method || '—'}{p.comments ? <div className="meta mt-px">{p.comments}</div> : null}</td>
                   <td><PaymentBadge status={p.status} /></td>
                   <td><div className="flex gap-1 justify-end">
@@ -193,7 +205,7 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
                     <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => dispatch({ type: 'DELETE_PAYMENT', id: p.id })}><Icon name="trash" size={13} /></button>
                   </div></td>
                 </tr>
-              ))}
+              ) })}
             </tbody>
           </table>
         </div>
