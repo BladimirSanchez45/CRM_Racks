@@ -16,11 +16,19 @@ import type {
   Seller,
   Stage,
   StageId,
+  StateAction,
   Supplier,
-  User,
 } from './types'
-import { SEED_CLIENTS } from './seed-clients'
-import { SEED_SUPPLIERS } from './seed-suppliers'
+import {
+  fetchMyProfile, signOut, loadAll,
+  saveProject, deleteProject as apiDeleteProject,
+  saveOrder, deleteOrder as apiDeleteOrder,
+  savePayment, deletePayment as apiDeletePayment,
+  saveClientPayment, deleteClientPayment as apiDeleteClientPayment,
+  saveCommission, saveClientRow, saveSupplierRow, saveSeller, deleteSeller as apiDeleteSeller,
+  saveActivity,
+} from './api'
+import { supabase } from './supabase'
 
 /* ---- The 9 pipeline stages (exact, in order) ---- */
 export const STAGES: Stage[] = [
@@ -126,283 +134,51 @@ export const REGIMEN_FISCAL: Record<string, string> = {
 export const regimenLabel = (code?: string) =>
   !code ? '—' : REGIMEN_FISCAL[code] ? `${code} · ${REGIMEN_FISCAL[code]}` : code
 
-/* ---- Sellers ---- */
-const SELLERS: Seller[] = [
-  { id: 'v1', name: 'Ana Robles',    initials: 'AR', rate: 0.04 },
-  { id: 'v2', name: 'Carlos Méndez', initials: 'CM', rate: 0.035 },
-  { id: 'v3', name: 'Diana Fuentes', initials: 'DF', rate: 0.04 },
-]
-
-/* ---- Usuarios del sistema (login + roles) ---- */
-const USERS: User[] = [
-  { id: 'u1', name: 'Bladimir Sanchez', email: 'admin@ccracks.mx',  password: 'admin123',  role: 'admin',  initials: 'BS', title: 'Administrador',     active: true },
-  { id: 'u2', name: 'Carlos Méndez',    email: 'carlos@ccracks.mx', password: 'ventas123', role: 'ventas', initials: 'CM', title: 'Ejecutivo de ventas', active: true },
-  { id: 'u3', name: 'Diana Fuentes',    email: 'diana@ccracks.mx',  password: 'ventas123', role: 'ventas', initials: 'DF', title: 'Ejecutiva de ventas', active: true },
-]
-
-/* ---- Clients ---- */
-const CLIENTS: Client[] = [
-  { id: 'c1', name: 'Distribuidora Logística del Centro', city: 'Ciudad de México', contact: 'Ing. Patricia Lozano', phone: '55 1842 3390', email: 'compras@dlc.mx', since: '2023-02-11' },
-  { id: 'c2', name: 'Almacenes Refrigerados Sonora',      city: 'Hermosillo, Son.',    contact: 'Lic. Marco Bustamante', phone: '662 210 7745', email: 'm.bustamante@arsonora.com', since: '2024-07-03' },
-  { id: 'c3', name: 'Grupo Comercial Azteca',             city: 'Guadalajara, Jal.',   contact: 'Sra. Elena Cárdenas',  phone: '33 3640 1188', email: 'proyectos@gcazteca.mx', since: '2022-11-20' },
-  ...SEED_CLIENTS,
-]
-
-/* ---- Suppliers ---- */
-const SUPPLIERS: Supplier[] = [
-  { id: 's1', name: 'Racks del Bajío, S.A. de C.V.', cat: 'Fabricante de racks', contact: 'Ing. Roberto Salazar', phone: '477 388 2210', email: 'ventas@racksbajio.mx', city: 'León, Gto.', rating: 5, active: true, notes: 'Proveedor principal. Cumple tiempos de fabricación. Acepta cambios de color sin costo extra.' },
-  { id: 's2', name: 'Transportes Férreos del Norte',  cat: 'Fletes y transporte', contact: 'Lic. Mónica Treviño',  phone: '81 8344 5567', email: 'logistica@tfnorte.com', city: 'Monterrey, N.L.', rating: 4, active: true, notes: 'Buena cobertura nacional. Tarifas competitivas en rutas al norte.' },
-  { id: 's3', name: 'Instalaciones Industriales Vega', cat: 'Cuadrilla de instalación', contact: 'Javier Vega', phone: '442 155 9023', email: 'jvega@iivega.mx', city: 'Querétaro, Qro.', rating: 4, active: true, notes: 'Cuadrilla de 6 instaladores certificados. Disponibilidad con 1 semana de anticipación.' },
-  { id: 's4', name: 'Estructuras Metálicas Poniente',  cat: 'Fabricante de racks', contact: 'Ing. Luis Ontiveros', phone: '33 3122 4400', email: 'cotizaciones@empon.mx', city: 'Guadalajara, Jal.', rating: 3, active: false, notes: 'Proveedor de respaldo. Tiempos más largos. Usar solo en saturación.' },
-  ...SEED_SUPPLIERS,
-]
-
-/* ---- Órdenes de Compra (modelo "Control OC" del Excel) ---- */
-const ORDERS: Order[] = [
-  // OCs vinculadas a proyectos del CRM (convertidas al nuevo modelo)
-  { id: 'oc1', number: 'OC-2026-0041', date: '2026-04-28', supplierId: 's1', projectId: 'p1', description: 'Racks selectivos · PRY-2026-001', conditions: '50% anticipo - 50% contra entrega', amount: 486000, responsible: 'Ana Robles', file: 'OC-2026-0041_RacksBajio.pdf' },
-  { id: 'oc2', number: 'OC-2026-0047', date: '2026-05-19', supplierId: 's1', projectId: 'p2', description: 'Racks anticorrosivos · PRY-2026-002', conditions: '50% anticipo - 50% finiquito', amount: 312000, responsible: 'Carlos Méndez', file: 'OC-2026-0047_RacksBajio.pdf' },
-  { id: 'oc3', number: 'OC-2026-0052', date: '2026-05-26', supplierId: 's2', projectId: 'p4', description: 'Flete Monterrey · PRY-2026-004', conditions: 'Contado', amount: 58000, responsible: 'Ana Robles', file: 'OC-2026-0052_Flete_TFN.pdf' },
-  { id: 'oc4', number: 'OC-2026-0038', date: '2026-03-30', supplierId: 's1', projectId: 'p6', description: 'Racks · PRY-2026-006', conditions: 'Contado', amount: 540000, responsible: 'Diana Fuentes', file: 'OC-2026-0038_RacksBajio.pdf' },
-  { id: 'oc5', number: 'OC-2026-0039', date: '2026-04-02', supplierId: 's3', projectId: 'p6', description: 'Instalación · PRY-2026-006', conditions: 'Contado', amount: 72000, responsible: 'Diana Fuentes', file: 'OC-2026-0039_Instalacion_Vega.pdf' },
-  { id: 'oc6', number: 'OC-2026-0033', date: '2026-03-12', supplierId: 's1', projectId: 'p7', description: 'Racks · PRY-2026-007', conditions: 'Contado', amount: 398000, responsible: 'Ana Robles', file: 'OC-2026-0033_RacksBajio.pdf' },
-  { id: 'oc7', number: 'OC-2026-0055', date: '2026-05-29', supplierId: 's1', projectId: 'p5', description: 'Racks · PRY-2026-005', conditions: '50% anticipo - 30 días finiquito', amount: 268000, responsible: 'Carlos Méndez', file: '' },
-  // OCs reales del Excel (Control OC) — sin proyecto
-  { id: 'oc-stock5', number: 'OC-STOCK 5', date: '2024-06-24', supplierId: 'rs1', description: 'Stock / compra general', conditions: 'Parcialidades', amount: 967150, responsible: 'Administración', file: 'OC-STOCK 5.pdf' },
-  { id: 'oc-2103', number: 'OC-2103', date: '2025-01-31', supplierId: 'rs2', description: 'Orden de compra OC-2103', conditions: 'Parcialidades', amount: 2610000, responsible: 'Administración', file: 'OC-2103.pdf' },
-  { id: 'oc-iwp1', number: 'OC-IWP-01', date: '2026-05-20', supplierId: 'rs3', description: 'Estructura metálica IWP', conditions: 'Crédito', amount: 180000, responsible: 'Administración', file: '' },
-  { id: 'oc-lmp1', number: 'OC-LMP-01', date: '2026-02-10', supplierId: 'rs6', description: 'Material LAMPER', conditions: 'Contado', amount: 95000, responsible: 'Administración', file: '', cancelled: true },
-]
-
-/* ---- Pagos / abonos (hoja "Pagos" del Excel) ---- */
-const PAYMENTS: Payment[] = [
-  { id: 'pg1',  orderId: 'oc1', n: 1, date: '2026-04-28', amount: 243000, method: 'Transferencia', status: 'Pagado',     comments: 'Anticipo 50%' },
-  { id: 'pg2',  orderId: 'oc1', n: 2, date: '2026-06-15', amount: 243000, method: '',              status: 'Programado', comments: 'Liquidación' },
-  { id: 'pg3',  orderId: 'oc2', n: 1, date: '2026-05-19', amount: 156000, method: 'Transferencia', status: 'Pagado',     comments: 'Anticipo 50%' },
-  { id: 'pg4',  orderId: 'oc2', n: 2, date: '2026-07-01', amount: 156000, method: '',              status: 'Programado', comments: '' },
-  { id: 'pg5',  orderId: 'oc3', n: 1, date: '2026-05-26', amount: 58000,  method: 'Transferencia', status: 'Pagado',     comments: 'Pago de contado' },
-  { id: 'pg6',  orderId: 'oc4', n: 1, date: '2026-03-30', amount: 540000, method: 'Transferencia', status: 'Pagado',     comments: '' },
-  { id: 'pg7',  orderId: 'oc5', n: 1, date: '2026-04-02', amount: 72000,  method: 'Transferencia', status: 'Pagado',     comments: '' },
-  { id: 'pg8',  orderId: 'oc6', n: 1, date: '2026-03-12', amount: 398000, method: 'Transferencia', status: 'Pagado',     comments: '' },
-  { id: 'pg9',  orderId: 'oc7', n: 1, date: '2026-05-29', amount: 134000, method: 'Transferencia', status: 'Pagado',     comments: 'Anticipo' },
-  { id: 'pg10', orderId: 'oc7', n: 2, date: '2026-05-25', amount: 134000, method: '',              status: 'Programado', comments: 'Vencido' },
-  // OC-STOCK 5 (datos reales del Excel) — liquidada
-  { id: 'pg11', orderId: 'oc-stock5', n: 1, date: '2025-04-30', amount: 122321.63, method: '', status: 'Pagado', comments: '' },
-  { id: 'pg12', orderId: 'oc-stock5', n: 2, date: '2025-06-17', amount: 300000,    method: '', status: 'Pagado', comments: '' },
-  { id: 'pg13', orderId: 'oc-stock5', n: 3, date: '2025-09-26', amount: 160000,    method: '', status: 'Pagado', comments: '' },
-  { id: 'pg14', orderId: 'oc-stock5', n: 4, date: '2025-09-30', amount: 384828.37, method: '', status: 'Pagado', comments: '' },
-  // OC-2103 (datos reales del Excel)
-  { id: 'pg15', orderId: 'oc-2103', n: 1, date: '2025-01-31', amount: 1450000, method: '', status: 'Pagado',     comments: '' },
-  { id: 'pg16', orderId: 'oc-2103', n: 2, date: '2025-09-30', amount: 200000,  method: '', status: 'Programado', comments: '' },
-  { id: 'pg17', orderId: 'oc-2103', n: 3, date: '2025-10-09', amount: 210000,  method: '', status: 'Programado', comments: '' },
-  { id: 'pg18', orderId: 'oc-2103', n: 4, date: '2025-10-13', amount: 500000,  method: '', status: 'Programado', comments: '' },
-  { id: 'pg19', orderId: 'oc-2103', n: 5, date: '2025-11-28', amount: 200000,  method: '', status: 'Programado', comments: '' },
-  // oc-iwp1 → sin abonos (Pendiente);  oc-lmp1 → Cancelada
-]
-
-/* ---- Cobros del cliente (lo que el cliente nos paga por cada proyecto) ---- */
-const CLIENT_PAYMENTS: ClientPayment[] = [
-  { id: 'cp1', projectId: 'p1', n: 1, date: '2026-04-22', amount: 301600, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
-  { id: 'cp2', projectId: 'p1', n: 2, date: '2026-06-30', amount: 301600, concept: 'Finiquito',    method: '',              status: 'Programado', comments: '' },
-  { id: 'cp3', projectId: 'p4', n: 1, date: '2026-04-05', amount: 324800, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
-  { id: 'cp4', projectId: 'p4', n: 2, date: '2026-05-27', amount: 324800, concept: 'Finiquito',    method: 'Transferencia', status: 'Cobrado',   comments: '' },
-  { id: 'cp5', projectId: 'p5', n: 1, date: '2026-04-25', amount: 249400, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
-  { id: 'cp6', projectId: 'p5', n: 2, date: '2026-06-18', amount: 249400, concept: 'Finiquito',    method: '',              status: 'Programado', comments: '' },
-  { id: 'cp7', projectId: 'p6', n: 1, date: '2026-03-25', amount: 400200, concept: 'Anticipo 50%', method: 'Transferencia', status: 'Cobrado',   comments: '' },
-  { id: 'cp8', projectId: 'p6', n: 2, date: '2026-05-30', amount: 400200, concept: 'Finiquito',    method: 'Transferencia', status: 'Cobrado',   comments: '' },
-  { id: 'cp9', projectId: 'p7', n: 1, date: '2026-03-10', amount: 556800, concept: 'Pago de contado', method: 'Transferencia', status: 'Cobrado', comments: '' },
-]
-
-/* ---- Projects (each project = one sale) ---- */
-const allDocs = (...flags: boolean[]): Project['docs'] => {
-  const k: (keyof Project['docs'])[] = ['cotizacion', 'layout', 'anticipo', 'ordenCompra', 'finiquito', 'remision', 'cartaFin']
-  const d = {} as Project['docs']
-  k.forEach((key, i) => { d[key] = flags[i] ? docOK(`${key}.pdf`) : docNo() })
-  return d
-}
-const PROJECTS: Project[] = [
-  {
-    id: 'p1', code: 'PRY-2026-001', stage: 'fabricacion', client: 'c1', seller: 'v1',
-    city: 'Ciudad de México', sistemaVendido: 'Rack selectivo', ventaSubtotal: 520000, freight: 38000, install: 64000, weeks: 6,
-    obs: 'Cambio de color a gris RAL 7016 en parcales. Cliente solicita refuerzo en niveles bajos.',
-    docs: allDocs(true, true, true, true, false, false, false),
-    suppliers: ['s1'], eta: '2026-06-24', finiquito: 'pending', created: '2026-04-20', updated: '2026-05-28',
-  },
-  {
-    id: 'p2', code: 'PRY-2026-002', stage: 'asignacion', client: 'c2', seller: 'v2',
-    city: 'Hermosillo, Son.', sistemaVendido: 'Rack selectivo anticorrosivo', ventaSubtotal: 410000, freight: 52000, install: 41000, weeks: 8,
-    obs: 'Almacén refrigerado — requiere acabado anticorrosivo especial. Validar con fabricante.',
-    docs: allDocs(true, true, true, true, false, false, false),
-    suppliers: ['s1'], eta: '', finiquito: 'pending', created: '2026-05-12', updated: '2026-05-19',
-  },
-  {
-    id: 'p3', code: 'PRY-2026-003', stage: 'registro', client: 'c3', seller: 'v3',
-    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack selectivo', ventaSubtotal: 240000, freight: 21000, install: 33000, weeks: 5,
-    obs: 'Venta recién registrada por el vendedor. Pendiente captura completa por admin.',
-    docs: allDocs(true, false, false, false, false, false, false),
-    suppliers: [], eta: '', finiquito: 'pending', created: '2026-05-30', updated: '2026-05-30',
-  },
-  {
-    id: 'p4', code: 'PRY-2026-004', stage: 'coordinacion', client: 'c1', seller: 'v1',
-    city: 'Monterrey, N.L.', sistemaVendido: 'Rack selectivo + cantilever', ventaSubtotal: 560000, freight: 47000, install: 58000, weeks: 7,
-    obs: 'Pago completo recibido. Coordinar flete con TFN y cuadrilla de instalación. Generar remisión.',
-    docs: allDocs(true, true, true, true, true, true, false),
-    suppliers: ['s1', 's2'], eta: '2026-06-10', finiquito: 'paid', created: '2026-04-02', updated: '2026-05-27', remision: 'REM-2026-019',
-  },
-  {
-    id: 'p5', code: 'PRY-2026-005', stage: 'entrega_est', client: 'c2', seller: 'v2',
-    city: 'Culiacán, Sin.', sistemaVendido: 'Rack selectivo', ventaSubtotal: 430000, freight: 44000, install: 39000, weeks: 6,
-    obs: 'Proveedor confirmó ETA 18 jun. Cliente notificado, en espera de finiquito antes de embarque.',
-    docs: allDocs(true, true, true, true, false, false, false),
-    suppliers: ['s1'], eta: '2026-06-18', finiquito: 'pending', created: '2026-04-25', updated: '2026-05-29',
-  },
-  /* completed this month → commissions */
-  {
-    id: 'p6', code: 'PRY-2026-006', stage: 'finalizado', client: 'c3', seller: 'v3',
-    city: 'Guadalajara, Jal.', sistemaVendido: 'Rack de penetración (drive-in)', ventaSubtotal: 690000, freight: 56000, install: 72000, weeks: 7,
-    obs: 'Obra concluida y carta de fin de obra firmada. Entra a comisiones de junio.',
-    docs: allDocs(true, true, true, true, true, true, true),
-    suppliers: ['s1', 's3'], eta: '2026-05-22', finiquito: 'paid', created: '2026-03-20', updated: '2026-05-30', closedOn: '2026-05-30',
-  },
-  {
-    id: 'p7', code: 'PRY-2026-007', stage: 'finalizado', client: 'c1', seller: 'v1',
-    city: 'Puebla, Pue.', sistemaVendido: 'Rack selectivo', ventaSubtotal: 480000, freight: 33000, install: 48000, weeks: 6,
-    obs: 'Proyecto cerrado. Cliente satisfecho, posible recompra Q3.',
-    docs: allDocs(true, true, true, true, true, true, true),
-    suppliers: ['s1'], eta: '2026-05-08', finiquito: 'paid', created: '2026-03-05', updated: '2026-05-14', closedOn: '2026-05-14',
-  },
-]
-
-/* ---- Commissions ---- */
-const COMMISSIONS: Commission[] = [
-  { id: 'cm1', projectId: 'p6', seller: 'v3', amount: 20480, status: 'pending', month: '2026-06' },
-  { id: 'cm2', projectId: 'p7', seller: 'v1', amount: 16200, status: 'paid',    month: '2026-06' },
-]
-
-/* ---- Activity feed ---- */
-const ACTIVITY: Activity[] = [
-  { id: 'a1', t: '2026-05-30T16:20', icon: 'check',   who: 'Diana Fuentes', txt: 'cerró el proyecto', tgt: 'PRY-2026-006', kind: 'done' },
-  { id: 'a2', t: '2026-05-29T11:05', icon: 'calendar',who: 'Logística',     txt: 'registró ETA 18 jun en', tgt: 'PRY-2026-005', kind: 'info' },
-  { id: 'a3', t: '2026-05-28T09:40', icon: 'factory', who: 'Racks del Bajío', txt: 'reportó avance de fabricación 60% en', tgt: 'PRY-2026-001', kind: 'work' },
-  { id: 'a4', t: '2026-05-27T15:12', icon: 'truck',   who: 'Logística',     txt: 'generó remisión REM-2026-019 para', tgt: 'PRY-2026-004', kind: 'info' },
-  { id: 'a5', t: '2026-05-26T10:30', icon: 'money',   who: 'Admin',         txt: 'confirmó finiquito de', tgt: 'PRY-2026-004', kind: 'money' },
-  { id: 'a6', t: '2026-05-19T13:55', icon: 'orders',  who: 'Carlos Méndez', txt: 'creó la OC-2026-0047 para', tgt: 'PRY-2026-002', kind: 'info' },
-  { id: 'a7', t: '2026-05-30T08:15', icon: 'flag',    who: 'Diana Fuentes', txt: 'registró nueva venta', tgt: 'PRY-2026-003', kind: 'new' },
-]
+// Datos mock eliminados: el estado se carga desde Supabase tras el login.
 
 // ============================================================
 //  STORE — context + reducer
 // ============================================================
-const SESSION_KEY = 'strakk-session'
-function loadSession(users: User[]): User | null {
-  try {
-    const id = localStorage.getItem(SESSION_KEY)
-    return id ? (users.find(u => u.id === id) ?? null) : null
-  } catch { return null }
-}
-
 const initial: AppState = {
-  projects: PROJECTS, suppliers: SUPPLIERS, orders: ORDERS, payments: PAYMENTS, clientPayments: CLIENT_PAYMENTS,
-  clients: CLIENTS, sellers: SELLERS, commissions: COMMISSIONS, activity: ACTIVITY,
-  users: USERS, currentUser: loadSession(USERS),
+  projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
+  clients: [], sellers: [], commissions: [], activity: [],
+  users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
 
-function pushActivity(state: AppState, a: Omit<Activity, 'id' | 't'>): Activity[] {
-  return [{ id: uid('a'), t: new Date().toISOString().slice(0, 16), ...a }, ...state.activity].slice(0, 40)
+/* Helpers de fecha/usuario para las acciones. */
+const today = () => new Date().toISOString().slice(0, 10)
+const nowISO = () => new Date().toISOString()
+const curMonth = () => new Date().toISOString().slice(0, 7)
+const whoName = (s: AppState) => s.currentUser?.name ?? 'Sistema'
+
+/* Reducer PURO: solo aplica cambios al estado local. La persistencia en
+   Supabase la maneja el wrapper `dispatch` de StoreProvider. */
+function upsertBy<T extends { id: string }>(list: T[], item: T): T[] {
+  return list.some(x => x.id === item.id) ? list.map(x => (x.id === item.id ? item : x)) : [item, ...list]
 }
 
-function reducer(state: AppState, action: Action): AppState {
-  switch (action.type) {
-    case 'MOVE_STAGE': {
-      const projects = state.projects.map(p => p.id === action.id ? { ...p, stage: action.stage, updated: '2026-06-02', ...(action.stage === 'finalizado' ? { closedOn: '2026-06-02' } : {}) } : p)
-      const proj = state.projects.find(p => p.id === action.id)!
-      let commissions = state.commissions
-      if (action.stage === 'finalizado' && !state.commissions.some(c => c.projectId === action.id)) {
-        const seller = state.sellers.find(s => s.id === proj.seller)
-        const amt = Math.round((proj.freight + proj.install) * (seller ? seller.rate : 0.04))
-        commissions = [...state.commissions, { id: uid('cm'), projectId: action.id, seller: proj.seller, amount: amt, status: 'pending', month: '2026-06' }]
-      }
-      const stg = STAGE_MAP[action.stage]
-      return { ...state, projects, commissions, activity: pushActivity(state, { icon: stg.icon, who: 'Tú', txt: `movió a ${stg.short}`, tgt: proj.code, kind: 'info' }) }
-    }
-    case 'SAVE_PROJECT': {
-      const exists = state.projects.some(p => p.id === action.project.id)
-      const projects = exists
-        ? state.projects.map(p => p.id === action.project.id ? { ...action.project, updated: '2026-06-02' } as Project : p)
-        : [{ ...action.project, id: uid('p'), created: '2026-06-02', updated: '2026-06-02' } as Project, ...state.projects]
-      return { ...state, projects, activity: exists ? state.activity : pushActivity(state, { icon: 'flag', who: 'Tú', txt: 'registró nueva venta', tgt: action.project.code, kind: 'new' }) }
-    }
-    case 'DELETE_PROJECT':
-      return { ...state, projects: state.projects.filter(p => p.id !== action.id), clientPayments: state.clientPayments.filter(c => c.projectId !== action.id) }
-    case 'SAVE_SUPPLIER': {
-      const exists = state.suppliers.some(s => s.id === action.supplier.id)
-      const suppliers = exists
-        ? state.suppliers.map(s => s.id === action.supplier.id ? action.supplier as Supplier : s)
-        : [...state.suppliers, { ...action.supplier, id: uid('s') } as Supplier]
-      return { ...state, suppliers }
-    }
-    case 'TOGGLE_SUPPLIER':
-      return { ...state, suppliers: state.suppliers.map(s => s.id === action.id ? { ...s, active: !s.active } : s) }
-    case 'SAVE_ORDER': {
-      const exists = state.orders.some(o => o.id === action.order.id)
-      const orders = exists
-        ? state.orders.map(o => o.id === action.order.id ? action.order as Order : o)
-        : [...state.orders, { ...action.order, id: uid('oc') } as Order]
-      return { ...state, orders }
-    }
-    case 'DELETE_ORDER':
-      return { ...state, orders: state.orders.filter(o => o.id !== action.id), payments: state.payments.filter(p => p.orderId !== action.id) }
-    case 'SAVE_PAYMENT': {
-      const exists = state.payments.some(p => p.id === action.payment.id)
-      const payments = exists
-        ? state.payments.map(p => p.id === action.payment.id ? action.payment as Payment : p)
-        : [...state.payments, { ...action.payment, id: uid('pg') } as Payment]
-      return { ...state, payments }
-    }
-    case 'DELETE_PAYMENT':
-      return { ...state, payments: state.payments.filter(p => p.id !== action.id) }
-    case 'SAVE_CLIENT_PAYMENT': {
-      const exists = state.clientPayments.some(c => c.id === action.payment.id)
-      const clientPayments = exists
-        ? state.clientPayments.map(c => c.id === action.payment.id ? action.payment as ClientPayment : c)
-        : [...state.clientPayments, { ...action.payment, id: uid('cp') } as ClientPayment]
-      return { ...state, clientPayments }
-    }
-    case 'DELETE_CLIENT_PAYMENT':
-      return { ...state, clientPayments: state.clientPayments.filter(c => c.id !== action.id) }
-    case 'SAVE_CLIENT': {
-      const exists = state.clients.some(c => c.id === action.client.id)
-      const clients = exists
-        ? state.clients.map(c => c.id === action.client.id ? action.client as Client : c)
-        : [...state.clients, { ...action.client, id: uid('c'), since: '2026-06-02' } as Client]
-      return { ...state, clients }
-    }
-    case 'TOGGLE_COMMISSION':
-      return { ...state, commissions: state.commissions.map(c => c.id === action.id ? { ...c, status: c.status === 'paid' ? 'pending' : 'paid' } : c) }
-    case 'LOGIN':
-      try { localStorage.setItem(SESSION_KEY, action.user.id) } catch { /* ignore */ }
-      return { ...state, currentUser: action.user }
-    case 'LOGOUT':
-      try { localStorage.removeItem(SESSION_KEY) } catch { /* ignore */ }
-      return { ...state, currentUser: null }
-    case 'SAVE_USER': {
-      const exists = state.users.some(u => u.id === action.user.id)
-      const saved = exists
-        ? { ...action.user } as User
-        : { ...action.user, id: uid('u') } as User
-      const users = exists
-        ? state.users.map(u => u.id === saved.id ? saved : u)
-        : [...state.users, saved]
-      // si edité al usuario en sesión, refresca currentUser
-      const currentUser = state.currentUser && state.currentUser.id === saved.id ? saved : state.currentUser
-      return { ...state, users, currentUser }
-    }
-    case 'DELETE_USER':
-      return { ...state, users: state.users.filter(u => u.id !== action.id) }
-    case 'TOGGLE_USER':
-      return { ...state, users: state.users.map(u => u.id === action.id ? { ...u, active: !u.active } : u) }
-    default:
-      return state
+function reducer(state: AppState, a: StateAction): AppState {
+  switch (a.type) {
+    case 'HYDRATE': return { ...state, ...a.data }
+    case 'LOGIN': return { ...state, currentUser: a.user }
+    case 'LOGOUT': return { ...state, currentUser: null }
+    case 'UPSERT_PROJECT': return { ...state, projects: upsertBy(state.projects, a.project) }
+    case 'REMOVE_PROJECT':
+      return { ...state, projects: state.projects.filter(p => p.id !== a.id), clientPayments: state.clientPayments.filter(c => c.projectId !== a.id) }
+    case 'UPSERT_ORDER': return { ...state, orders: upsertBy(state.orders, a.order) }
+    case 'REMOVE_ORDER':
+      return { ...state, orders: state.orders.filter(o => o.id !== a.id), payments: state.payments.filter(p => p.orderId !== a.id) }
+    case 'UPSERT_PAYMENT': return { ...state, payments: upsertBy(state.payments, a.payment) }
+    case 'REMOVE_PAYMENT': return { ...state, payments: state.payments.filter(p => p.id !== a.id) }
+    case 'UPSERT_CLIENT_PAYMENT': return { ...state, clientPayments: upsertBy(state.clientPayments, a.payment) }
+    case 'REMOVE_CLIENT_PAYMENT': return { ...state, clientPayments: state.clientPayments.filter(c => c.id !== a.id) }
+    case 'UPSERT_COMMISSION': return { ...state, commissions: upsertBy(state.commissions, a.commission) }
+    case 'UPSERT_CLIENT': return { ...state, clients: upsertBy(state.clients, a.client) }
+    case 'UPSERT_SUPPLIER': return { ...state, suppliers: upsertBy(state.suppliers, a.supplier) }
+    case 'UPSERT_SELLER': return { ...state, sellers: upsertBy(state.sellers, a.seller) }
+    case 'REMOVE_SELLER': return { ...state, sellers: state.sellers.filter(s => s.id !== a.id) }
+    case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
+    default: return state
   }
 }
 
@@ -414,8 +190,166 @@ export interface StoreValue {
 const StoreCtx = React.createContext<StoreValue | null>(null)
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = React.useReducer(reducer, initial)
-  const value = React.useMemo<StoreValue>(() => ({ state, dispatch }), [state])
+  const [state, rawDispatch] = React.useReducer(reducer, initial)
+  const stateRef = React.useRef(state)
+  stateRef.current = state
+
+  // Recarga TODO desde la base (resync tras un error de guardado).
+  const reloadAll = React.useCallback(() => {
+    loadAll()
+      .then(data => rawDispatch({ type: 'HYDRATE', data }))
+      .catch(err => console.error('[supabase] Error recargando datos:', err))
+  }, [])
+
+  // Ejecuta las escrituras en Supabase; si fallan, avisa y re-sincroniza.
+  const persist = React.useCallback((thunks: (() => Promise<void>)[]) => {
+    Promise.all(thunks.map(t => t())).catch(err => {
+      console.error('[supabase] Error guardando, re-sincronizando:', err)
+      alert('No se pudo guardar el cambio en la base. Se recargarán los datos.')
+      reloadAll()
+    })
+  }, [reloadAll])
+
+  // dispatch PÚBLICO: aplica el cambio localmente (optimista) y lo persiste.
+  const dispatch = React.useCallback((action: Action) => {
+    const s = stateRef.current
+    switch (action.type) {
+      case 'HYDRATE': rawDispatch(action); return
+      case 'LOGIN': rawDispatch(action); return
+      case 'LOGOUT': rawDispatch(action); return
+
+      case 'MOVE_STAGE': {
+        const proj = s.projects.find(p => p.id === action.id); if (!proj) return
+        const updated: Project = { ...proj, stage: action.stage, updated: today(), ...(action.stage === 'finalizado' ? { closedOn: today() } : {}) }
+        rawDispatch({ type: 'UPSERT_PROJECT', project: updated })
+        const thunks: (() => Promise<void>)[] = [() => saveProject(updated)]
+        if (action.stage === 'finalizado' && !s.commissions.some(c => c.projectId === action.id)) {
+          const seller = s.sellers.find(x => x.id === proj.seller)
+          const amount = Math.round((proj.freight + proj.install) * (seller ? seller.rate : 0.04))
+          const commission: Commission = { id: uid('cm'), projectId: action.id, seller: proj.seller, amount, status: 'pending', month: curMonth() }
+          rawDispatch({ type: 'UPSERT_COMMISSION', commission })
+          thunks.push(() => saveCommission(commission))
+        }
+        const stg = STAGE_MAP[action.stage]
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: stg.icon, who: whoName(s), txt: `movió a ${stg.short}`, tgt: proj.code, kind: 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        persist(thunks); return
+      }
+
+      case 'SAVE_PROJECT': {
+        const isNew = !action.project.id || !s.projects.some(p => p.id === action.project.id)
+        const full: Project = isNew
+          ? { ...(action.project as Project), id: action.project.id ?? uid('p'), created: today(), updated: today() }
+          : { ...(action.project as Project), updated: today() }
+        rawDispatch({ type: 'UPSERT_PROJECT', project: full })
+        const thunks: (() => Promise<void>)[] = [() => saveProject(full)]
+        if (isNew) {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'flag', who: whoName(s), txt: 'registró nueva venta', tgt: full.code, kind: 'new' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        persist(thunks); return
+      }
+      case 'DELETE_PROJECT':
+        rawDispatch({ type: 'REMOVE_PROJECT', id: action.id })
+        persist([() => apiDeleteProject(action.id)]); return
+
+      case 'SAVE_SUPPLIER': {
+        const full: Supplier = { ...(action.supplier as Supplier), id: action.supplier.id ?? uid('s') }
+        rawDispatch({ type: 'UPSERT_SUPPLIER', supplier: full })
+        persist([() => saveSupplierRow(full)]); return
+      }
+      case 'TOGGLE_SUPPLIER': {
+        const sup = s.suppliers.find(x => x.id === action.id); if (!sup) return
+        const updated: Supplier = { ...sup, active: !sup.active }
+        rawDispatch({ type: 'UPSERT_SUPPLIER', supplier: updated })
+        persist([() => saveSupplierRow(updated)]); return
+      }
+
+      case 'SAVE_ORDER': {
+        const full: Order = { ...(action.order as Order), id: action.order.id ?? uid('oc') }
+        rawDispatch({ type: 'UPSERT_ORDER', order: full })
+        persist([() => saveOrder(full)]); return
+      }
+      case 'DELETE_ORDER':
+        rawDispatch({ type: 'REMOVE_ORDER', id: action.id })
+        persist([() => apiDeleteOrder(action.id)]); return
+
+      case 'SAVE_PAYMENT': {
+        const full: Payment = { ...(action.payment as Payment), id: action.payment.id ?? uid('pg') }
+        rawDispatch({ type: 'UPSERT_PAYMENT', payment: full })
+        persist([() => savePayment(full)]); return
+      }
+      case 'DELETE_PAYMENT':
+        rawDispatch({ type: 'REMOVE_PAYMENT', id: action.id })
+        persist([() => apiDeletePayment(action.id)]); return
+
+      case 'SAVE_CLIENT_PAYMENT': {
+        const full: ClientPayment = { ...(action.payment as ClientPayment), id: action.payment.id ?? uid('cp') }
+        rawDispatch({ type: 'UPSERT_CLIENT_PAYMENT', payment: full })
+        persist([() => saveClientPayment(full)]); return
+      }
+      case 'DELETE_CLIENT_PAYMENT':
+        rawDispatch({ type: 'REMOVE_CLIENT_PAYMENT', id: action.id })
+        persist([() => apiDeleteClientPayment(action.id)]); return
+
+      case 'SAVE_CLIENT': {
+        const existing = s.clients.find(c => c.id === action.client.id)
+        const full: Client = {
+          ...(action.client as Client),
+          id: action.client.id ?? uid('c'),
+          since: action.client.since ?? existing?.since ?? today(),
+        }
+        rawDispatch({ type: 'UPSERT_CLIENT', client: full })
+        persist([() => saveClientRow(full)]); return
+      }
+
+      case 'TOGGLE_COMMISSION': {
+        const com = s.commissions.find(c => c.id === action.id); if (!com) return
+        const updated: Commission = { ...com, status: com.status === 'paid' ? 'pending' : 'paid' }
+        rawDispatch({ type: 'UPSERT_COMMISSION', commission: updated })
+        persist([() => saveCommission(updated)]); return
+      }
+
+      case 'SAVE_SELLER': {
+        const full: Seller = { ...(action.seller as Seller), id: action.seller.id ?? uid('v') }
+        rawDispatch({ type: 'UPSERT_SELLER', seller: full })
+        persist([() => saveSeller(full)]); return
+      }
+      case 'DELETE_SELLER':
+        rawDispatch({ type: 'REMOVE_SELLER', id: action.id })
+        persist([() => apiDeleteSeller(action.id)]); return
+    }
+  }, [persist])
+
+  // Sesión Supabase: al montar restaura la sesión (si la hay) y, cuando hay
+  // usuario, carga su perfil + TODOS los datos. Al cerrar sesión, limpia.
+  React.useEffect(() => {
+    let active = true
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return
+      if (session?.user) {
+        fetchMyProfile()
+          .then(profile => {
+            if (!active || !profile) return
+            if (!profile.active) { void signOut(); return }   // usuario desactivado
+            rawDispatch({ type: 'LOGIN', user: profile })
+            loadAll()
+              .then(data => { if (active) rawDispatch({ type: 'HYDRATE', data }) })
+              .catch(err => console.error('[supabase] No se pudieron cargar los datos:', err))
+          })
+          .catch(err => console.error('[supabase] Error cargando el perfil:', err))
+      } else {
+        rawDispatch({ type: 'LOGOUT' })
+      }
+    })
+
+    return () => { active = false; sub.subscription.unsubscribe() }
+  }, [])
+
+  const value = React.useMemo<StoreValue>(() => ({ state, dispatch }), [state, dispatch])
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>
 }
 

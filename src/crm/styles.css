@@ -148,8 +148,11 @@ body.light .brand-logo-dark { @apply hidden; }
 
 /* ---- Roles (badges) ---- */
 .badge-role { @apply inline-flex items-center text-[10.5px] font-semibold uppercase tracking-[0.04em] px-2 py-[2px] rounded-full; }
-.role-admin  { color: var(--acc-bright); background: var(--acc-ghost-2); }
-.role-ventas { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.role-admin     { color: var(--acc-bright); background: var(--acc-ghost-2); }
+.role-ventas    { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.role-logistica { color: #38bdf8; background: color-mix(in srgb, #38bdf8 16%, transparent); }
+.role-almacen   { color: #34d399; background: color-mix(in srgb, #34d399 16%, transparent); }
+.role-direccion { color: #c084fc; background: color-mix(in srgb, #c084fc 16%, transparent); }
 
 /* ---- Login ---- */
 .login-wrap { @apply min-h-screen w-full flex flex-col items-center justify-center gap-5 p-6; background: var(--bg-0); }

@@ -1,26 +1,35 @@
 // ============================================================
-//  LOGIN — autenticación (demo, sin backend)
+//  LOGIN — autenticación con Supabase Auth
 // ============================================================
 import * as React from 'react'
-import { useStore } from '../../core/data'
+import { signIn } from '../../core/api'
 import { Icon } from '../../core/icons'
 import strakkLogo from '../../../assets/logos/strakk_logo.png'
 import strakkLogoBlanco from '../../../assets/logos/strakk_logo_blanco.png'
 import nebulaiLogo from '../../../assets/logos/nebulai_logo.png'
 
 export function LoginPage() {
-  const { state, dispatch } = useStore()
   const [email, setEmail] = React.useState('')
   const [password, setPassword] = React.useState('')
   const [show, setShow] = React.useState(false)
   const [error, setError] = React.useState('')
+  const [loading, setLoading] = React.useState(false)
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const user = state.users.find(u => u.email.trim().toLowerCase() === email.trim().toLowerCase() && u.password === password)
-    if (!user) { setError('Correo o contraseña incorrectos.'); return }
-    if (!user.active) { setError('Este usuario está desactivado. Contacta al administrador.'); return }
-    dispatch({ type: 'LOGIN', user })
+    setError('')
+    setLoading(true)
+    try {
+      // Si tiene éxito, el listener de sesión (en data.tsx) hace el LOGIN
+      // y carga los datos. Aquí solo manejamos los errores.
+      await signIn(email.trim(), password)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : ''
+      if (/invalid login credentials/i.test(msg)) setError('Correo o contraseña incorrectos.')
+      else if (/email not confirmed/i.test(msg)) setError('Tu cuenta aún no está confirmada. Contacta al administrador.')
+      else setError('No se pudo iniciar sesión. Revisa tu conexión e intenta de nuevo.')
+      setLoading(false)
+    }
   }
 
   return (
@@ -58,13 +67,9 @@ export function LoginPage() {
           </div>
         </label>
 
-        <button type="submit" className="btn btn-primary login-btn"><Icon name="arrowRight" size={16} /> Entrar</button>
-
-        <div className="login-demo">
-          <div className="login-demo-title">Accesos de prueba</div>
-          <div className="login-demo-row"><span className="badge-role role-admin">Admin</span> admin@ccracks.mx · admin123</div>
-          <div className="login-demo-row"><span className="badge-role role-ventas">Ventas</span> carlos@ccracks.mx · ventas123</div>
-        </div>
+        <button type="submit" className={'btn btn-primary login-btn' + (loading ? ' opacity-60' : '')} disabled={loading}>
+          <Icon name="arrowRight" size={16} /> {loading ? 'Entrando…' : 'Entrar'}
+        </button>
       </form>
 
       <div className="login-credit">

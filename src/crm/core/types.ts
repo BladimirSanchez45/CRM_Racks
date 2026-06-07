@@ -34,14 +34,14 @@ export interface Seller {
   rate: number
 }
 
-/** Roles de acceso. Por ahora todos ven todo; a futuro 'ventas' se limitará. */
-export type Role = 'admin' | 'ventas'
+/** Roles de acceso. Por ahora todos ven todo; a futuro se limitará por rol. */
+export type Role = 'admin' | 'ventas' | 'logistica' | 'almacen' | 'direccion'
 
 export interface User {
   id: string
   name: string
   email: string
-  password: string        // demo: texto plano, sin backend
+  password?: string       // solo se usa al CREAR/cambiar (lo maneja Supabase Auth, no se guarda en la tabla)
   role: Role
   initials: string
   title?: string          // puesto / cargo
@@ -255,9 +255,11 @@ export type ClientInput = Omit<Client, 'id' | 'since'> & {
   since?: string
 }
 export type UserInput = Omit<User, 'id'> & { id?: string }
+export type SellerInput = Omit<Seller, 'id'> & { id?: string }
 
 /** Acciones del store. */
 export type Action =
+  | { type: 'HYDRATE'; data: Partial<AppState> }
   | { type: 'MOVE_STAGE'; id: string; stage: StageId }
   | { type: 'SAVE_PROJECT'; project: ProjectInput }
   | { type: 'DELETE_PROJECT'; id: string }
@@ -271,8 +273,28 @@ export type Action =
   | { type: 'DELETE_CLIENT_PAYMENT'; id: string }
   | { type: 'SAVE_CLIENT'; client: ClientInput }
   | { type: 'TOGGLE_COMMISSION'; id: string }
+  | { type: 'SAVE_SELLER'; seller: SellerInput }
+  | { type: 'DELETE_SELLER'; id: string }
   | { type: 'LOGIN'; user: User }
   | { type: 'LOGOUT' }
-  | { type: 'SAVE_USER'; user: UserInput }
-  | { type: 'DELETE_USER'; id: string }
-  | { type: 'TOGGLE_USER'; id: string }
+
+/** Acciones PURAS del reducer (estado local). La capa de store traduce
+ *  las acciones de arriba a estas + persistencia en Supabase. */
+export type StateAction =
+  | { type: 'HYDRATE'; data: Partial<AppState> }
+  | { type: 'LOGIN'; user: User }
+  | { type: 'LOGOUT' }
+  | { type: 'UPSERT_PROJECT'; project: Project }
+  | { type: 'REMOVE_PROJECT'; id: string }
+  | { type: 'UPSERT_ORDER'; order: Order }
+  | { type: 'REMOVE_ORDER'; id: string }
+  | { type: 'UPSERT_PAYMENT'; payment: Payment }
+  | { type: 'REMOVE_PAYMENT'; id: string }
+  | { type: 'UPSERT_CLIENT_PAYMENT'; payment: ClientPayment }
+  | { type: 'REMOVE_CLIENT_PAYMENT'; id: string }
+  | { type: 'UPSERT_COMMISSION'; commission: Commission }
+  | { type: 'UPSERT_CLIENT'; client: Client }
+  | { type: 'UPSERT_SUPPLIER'; supplier: Supplier }
+  | { type: 'UPSERT_SELLER'; seller: Seller }
+  | { type: 'REMOVE_SELLER'; id: string }
+  | { type: 'PUSH_ACTIVITY'; activity: Activity }

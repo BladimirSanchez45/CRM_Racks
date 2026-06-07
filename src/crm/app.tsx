@@ -3,6 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { StoreProvider, useStore } from './core/data'
+import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { Icon, type IconName } from './core/icons'
 import { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakColor } from './core/tweaks-panel'
@@ -19,7 +20,6 @@ import { LoginPage } from './views/login/login'
 import type { Project } from './core/types'
 import strakkLogo from '../assets/logos/strakk_logo.png'
 import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
-import nebulaiLogo from '../assets/logos/nebulai_logo.png'
 
 type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
@@ -95,7 +95,7 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
             <div className="text-[12.5px] font-semibold truncate">{me?.name ?? 'Invitado'}</div>
             <div className="meta text-[10.5px] truncate">{me?.title || (me?.role === 'admin' ? 'Administrador' : 'Ventas')}</div>
           </div>
-          <button className="icon-btn shrink-0" title="Cerrar sesión" onClick={() => dispatch({ type: 'LOGOUT' })}><Icon name="logout" size={16} /></button>
+          <button className="icon-btn shrink-0" title="Cerrar sesión" onClick={() => { void signOut(); dispatch({ type: 'LOGOUT' }) }}><Icon name="logout" size={16} /></button>
         </div>
       </div>
     </aside>
