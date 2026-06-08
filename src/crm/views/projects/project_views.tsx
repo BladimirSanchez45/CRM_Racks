@@ -2,8 +2,8 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS, TODAY_ISO } from '../../core/data'
+import { Modal, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
@@ -17,7 +17,7 @@ export function CobroForm({ project, cobro, onClose }: { project?: Project; cobr
   const nextN = (pid: string) => Math.max(0, ...sel.clientPaymentsForProject(state, pid).map(c => c.n)) + 1
   const initPid = project?.id || cobro?.projectId || ''
   const [c, setC] = React.useState<CobroFormState>(() => cobro ? { ...cobro } : {
-    projectId: initPid, n: initPid ? nextN(initPid) : 1, date: '2026-06-05', amount: '', concept: '', method: '', status: 'Programado', comments: '',
+    projectId: initPid, n: initPid ? nextN(initPid) : 1, date: TODAY_ISO, amount: '', concept: '', method: '', status: 'Programado', comments: '',
   })
   const set = (k: keyof CobroFormState, v: unknown) => setC(s => ({ ...s, [k]: v }))
   const onPickProject = (pid: string) => setC(s => ({ ...s, projectId: pid, n: cobro ? s.n : (pid ? nextN(pid) : 1) }))
@@ -119,7 +119,7 @@ export function MoveStage({ project }: { project: Project }) {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)}></div>
-          <div className="absolute top-[110%] right-0 z-[31] bg-bg-3 border border-line-2 shadow-[var(--shadow-2)] min-w-[230px] p-[5px]">
+          <div className="absolute bottom-[115%] right-0 z-[31] bg-bg-3 border border-line-2 shadow-[var(--shadow-2)] min-w-[230px] p-[5px] rounded-[8px] max-h-[58vh] overflow-y-auto">
             <div className="label-k pt-2 px-2.5 pb-1">Mover a etapa</div>
             {STAGES.map(s => (
               <div key={s.id} onClick={() => { dispatch({ type: 'MOVE_STAGE', id: project.id, stage: s.id }); setOpen(false) }}
@@ -298,8 +298,17 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
 }
 
 /* ---------- Create / edit form ---------- */
+// Siguiente código consecutivo: PRY-2026-### (el mayor existente + 1).
+const nextProjectCode = (projects: Project[]) => {
+  const max = projects.reduce((m, p) => {
+    const mt = /(\d+)\s*$/.exec(p.code || '')
+    return mt ? Math.max(m, parseInt(mt[1], 10)) : m
+  }, 0)
+  return `PRY-2026-${String(max + 1).padStart(3, '0')}`
+}
+
 const blank = (): ProjectFormState => ({
-  code: 'PRY-2026-' + String(Math.floor(Math.random()*900)+100), stage: 'registro',
+  code: '', stage: 'registro',
   client: '', seller: '', city: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending',
   docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: docNo(), finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
@@ -307,10 +316,11 @@ const blank = (): ProjectFormState => ({
 
 export function ProjectForm({ project, onClose }: { project?: Project; onClose: () => void }) {
   const { state, dispatch } = useStore()
-  const [p, setP] = React.useState<ProjectFormState>(() => project ? JSON.parse(JSON.stringify(project)) : blank())
+  const [p, setP] = React.useState<ProjectFormState>(() => project ? JSON.parse(JSON.stringify(project)) : { ...blank(), code: nextProjectCode(state.projects) })
   const isNew = !project
   const set = (k: keyof ProjectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
-  const setDoc = (k: keyof ProjectDocs, name: string) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name, ok: !!name } } }))
+  const setDoc = (k: keyof ProjectDocs, v: { name: string; path: string }) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name: v.name, ok: !!v.name, ...(v.path ? { path: v.path } : {}) } } }))
+  const docFolder = `projects/${p.code || project?.id || 'nuevos'}`
 
   const valid = p.client && p.city && p.seller
   const ventaSub = +(p.ventaSubtotal || 0)
@@ -335,10 +345,8 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
       <div className="grid grid-cols-3 gap-3.5">
         <Field label="Código de proyecto"><Input className="input mono" value={p.code} onChange={e => set('code', e.target.value)} /></Field>
         <Field label="Cliente">
-          <Select value={p.client} onChange={e => set('client', e.target.value)}>
-            <option value="">Selecciona…</option>
-            {state.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
+          <Combobox value={p.client} onChange={v => set('client', v)} placeholder="Buscar cliente…"
+            options={state.clients.map(c => ({ value: c.id, label: c.name, sub: c.rfc || c.city }))} />
         </Field>
         <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey, N.L." /></Field>
         <Field label="Sistema vendido"><Input value={p.sistemaVendido || ''} onChange={e => set('sistemaVendido', e.target.value)} placeholder="Ej. Rack selectivo" /></Field>
@@ -380,7 +388,7 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
         <div className="label-k mb-2">Documentos</div>
         <div className="grid grid-cols-2 gap-3.5">
           {DOC_LABELS.map(d => (
-            <FileField key={d.key} label={d.label} value={p.docs[d.key].name} onChange={n => setDoc(d.key, n)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
+            <FileField key={d.key} label={d.label} value={p.docs[d.key].name} path={p.docs[d.key].path} folder={docFolder} onChange={v => setDoc(d.key, v)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
           ))}
         </div>
       </div>

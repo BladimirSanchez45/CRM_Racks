@@ -1,83 +1,139 @@
 // ============================================================
-//  COBRANZA — cobros que el CLIENTE nos hace por cada proyecto
+//  COBRANZA — estado de cobro por PROYECTO (una fila por proyecto)
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort } from '../../core/data'
-import { Badge, Empty, KPI } from '../../core/ui'
+import { Modal, Badge, Empty, KPI } from '../../core/ui'
 import { CobroForm } from '../projects/project_views'
 import { Icon } from '../../core/icons'
-import type { ClientPayment, ClientPaymentStatus } from '../../core/types'
+import type { Project, ClientPayment, ClientPaymentStatus } from '../../core/types'
 
-const COBRO_STATES: ClientPaymentStatus[] = ['Cobrado', 'Programado', 'Cancelado']
 const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)', Programado: 'var(--warn)', Cancelado: 'var(--tx-3)' }
+
+type Estado = 'Cobrado' | 'Parcial' | 'Sin cobro'
+const ESTADO_COLOR: Record<Estado, string> = { Cobrado: 'var(--ok)', Parcial: 'var(--warn)', 'Sin cobro': 'var(--danger)' }
+const estadoDe = (total: number, cobrado: number): Estado =>
+  cobrado <= 0 ? 'Sin cobro' : (cobrado >= total - 0.5 ? 'Cobrado' : 'Parcial')
+
+/* ---- Detalle de cobranza de un proyecto (registrar/ver cobros) ---- */
+function CobranzaDetail({ project, onClose }: { project: Project; onClose: () => void }) {
+  const { state, dispatch } = useStore()
+  const p = state.projects.find(x => x.id === project.id) || project
+  const cobros = sel.clientPaymentsForProject(state, p.id)
+  const total = sel.projectTotalConIva(p)
+  const cobrado = sel.projectCobrado(state, p.id)
+  const saldo = sel.projectSaldoCliente(state, p)
+  const [cobro, setCobro] = React.useState<ClientPayment | {} | null>(null)
+  const acumOf = (c: ClientPayment) => cobros.filter(x => x.status !== 'Cancelado' && x.n <= c.n).reduce((a, x) => a + x.amount, 0)
+
+  return (
+    <Modal width={720} icon="download" title={`${p.code} · ${sel.clientName(state, p.client)}`} sub="Cobranza del proyecto" onClose={onClose}
+      footer={<><div className="flex-1"></div><button className="btn btn-primary" onClick={() => setCobro({})}><Icon name="plus" size={15} /> Registrar cobro</button></>}>
+      <div className="grid grid-cols-3 gap-3 mb-4">
+        <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Monto total (c/IVA)</div><div className="font-display font-bold text-[17px] mt-0.5">{fmtMoney(total)}</div></div>
+        <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Cobrado</div><div className="font-display font-bold text-[17px] mt-0.5 text-ok">{fmtMoney(cobrado)}</div></div>
+        <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Saldo por cobrar</div><div className="font-display font-bold text-[17px] mt-0.5" style={{ color: saldo > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldo)}</div></div>
+      </div>
+      {cobros.length === 0 ? (
+        <div className="text-center py-10 text-[13px] text-tx-2">
+          <Icon name="alert" size={26} className="mx-auto mb-2 text-warn opacity-70" />
+          Sin cobros registrados.<br />Registra el <strong>anticipo</strong> para poder avanzar a la orden de compra.
+        </div>
+      ) : (
+        <div className="border border-line rounded-[8px] overflow-hidden">
+          <table className="tbl">
+            <thead><tr><th>#</th><th>Fecha</th><th>Concepto</th><th className="num">Importe</th><th className="num">Acum.</th><th>Forma</th><th>Estado</th><th></th></tr></thead>
+            <tbody>
+              {cobros.map(c => (
+                <tr key={c.id} style={{ cursor: 'default' }}>
+                  <td className="mono">{c.n}</td>
+                  <td className="num text-tx-1 text-[12px]">{fmtDateShort(c.date)}</td>
+                  <td className="text-[12.5px]">{c.concept || '—'}</td>
+                  <td className="num">{fmtMoney(c.amount)}</td>
+                  <td className="num text-[12px]">{fmtMoney(acumOf(c))}<div className="meta">de {fmtMoney(total)}</div></td>
+                  <td className="text-tx-1 text-[12px]">{c.method || '—'}</td>
+                  <td><Badge color={COBRO_COLOR[c.status]}>{c.status}</Badge></td>
+                  <td><div className="flex gap-1 justify-end">
+                    <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setCobro(c)}><Icon name="edit" size={13} /></button>
+                    <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => dispatch({ type: 'DELETE_CLIENT_PAYMENT', id: c.id })}><Icon name="trash" size={13} /></button>
+                  </div></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {cobro && <CobroForm project={p} cobro={'id' in cobro ? cobro : undefined} onClose={() => setCobro(null)} />}
+    </Modal>
+  )
+}
 
 export function CobranzaPage() {
   const { state } = useStore()
-  const [cobroForm, setCobroForm] = React.useState<ClientPayment | {} | null>(null)
-  const [fCobro, setFCobro] = React.useState('')
+  const [detail, setDetail] = React.useState<Project | null>(null)
+  const [q, setQ] = React.useState('')
 
-  const rows = state.clientPayments
-    .map(c => ({ c, project: state.projects.find(x => x.id === c.projectId) }))
-    .filter(r => r.project)
-    .filter(r => !fCobro || r.c.status === fCobro)
-    .sort((a, b) => (a.c.date < b.c.date ? 1 : -1))
-  const totalCobrado = state.clientPayments.filter(c => c.status === 'Cobrado').reduce((a, c) => a + c.amount, 0)
-  const totalProg = state.clientPayments.filter(c => c.status === 'Programado').reduce((a, c) => a + c.amount, 0)
-  // acumulado del proyecto hasta este cobro (por No., sin contar cancelados)
-  const acumOf = (c: ClientPayment) =>
-    state.clientPayments.filter(x => x.projectId === c.projectId && x.status !== 'Cancelado' && x.n <= c.n).reduce((a, x) => a + x.amount, 0)
+  const rows = state.projects.map(p => {
+    const total = sel.projectTotalConIva(p)
+    const cobrado = sel.projectCobrado(state, p.id)
+    const cobros = sel.clientPaymentsForProject(state, p.id)
+    const formas = Array.from(new Set(cobros.filter(c => c.status !== 'Cancelado' && c.method).map(c => c.method)))
+    const coment = cobros.map(c => c.comments).filter(Boolean).join(' · ')
+    return { p, client: sel.clientName(state, p.client), total, cobrado, saldo: total - cobrado, estado: estadoDe(total, cobrado), forma: formas.join(', '), coment }
+  })
+
+  const needle = q.trim().toLowerCase()
+  const filtered = needle
+    ? rows.filter(r => `${r.p.code} ${r.client} ${r.total} ${r.cobrado} ${fmtMoney(r.total)} ${fmtMoney(r.cobrado)}`.toLowerCase().includes(needle))
+    : rows
+  const ord: Record<Estado, number> = { 'Sin cobro': 0, Parcial: 1, Cobrado: 2 }
+  const sorted = [...filtered].sort((a, b) => ord[a.estado] - ord[b.estado] || (a.p.code < b.p.code ? 1 : -1))
+
+  const totalCobrado = rows.reduce((a, r) => a + r.cobrado, 0)
+  const totalPorCobrar = rows.reduce((a, r) => a + Math.max(0, r.saldo), 0)
+  const sinCobro = rows.filter(r => r.estado === 'Sin cobro').length
 
   return (
     <div>
       <div className="spread mb-[18px]">
-        <div className="sec-title m-0"><h2>Cobranza</h2><span className="sub">Cobros de clientes por proyecto</span></div>
-        <button className="btn btn-primary" onClick={() => setCobroForm({})}><Icon name="plus" size={15} /> Nuevo cobro</button>
+        <div className="sec-title m-0"><h2>Cobranza</h2><span className="sub">Estado de cobro por proyecto</span></div>
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">
         <KPI label="Total cobrado" value={totalCobrado} format={fmtMoney} icon="money" accent />
-        <KPI label="Programado por cobrar" value={totalProg} format={fmtMoney} icon="calendar" foot="Pendiente de entrar" />
-        <KPI label="Cobros registrados" value={state.clientPayments.length} icon="clients" />
+        <KPI label="Por cobrar (saldo)" value={totalPorCobrar} format={fmtMoney} icon="calendar" foot="Pendiente de entrar" />
+        <KPI label="Proyectos sin cobro" value={sinCobro} icon="alert" />
       </div>
 
-      <div className="flex gap-2 mb-3.5 items-center flex-wrap">
-        <span className="label-k">Filtrar:</span>
-        <div className="seg">
-          <button className={!fCobro ? 'on' : ''} onClick={() => setFCobro('')}>Todos</button>
-          {COBRO_STATES.map(s => <button key={s} className={fCobro === s ? 'on' : ''} onClick={() => setFCobro(s)}>{s}</button>)}
-        </div>
-        <span className="meta">{rows.length} de {state.clientPayments.length}</span>
+      <div className="relative mb-4 max-w-[440px]">
+        <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+        <input className="input pl-[34px]" placeholder="Buscar por proyecto, cliente, monto total o cobrado…" value={q} onChange={e => setQ(e.target.value)} />
       </div>
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>Proyecto</th><th>Cliente</th><th className="num">No.</th><th>Fecha</th><th className="num">Importe</th><th className="num">Acumulado</th><th className="num">Saldo</th><th>Concepto</th><th>Estado</th><th>Forma pago</th><th>Comentarios</th></tr></thead>
+            <thead><tr><th>Proyecto</th><th>Cliente</th><th className="num">Monto total</th><th className="num">Cobrado</th><th className="num">Saldo</th><th>Estado</th><th>Forma de pago</th><th>Comentarios</th></tr></thead>
             <tbody>
-              {rows.map(({ c, project }) => {
-                const total = sel.projectTotalConIva(project!); const acum = acumOf(c); const saldo = total - acum
-                return (
-                <tr key={c.id} onClick={() => setCobroForm(c)}>
-                  <td><span className="mono text-acc font-semibold">{project!.code}</span></td>
-                  <td className="text-[12.5px]">{sel.clientName(state, project!.client)}</td>
-                  <td className="num mono">{c.n}</td>
-                  <td className="num text-tx-1 text-[12px]">{fmtDateShort(c.date)}</td>
-                  <td className="num font-semibold">{fmtMoney2(c.amount)}</td>
-                  <td className="num text-[12px]">{fmtMoney(acum)}<div className="meta">de {fmtMoney(total)}</div></td>
-                  <td className="num text-[12px]" style={{ color: saldo > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldo)}</td>
-                  <td className="text-tx-1 text-[12px]">{c.concept || '—'}</td>
-                  <td><Badge color={COBRO_COLOR[c.status]}>{c.status}</Badge></td>
-                  <td className="text-tx-1 text-[12px]">{c.method || '—'}</td>
-                  <td className="text-tx-2 text-[12px]">{c.comments || '—'}</td>
+              {sorted.map(r => (
+                <tr key={r.p.id} onClick={() => setDetail(r.p)}>
+                  <td><span className="mono text-acc font-semibold">{r.p.code}</span></td>
+                  <td className="text-[12.5px]">{r.client}</td>
+                  <td className="num font-semibold">{fmtMoney2(r.total)}</td>
+                  <td className="num text-ok">{fmtMoney2(r.cobrado)}</td>
+                  <td className="num" style={{ color: r.saldo > 0.5 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney2(Math.max(0, r.saldo))}</td>
+                  <td><Badge color={ESTADO_COLOR[r.estado]}>{r.estado}</Badge></td>
+                  <td className="text-tx-1 text-[12px]">{r.forma || '—'}</td>
+                  <td className="text-tx-2 text-[12px] max-w-[220px] truncate" title={r.coment}>{r.coment || '—'}</td>
                 </tr>
-              ) })}
+              ))}
             </tbody>
           </table>
         </div>
-        {rows.length === 0 && <Empty icon="money">Sin cobros registrados</Empty>}
+        {sorted.length === 0 && <Empty icon="download">Ningún proyecto coincide con la búsqueda</Empty>}
       </div>
 
-      {cobroForm && <CobroForm cobro={'id' in cobroForm ? cobroForm : undefined} onClose={() => setCobroForm(null)} />}
+      {detail && <CobranzaDetail project={detail} onClose={() => setDetail(null)} />}
     </div>
   )
 }

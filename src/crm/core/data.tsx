@@ -61,8 +61,9 @@ export const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct
 export const MESES_L = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 export const fmtDate = (d?: string) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return `${String(x.getDate()).padStart(2,'0')} ${MESES[x.getMonth()]} ${x.getFullYear()}` }
 export const fmtDateShort = (d?: string) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return `${String(x.getDate()).padStart(2,'0')}/${String(x.getMonth()+1).padStart(2,'0')}/${String(x.getFullYear()).slice(2)}` }
-export const TODAY = new Date('2026-06-02T00:00:00')
-export const TODAY_ISO = '2026-06-02'
+// "Hoy" real (medianoche local), para que los días/vencimientos usen la fecha actual.
+export const TODAY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })()
+export const TODAY_ISO = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, '0')}-${String(TODAY.getDate()).padStart(2, '0')}`
 export const daysBetween = (d?: string) => { if (!d) return null; const x = new Date(d + 'T00:00:00'); return Math.round((x.getTime() - TODAY.getTime()) / 86400000) }
 export const ago = (d: string) => {
   const x = new Date(d); const diff = Math.round((TODAY.getTime() - x.getTime()) / 86400000)

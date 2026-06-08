@@ -2,7 +2,7 @@
 //  PAGOS — réplica de la hoja "Pagos" del Excel (abonos por OC)
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, TODAY_ISO } from '../../core/data'
 import { Modal, Field, Input, Select, MoneyInput, PaymentBadge, Empty, KPI } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Payment, PaymentInput, PaymentStatus } from '../../core/types'
@@ -23,7 +23,7 @@ type PaymentFormState = {
 function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const [p, setP] = React.useState<PaymentFormState>(() => payment ? { ...payment } : {
-    orderId: '', n: 1, date: '2026-06-02', amount: '', method: '', status: 'Programado', comments: '',
+    orderId: '', n: 1, date: TODAY_ISO, amount: '', method: '', status: 'Programado', comments: '',
   })
   const set = (k: keyof PaymentFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   // sugiere el siguiente No. de abono al elegir OC

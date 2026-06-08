@@ -4,8 +4,8 @@
 //  asignar" y se asigna proveedor → 3) se crea la OC (PDF).
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween, MESES, uid } from '../../core/data'
-import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg } from '../../core/ui'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween, MESES, uid, TODAY_ISO } from '../../core/data'
+import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { AppState, OcItem, Order, OrderInput, Payment, PaymentInput, PaymentStatus, Project } from '../../core/types'
 
@@ -83,7 +83,7 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
   const { state, dispatch } = useStore()
   const nextN = Math.max(0, ...sel.paymentsForOrder(state, order.id).map(p => p.n)) + 1
   const [a, setA] = React.useState<AbonoFormState>(() => payment ? { ...payment } : {
-    orderId: order.id, n: nextN, date: '2026-06-02', amount: '', method: '', status: 'Programado', comments: '',
+    orderId: order.id, n: nextN, date: TODAY_ISO, amount: '', method: '', status: 'Programado', comments: '',
   })
   const set = (k: keyof AbonoFormState, v: unknown) => setA(s => ({ ...s, [k]: v }))
   const valid = a.date && a.amount
@@ -129,6 +129,7 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
   const pct = sel.ocPct(state, o)
   const next = sel.ocNextPayment(state, o.id)
   const days = next ? daysBetween(next) : null
+  const eta = o.deliveryDate ? daysBetween(o.deliveryDate) : null
   const items = o.items || []
   const [abono, setAbono] = React.useState<Payment | {} | null>(null)
 
@@ -157,10 +158,12 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
 
       <div className="grid grid-cols-2 gap-x-6 gap-y-2 mb-5 text-[13px]">
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Fecha OC</span><span>{fmtDate(o.date)}</span></div>
+        <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Entrega estimada</span><span>{o.deliveryDate ? <>{fmtDate(o.deliveryDate)} {eta != null && <span className="mono text-[11px]" style={{ color: eta <= 3 ? 'var(--danger)' : eta <= 10 ? 'var(--warn)' : 'var(--ok)' }}>({eta < 0 ? `${-eta}d vencido` : eta + 'd'})</span>}</> : '—'}</span></div>
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Proyecto</span><span>{project ? `${project.code} · ${sel.clientName(state, project.client)}` : '—'}</span></div>
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Condiciones</span><span className="text-right">{o.conditions}</span></div>
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Responsable</span><span>{o.responsible || '—'}</span></div>
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Próximo pago</span><span>{next ? <>{fmtDate(next)} {days != null && <span className="mono text-[11px]" style={{ color: days < 0 ? 'var(--danger)' : days < 7 ? 'var(--warn)' : 'var(--tx-2)' }}>({days < 0 ? `${-days}d vencido` : days + 'd'})</span>}</> : '—'}</span></div>
+        <div className="flex justify-between items-center border-b border-line-soft py-[7px]"><span className="label-k">OC firmada</span><span>{o.filePath ? <DocChip doc={{ name: o.file || 'OC firmada', ok: true, path: o.filePath }} label="OC firmada" /> : (o.file || '—')}</span></div>
       </div>
 
       {items.length > 0 && (
@@ -222,7 +225,7 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
 type OcFormState = {
   id?: string; number: string; date: string; supplierId: string; projectId?: string
   description: string; conditions: string; amount: number | string; responsible: string
-  file: string; items: OcItem[]; cancelled?: boolean
+  file: string; filePath?: string; deliveryDate?: string; items: OcItem[]; cancelled?: boolean
 }
 function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => void }) {
   const { state, dispatch } = useStore()
@@ -230,7 +233,7 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
   const [o, setO] = React.useState<OcFormState>(() => ({
     id: order?.id,
     number: order?.number || ('OC-' + String(Math.floor(Math.random() * 9000) + 1000)),
-    date: order?.date || '2026-06-02',
+    date: order?.date || TODAY_ISO,
     supplierId: order?.supplierId || '',
     projectId: order?.projectId,
     description: order?.description || '',
@@ -238,6 +241,8 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
     amount: order?.amount ?? '',
     responsible: order?.responsible || 'Administración',
     file: order?.file || '',
+    filePath: order?.filePath || '',
+    deliveryDate: order?.deliveryDate || '',
     items: order?.items ? JSON.parse(JSON.stringify(order.items)) : [],
     cancelled: order?.cancelled || false,
   }))
@@ -296,6 +301,7 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
           ? <Field label="Monto total (con IVA)"><div className="input mono flex items-center">{fmtMoney2(total)}</div></Field>
           : <Field label="Monto total (MXN)"><MoneyInput value={o.amount} onChange={v => set('amount', v)} /></Field>}
         <Field label="Responsable (vendedor)"><Input value={o.responsible} onChange={e => set('responsible', e.target.value)} /></Field>
+        <Field label="Fecha estimada de entrega"><Input type="date" value={o.deliveryDate || ''} onChange={e => set('deliveryDate', e.target.value)} /></Field>
       </div>
 
       {/* materiales */}
@@ -336,7 +342,7 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3.5 items-end">
-        <Field label="Archivo adjunto (OC firmada)"><FileField label="" value={o.file} onChange={n => set('file', n)} accept=".pdf,.jpg,.png" /></Field>
+        <Field label="Archivo adjunto (OC firmada)"><FileField label="" value={o.file} path={o.filePath} folder={`orders/${o.number || order?.id || 'nuevas'}`} onChange={v => setO(s => ({ ...s, file: v.name, filePath: v.path }))} accept=".pdf,.jpg,.png" /></Field>
         <Field label="Estado">
           <button type="button" className="btn h-[38px] justify-center w-full" onClick={() => set('cancelled', !o.cancelled)} style={{ color: o.cancelled ? 'var(--danger)' : 'var(--tx-2)' }}>
             {o.cancelled ? 'Cancelada' : 'Activa'}
@@ -525,7 +531,7 @@ export function OrdersPage() {
                 <thead><tr>
                   <th>OC</th><th>Fecha</th><th>Proveedor</th><th>Descripción</th><th>Condiciones</th>
                   <th className="num">Monto</th><th className="num">Pagado</th><th className="num">Saldo</th><th className="num">%</th>
-                  <th>Próx. pago</th><th className="num">Días</th><th>Estatus</th><th>Responsable</th>
+                  <th>Entrega est.</th><th className="num">Días</th><th>Estatus</th><th>Responsable</th>
                 </tr></thead>
                 <tbody>
                   {list.map(o => {
@@ -533,8 +539,7 @@ export function OrdersPage() {
                     const paid = sel.ocPaid(state, o.id)
                     const balance = sel.ocBalance(state, o)
                     const pct = sel.ocPct(state, o)
-                    const next = sel.ocNextPayment(state, o.id)
-                    const days = next ? daysBetween(next) : null
+                    const eta = o.deliveryDate ? daysBetween(o.deliveryDate) : null
                     return (
                       <tr key={o.id} onClick={() => setDetail(o)}>
                         <td><span className="mono text-acc font-semibold">{o.number}</span></td>
@@ -546,8 +551,8 @@ export function OrdersPage() {
                         <td className="num text-ok">{fmtMoney(paid)}</td>
                         <td className="num" style={{ color: balance > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(balance)}</td>
                         <td className="num text-tx-2 text-[12px]">{(pct * 100).toFixed(0)}%</td>
-                        <td className="num text-tx-1 text-[12px]">{next ? fmtDateShort(next) : '—'}</td>
-                        <td className="num text-[12px]" style={{ color: days == null ? 'var(--tx-3)' : days < 0 ? 'var(--danger)' : days < 7 ? 'var(--warn)' : 'var(--tx-2)' }}>{days == null ? '—' : days < 0 ? `${-days}d` : days + 'd'}</td>
+                        <td className="num text-tx-1 text-[12px]">{o.deliveryDate ? fmtDateShort(o.deliveryDate) : '—'}</td>
+                        <td className="num text-[12px]" style={{ color: eta == null ? 'var(--tx-3)' : eta <= 3 ? 'var(--danger)' : eta <= 10 ? 'var(--warn)' : 'var(--ok)' }}>{eta == null ? '—' : eta < 0 ? `${-eta}d` : eta + 'd'}</td>
                         <td><OCStatus status={sel.ocStatus(state, o)} /></td>
                         <td className="text-tx-2 text-[12px]">{o.responsible}</td>
                       </tr>

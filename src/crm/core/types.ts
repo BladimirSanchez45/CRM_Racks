@@ -128,7 +128,9 @@ export interface Order {
   conditions: string        // Condiciones (texto libre, p.ej. "50% anticipo - 30 días finiquito")
   amount: number            // Monto Total (con IVA si hay materiales)
   responsible: string       // Responsable (vendedor)
-  file: string              // archivo adjunto (OC firmada)
+  file: string              // archivo adjunto (OC firmada) — nombre visible
+  filePath?: string         // ruta del adjunto en Supabase Storage
+  deliveryDate?: string     // fecha estimada de entrega de la OC
   projectId?: string        // proyecto asociado
   items?: OcItem[]          // lista de materiales (opcional)
   cancelled?: boolean       // override manual → Estatus "Cancelada"
@@ -162,10 +164,11 @@ export interface Payment {
   comments: string          // Comentarios
 }
 
-/** Referencia a un documento adjunto (solo se guarda el nombre). */
+/** Referencia a un documento adjunto. `path` = ruta en Supabase Storage. */
 export interface DocRef {
   name: string
   ok: boolean
+  path?: string
 }
 
 export interface ProjectDocs {

@@ -4,6 +4,7 @@
 import * as React from 'react'
 import { Icon, type IconName } from './icons'
 import { STAGES, STAGE_MAP, stageIndex } from './data'
+import { uploadDoc, deleteDoc, signedDocUrl } from './api'
 import type { DocRef, OcStatus, PaymentStatus, PayStatus, StageId } from './types'
 
 /* ---- Stage badge (colored, blueprint-y) ---- */
@@ -88,8 +89,9 @@ export function Rating({ value = 0, size = 13 }: { value?: number; size?: number
   )
 }
 
-/* ---- Document chip ---- */
+/* ---- Document chip (abre el visor si tiene archivo) ---- */
 export function DocChip({ doc, label }: { doc?: DocRef; label: string }) {
+  const [open, setOpen] = React.useState(false)
   if (!doc || !doc.ok) {
     return (
       <span className="doc-chip doc-missing" title={`${label}: faltante`}>
@@ -99,28 +101,90 @@ export function DocChip({ doc, label }: { doc?: DocRef; label: string }) {
     )
   }
   return (
-    <span className="doc-chip" title={doc.name}>
-      <Icon name="doc" size={14} />
-      <span className="nm">{doc.name}</span>
-    </span>
+    <>
+      <span className={'doc-chip' + (doc.path ? ' doc-clickable' : '')} title={doc.path ? `Ver ${doc.name}` : doc.name} onClick={doc.path ? () => setOpen(true) : undefined}>
+        <Icon name="doc" size={14} />
+        <span className="nm">{doc.name}</span>
+        {doc.path && <Icon name="eye" size={13} className="doc-eye" />}
+      </span>
+      {open && doc.path && <DocPreview path={doc.path} name={doc.name} onClose={() => setOpen(false)} />}
+    </>
   )
 }
 
-/* ---- File field (stores filename only) ---- */
-export function FileField({ label, value, onChange, accept }: { label: string; value?: string; onChange: (name: string) => void; accept?: string }) {
+/* ---- Visor de documento (URL firmada de Storage: PDF en iframe, imágenes inline) ---- */
+export function DocPreview({ path, name, onClose }: { path: string; name: string; onClose: () => void }) {
+  const [url, setUrl] = React.useState('')
+  const [err, setErr] = React.useState('')
+  React.useEffect(() => {
+    let active = true
+    signedDocUrl(path)
+      .then(u => { if (active) setUrl(u) })
+      .catch(() => { if (active) setErr('No se pudo cargar el documento.') })
+    return () => { active = false }
+  }, [path])
+  const isImg = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)
+  const isPdf = /\.pdf$/i.test(name)
+  return (
+    <Modal width={900} icon="doc" title={name} onClose={onClose}
+      footer={url ? <a className="btn btn-ghost" href={url} target="_blank" rel="noreferrer"><Icon name="download" size={15} /> Abrir / Descargar</a> : <span></span>}>
+      <div className="doc-preview">
+        {err ? <div className="text-tx-2 text-[13px] py-12 text-center">{err}</div>
+          : !url ? <div className="text-tx-3 text-[13px] py-12 text-center">Cargando…</div>
+          : isImg ? <img src={url} alt={name} />
+          : isPdf ? <iframe src={url} title={name} />
+          : <div className="text-tx-2 text-[13px] py-12 text-center">Sin vista previa para este tipo de archivo.<br /><a className="text-acc" href={url} target="_blank" rel="noreferrer">Descargar archivo</a></div>}
+      </div>
+    </Modal>
+  )
+}
+
+/* ---- File field (sube a Supabase Storage; guarda nombre + ruta) ---- */
+export function FileField({ label, value, path, folder, onChange, accept }: {
+  label: string
+  value?: string
+  path?: string
+  folder: string
+  onChange: (v: { name: string; path: string }) => void
+  accept?: string
+}) {
   const ref = React.useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = React.useState(false)
+  const [err, setErr] = React.useState('')
+  const [preview, setPreview] = React.useState(false)
+
+  const pick = async (file: File) => {
+    setBusy(true); setErr('')
+    try {
+      const p = await uploadDoc(file, folder)
+      onChange({ name: file.name, path: p })
+    } catch {
+      setErr('No se pudo subir el archivo.')
+    } finally {
+      setBusy(false)
+      if (ref.current) ref.current.value = ''
+    }
+  }
+  const clear = async () => {
+    if (path) { try { await deleteDoc(path) } catch { /* best-effort */ } }
+    onChange({ name: '', path: '' })
+  }
+
   return (
     <div className="field">
-      <label>{label}</label>
+      {label && <label>{label}</label>}
       <div className="flex gap-2">
         <div className={'doc-chip flex-1' + (value ? '' : ' doc-missing')}>
-          <Icon name="clip" size={14} />
-          <span className="nm">{value || 'Ningún archivo seleccionado'}</span>
+          <Icon name={value && !busy ? 'doc' : 'clip'} size={14} />
+          <span className="nm">{busy ? 'Subiendo…' : (value || 'Ningún archivo seleccionado')}</span>
         </div>
-        <button type="button" className="btn btn-sm btn-ghost" onClick={() => ref.current?.click()}>Examinar</button>
-        {value && <button type="button" className="btn btn-sm btn-ghost" onClick={() => onChange('')}><Icon name="close" size={13} /></button>}
+        {value && path && <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPreview(true)} title="Ver"><Icon name="eye" size={14} /></button>}
+        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => ref.current?.click()}>{value ? 'Cambiar' : 'Examinar'}</button>
+        {value && <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={clear}><Icon name="close" size={13} /></button>}
       </div>
-      <input ref={ref} type="file" accept={accept} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onChange(f.name) }} />
+      {err && <div className="text-[11.5px] mt-1" style={{ color: 'var(--danger)' }}>{err}</div>}
+      <input ref={ref} type="file" accept={accept} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f) }} />
+      {preview && path && <DocPreview path={path} name={value || 'documento'} onClose={() => setPreview(false)} />}
     </div>
   )
 }
@@ -132,6 +196,62 @@ export function Field({ label, children, span }: { label?: React.ReactNode; chil
 export function Input(props: React.InputHTMLAttributes<HTMLInputElement>) { return <input className="input" {...props} /> }
 export function TextArea(props: React.TextareaHTMLAttributes<HTMLTextAreaElement>) { return <textarea className="textarea" {...props} /> }
 export function Select({ children, className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) { return <select className={'select' + (className ? ' ' + className : '')} {...props}>{children}</select> }
+
+/* ---- Combobox: select con búsqueda (escribe y filtra) ---- */
+export interface ComboOption { value: string; label: string; sub?: string }
+export function Combobox({ value, onChange, options, placeholder = 'Selecciona…', emptyText = 'Sin resultados', max = 50 }: {
+  value: string
+  onChange: (v: string) => void
+  options: ComboOption[]
+  placeholder?: string
+  emptyText?: string
+  max?: number
+}) {
+  const [open, setOpen] = React.useState(false)
+  const [q, setQ] = React.useState('')
+  const wrap = React.useRef<HTMLDivElement>(null)
+  const selected = options.find(o => o.value === value)
+
+  React.useEffect(() => {
+    const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) { setOpen(false); setQ('') } }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [])
+
+  const needle = q.trim().toLowerCase()
+  const matches = needle ? options.filter(o => (o.label + ' ' + (o.sub || '')).toLowerCase().includes(needle)) : options
+  const shown = matches.slice(0, max)
+  const pick = (v: string) => { onChange(v); setOpen(false); setQ('') }
+
+  return (
+    <div className="combo" ref={wrap}>
+      <div className={'combo-input' + (open ? ' open' : '')} onClick={() => setOpen(true)}>
+        <Icon name="search" size={14} />
+        <input
+          value={open ? q : (selected?.label ?? '')}
+          placeholder={selected ? selected.label : placeholder}
+          onChange={e => { setQ(e.target.value); setOpen(true) }}
+          onFocus={() => setOpen(true)}
+        />
+        {value && <button type="button" className="combo-clear" title="Quitar" onClick={e => { e.stopPropagation(); onChange(''); setQ('') }}><Icon name="close" size={13} /></button>}
+        <Icon name="chevronDown" size={14} className="combo-caret" />
+      </div>
+      {open && (
+        <div className="combo-pop">
+          {shown.length === 0
+            ? <div className="combo-empty">{emptyText}</div>
+            : shown.map(o => (
+              <div key={o.value} className={'combo-opt' + (o.value === value ? ' on' : '')} onMouseDown={e => { e.preventDefault(); pick(o.value) }}>
+                <span className="combo-opt-label">{o.label}</span>
+                {o.sub && <span className="combo-opt-sub">{o.sub}</span>}
+              </div>
+            ))}
+          {matches.length > shown.length && <div className="combo-more">Mostrando {shown.length} de {matches.length} · sigue escribiendo para afinar</div>}
+        </div>
+      )}
+    </div>
+  )
+}
 
 /* ---- Campo de dinero: muestra el número con comas y "$"; devuelve el número ---- */
 const moneyClean = (s: string) => {

@@ -218,6 +218,8 @@ function mapOrder(r: any): Order {
     id: r.id, number: r.number, date: r.date ?? '', supplierId: r.supplier_id ?? '',
     description: r.description ?? '', conditions: r.conditions ?? '', amount: Number(r.amount ?? 0),
     responsible: r.responsible ?? '', file: r.file ?? '',
+    ...(r.file_path ? { filePath: r.file_path } : {}),
+    ...(r.delivery_date ? { deliveryDate: r.delivery_date } : {}),
     ...(r.project_id ? { projectId: r.project_id } : {}),
     ...(Array.isArray(r.items) && r.items.length ? { items: r.items } : {}),
     ...(r.cancelled ? { cancelled: true } : {}),
@@ -227,8 +229,8 @@ function orderRow(o: Order): Record<string, unknown> {
   return {
     id: o.id, number: o.number, date: orNull(o.date), supplier_id: o.supplierId,
     description: o.description, conditions: o.conditions, amount: o.amount,
-    responsible: o.responsible, file: o.file,
-    project_id: o.projectId ?? null, items: o.items ?? [], cancelled: !!o.cancelled,
+    responsible: o.responsible, file: o.file, file_path: o.filePath ?? null,
+    delivery_date: orNull(o.deliveryDate), project_id: o.projectId ?? null, items: o.items ?? [], cancelled: !!o.cancelled,
   }
 }
 export async function fetchOrders(): Promise<Order[]> {
@@ -323,6 +325,31 @@ export const saveSupplierRow = (s: Supplier) => upsert('suppliers', {
   dias_credito: s.diasCredito ?? null, cuenta_banco: s.cuentaBanco ?? null, prefijo: s.prefijo ?? null,
 })
 export const deleteSupplier = (id: string) => removeRow('suppliers', id)
+
+/* ---- Documentos (Supabase Storage, bucket privado "documentos") ---- */
+const DOC_BUCKET = 'documentos'
+
+/** Sube un archivo al bucket y devuelve su ruta (path) guardable. */
+export async function uploadDoc(file: File, folder: string): Promise<string> {
+  const safe = file.name.replace(/[^\w.\-]+/g, '_')
+  const path = `${folder}/${Date.now()}_${safe}`
+  const { error } = await supabase.storage.from(DOC_BUCKET).upload(path, file, { upsert: false })
+  if (error) throw error
+  return path
+}
+
+/** URL temporal firmada para ver/descargar un documento (por defecto 1 h). */
+export async function signedDocUrl(path: string, expiresSec = 3600): Promise<string> {
+  const { data, error } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, expiresSec)
+  if (error) throw error
+  return data.signedUrl
+}
+
+/** Borra un documento del bucket (best-effort). */
+export async function deleteDoc(path: string): Promise<void> {
+  const { error } = await supabase.storage.from(DOC_BUCKET).remove([path])
+  if (error) throw error
+}
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
