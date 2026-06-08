@@ -265,6 +265,7 @@ export type Action =
   | { type: 'DELETE_PROJECT'; id: string }
   | { type: 'SAVE_SUPPLIER'; supplier: SupplierInput }
   | { type: 'TOGGLE_SUPPLIER'; id: string }
+  | { type: 'DELETE_SUPPLIER'; id: string }
   | { type: 'SAVE_ORDER'; order: OrderInput }
   | { type: 'DELETE_ORDER'; id: string }
   | { type: 'SAVE_PAYMENT'; payment: PaymentInput }
@@ -272,6 +273,7 @@ export type Action =
   | { type: 'SAVE_CLIENT_PAYMENT'; payment: ClientPaymentInput }
   | { type: 'DELETE_CLIENT_PAYMENT'; id: string }
   | { type: 'SAVE_CLIENT'; client: ClientInput }
+  | { type: 'DELETE_CLIENT'; id: string }
   | { type: 'TOGGLE_COMMISSION'; id: string }
   | { type: 'SAVE_SELLER'; seller: SellerInput }
   | { type: 'DELETE_SELLER'; id: string }
@@ -294,7 +296,9 @@ export type StateAction =
   | { type: 'REMOVE_CLIENT_PAYMENT'; id: string }
   | { type: 'UPSERT_COMMISSION'; commission: Commission }
   | { type: 'UPSERT_CLIENT'; client: Client }
+  | { type: 'REMOVE_CLIENT'; id: string }
   | { type: 'UPSERT_SUPPLIER'; supplier: Supplier }
+  | { type: 'REMOVE_SUPPLIER'; id: string }
   | { type: 'UPSERT_SELLER'; seller: Seller }
   | { type: 'REMOVE_SELLER'; id: string }
   | { type: 'PUSH_ACTIVITY'; activity: Activity }

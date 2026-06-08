@@ -316,11 +316,13 @@ export const saveClientRow = (c: Client) => upsert('clients', {
   dias_credito: c.diasCredito ?? null, limite_credito: c.limiteCredito ?? null,
   metodo_pago: c.metodoPago ?? null, forma_pago: c.formaPago ?? null,
 })
+export const deleteClient = (id: string) => removeRow('clients', id)
 export const saveSupplierRow = (s: Supplier) => upsert('suppliers', {
   id: s.id, name: s.name, cat: s.cat, contact: s.contact, phone: s.phone, email: s.email, city: s.city,
   rating: s.rating, active: s.active, notes: s.notes, direccion: s.direccion ?? null,
   dias_credito: s.diasCredito ?? null, cuenta_banco: s.cuentaBanco ?? null, prefijo: s.prefijo ?? null,
 })
+export const deleteSupplier = (id: string) => removeRow('suppliers', id)
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {

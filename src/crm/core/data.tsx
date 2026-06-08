@@ -25,7 +25,7 @@ import {
   saveOrder, deleteOrder as apiDeleteOrder,
   savePayment, deletePayment as apiDeletePayment,
   saveClientPayment, deleteClientPayment as apiDeleteClientPayment,
-  saveCommission, saveClientRow, saveSupplierRow, saveSeller, deleteSeller as apiDeleteSeller,
+  saveCommission, saveClientRow, deleteClient as apiDeleteClient, saveSupplierRow, deleteSupplier as apiDeleteSupplier, saveSeller, deleteSeller as apiDeleteSeller,
   saveActivity,
 } from './api'
 import { supabase } from './supabase'
@@ -174,7 +174,9 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_CLIENT_PAYMENT': return { ...state, clientPayments: state.clientPayments.filter(c => c.id !== a.id) }
     case 'UPSERT_COMMISSION': return { ...state, commissions: upsertBy(state.commissions, a.commission) }
     case 'UPSERT_CLIENT': return { ...state, clients: upsertBy(state.clients, a.client) }
+    case 'REMOVE_CLIENT': return { ...state, clients: state.clients.filter(c => c.id !== a.id) }
     case 'UPSERT_SUPPLIER': return { ...state, suppliers: upsertBy(state.suppliers, a.supplier) }
+    case 'REMOVE_SUPPLIER': return { ...state, suppliers: state.suppliers.filter(s => s.id !== a.id) }
     case 'UPSERT_SELLER': return { ...state, sellers: upsertBy(state.sellers, a.seller) }
     case 'REMOVE_SELLER': return { ...state, sellers: state.sellers.filter(s => s.id !== a.id) }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
@@ -266,6 +268,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'UPSERT_SUPPLIER', supplier: updated })
         persist([() => saveSupplierRow(updated)]); return
       }
+      case 'DELETE_SUPPLIER':
+        rawDispatch({ type: 'REMOVE_SUPPLIER', id: action.id })
+        persist([() => apiDeleteSupplier(action.id)]); return
 
       case 'SAVE_ORDER': {
         const full: Order = { ...(action.order as Order), id: action.order.id ?? uid('oc') }
@@ -304,6 +309,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'UPSERT_CLIENT', client: full })
         persist([() => saveClientRow(full)]); return
       }
+      case 'DELETE_CLIENT':
+        rawDispatch({ type: 'REMOVE_CLIENT', id: action.id })
+        persist([() => apiDeleteClient(action.id)]); return
 
       case 'TOGGLE_COMMISSION': {
         const com = s.commissions.find(c => c.id === action.id); if (!com) return

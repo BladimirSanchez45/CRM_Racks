@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtK, fmtDate, fmtMoney2, REGIMEN_FISCAL, regimenLabel } from '../../core/data'
-import { Modal, Field, Input, Select, StageBadge, PayBadge, Badge, Avatar, Empty } from '../../core/ui'
+import { Modal, Field, Input, Select, StageBadge, PayBadge, Badge, Avatar, Empty, Confirm } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Client, ClientInput, Project } from '../../core/types'
 
@@ -47,7 +47,7 @@ function FiscalRow({ label, value, mono, span2 }: { label: string; value?: strin
   )
 }
 
-function ClientDetail({ client, onClose, onEdit, onOpenProject }: { client: Client; onClose: () => void; onEdit: () => void; onOpenProject: (p: Project) => void }) {
+function ClientDetail({ client, onClose, onEdit, onDelete, onOpenProject }: { client: Client; onClose: () => void; onEdit: () => void; onDelete: () => void; onOpenProject: (p: Project) => void }) {
   const { state } = useStore()
   const projects = sel.projectsForClient(state, client.id)
   const total = projects.reduce((a, p) => a + sel.budget(p), 0)
@@ -55,7 +55,11 @@ function ClientDetail({ client, onClose, onEdit, onOpenProject }: { client: Clie
   const sub = [client.rfc || client.city, `Cliente desde ${fmtDate(client.since)}`].filter(Boolean).join(' · ')
   return (
     <Modal width={680} icon="clients" title={client.name} sub={sub} onClose={onClose}
-      footer={<><button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button></>}>
+      footer={<>
+        <button className="btn btn-danger" disabled={projects.length > 0} title={projects.length > 0 ? 'No se puede eliminar: tiene proyectos asociados' : 'Eliminar cliente'} onClick={onDelete}><Icon name="trash" size={15} /> Eliminar</button>
+        <div className="flex-1"></div>
+        <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button>
+      </>}>
       <div className="grid grid-cols-2 gap-5 mb-5">
         <div className="flex flex-col gap-2.5">
           {client.contact && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="user" size={15} className="text-tx-2" /> {client.contact}</div>}
@@ -111,8 +115,9 @@ function ClientDetail({ client, onClose, onEdit, onOpenProject }: { client: Clie
 const CLIENTS_PAGE_SIZE = 60
 
 export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => void }) {
-  const { state } = useStore()
+  const { state, dispatch } = useStore()
   const [detail, setDetail] = React.useState<Client | null>(null)
+  const [del, setDel] = React.useState<Client | null>(null)
   const [form, setForm] = React.useState<Partial<Client> | null>(null)
   const [q, setQ] = React.useState('')
   const [limit, setLimit] = React.useState(CLIENTS_PAGE_SIZE)
@@ -173,8 +178,9 @@ export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => 
           </button>
         </div>
       )}
-      {detail && <ClientDetail client={state.clients.find(x=>x.id===detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onOpenProject={onOpenProject} />}
+      {detail && <ClientDetail client={state.clients.find(x=>x.id===detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} onOpenProject={onOpenProject} />}
       {form && <ClientForm client={form.id ? (form as Client) : undefined} onClose={() => setForm(null)} />}
+      {del && <Confirm title="Eliminar cliente" message={`¿Eliminar a ${del.name}? Esta acción no se puede deshacer.`} onConfirm={() => { dispatch({ type: 'DELETE_CLIENT', id: del.id }); setDel(null) }} onClose={() => setDel(null)} />}
     </div>
   )
 }

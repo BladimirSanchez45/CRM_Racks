@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtDate, fmtK } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, Rating, Badge, OCStatus, Empty } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, Rating, Badge, OCStatus, Empty, Confirm } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Supplier, SupplierInput } from '../../core/types'
 
@@ -54,7 +54,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
   )
 }
 
-function SupplierDetail({ supplier, onClose, onEdit }: { supplier: Supplier; onClose: () => void; onEdit: () => void }) {
+function SupplierDetail({ supplier, onClose, onEdit, onDelete }: { supplier: Supplier; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
   const { state } = useStore()
   const ocs = sel.ordersForSupplier(state, supplier.id)
   const total = ocs.reduce((a, o) => a + o.amount, 0)
@@ -64,7 +64,11 @@ function SupplierDetail({ supplier, onClose, onEdit }: { supplier: Supplier; onC
     <Modal width={680} onClose={onClose} icon="suppliers"
       title={supplier.name}
       sub={`${supplier.cat} · ${supplier.city}`}
-      footer={<><button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button></>}>
+      footer={<>
+        <button className="btn btn-danger" disabled={ocs.length > 0} title={ocs.length > 0 ? 'No se puede eliminar: tiene órdenes de compra' : 'Eliminar proveedor'} onClick={onDelete}><Icon name="trash" size={15} /> Eliminar</button>
+        <div className="flex-1"></div>
+        <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button>
+      </>}>
       <div className="grid grid-cols-2 gap-5 mb-5">
         <div className="flex flex-col gap-2.5">
           {supplier.contact && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="user" size={15} className="text-tx-2" /> {supplier.contact}</div>}
@@ -122,6 +126,7 @@ function SupplierDetail({ supplier, onClose, onEdit }: { supplier: Supplier; onC
 export function SuppliersPage() {
   const { state, dispatch } = useStore()
   const [detail, setDetail] = React.useState<Supplier | null>(null)
+  const [del, setDel] = React.useState<Supplier | null>(null)
   const [form, setForm] = React.useState<Partial<Supplier> | null>(null)
   const [showInactive, setShowInactive] = React.useState(true)
   const list = state.suppliers.filter(s => showInactive || s.active)
@@ -170,8 +175,9 @@ export function SuppliersPage() {
         })}
       </div>
 
-      {detail && <SupplierDetail supplier={state.suppliers.find(x => x.id === detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} />}
+      {detail && <SupplierDetail supplier={state.suppliers.find(x => x.id === detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} />}
       {form && <SupplierForm supplier={form.id ? (form as Supplier) : undefined} onClose={() => setForm(null)} />}
+      {del && <Confirm title="Eliminar proveedor" message={`¿Eliminar a ${del.name}? Esta acción no se puede deshacer.`} onConfirm={() => { dispatch({ type: 'DELETE_SUPPLIER', id: del.id }); setDel(null) }} onClose={() => setDel(null)} />}
     </div>
   )
 }
