@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS, TODAY_ISO } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
+import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
@@ -22,6 +22,7 @@ export function CobroForm({ project, cobro, onClose }: { project?: Project; cobr
   const set = (k: keyof CobroFormState, v: unknown) => setC(s => ({ ...s, [k]: v }))
   const onPickProject = (pid: string) => setC(s => ({ ...s, projectId: pid, n: cobro ? s.n : (pid ? nextN(pid) : 1) }))
   const valid = c.projectId && c.date && c.amount
+  const { requestClose, guard } = useUnsavedGuard(c, onClose)
   const save = () => { dispatch({ type: 'SAVE_CLIENT_PAYMENT', payment: { ...c, n: +c.n || 1, amount: +c.amount || 0 } as ClientPaymentInput }); onClose() }
   const proj = state.projects.find(x => x.id === c.projectId)
   const total = proj ? sel.projectTotalConIva(proj) : 0
@@ -29,9 +30,9 @@ export function CobroForm({ project, cobro, onClose }: { project?: Project; cobr
   const abonado = abonadoAntes + (c.status === 'Cobrado' ? (+c.amount || 0) : 0)
   const saldoRestante = total - abonado
   return (
-    <Modal width={500} icon={cobro ? 'edit' : 'plus'} title={cobro ? 'Editar cobro' : 'Registrar cobro del cliente'} sub={proj ? `${proj.code} · ${sel.clientName(state, proj.client)}` : undefined} onClose={onClose}
+    <Modal width={500} icon={cobro ? 'edit' : 'plus'} title={cobro ? 'Editar cobro' : 'Registrar cobro del cliente'} sub={proj ? `${proj.code} · ${sel.clientName(state, proj.client)}` : undefined} onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar cobro</button>
       </>}>
       {proj && (
@@ -65,6 +66,7 @@ export function CobroForm({ project, cobro, onClose }: { project?: Project; cobr
         <Field label="Forma de pago / Ref." span={2}><Input value={c.method} onChange={e => set('method', e.target.value)} placeholder="Transferencia, cheque…" /></Field>
         <Field label="Comentarios" span={2}><Input value={c.comments} onChange={e => set('comments', e.target.value)} /></Field>
       </div>
+      {guard}
     </Modal>
   )
 }
@@ -110,7 +112,7 @@ export function MoveStage({ project }: { project: Project }) {
       )}
       {next ? (
         <button className="btn btn-primary btn-sm" onClick={() => dispatch({ type: 'MOVE_STAGE', id: project.id, stage: next.id })}>
-          Avanzar a {next.short} <Icon name="arrowRight" size={14} />
+          {project.stage === 'registro' ? 'Confirmar venta' : `Avanzar a ${next.short}`} <Icon name="arrowRight" size={14} />
         </button>
       ) : (
         <Badge color="var(--st-9)" icon="check" solid>Proyecto cerrado</Badge>
@@ -326,6 +328,8 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
   const ventaSub = +(p.ventaSubtotal || 0)
   const ventaIva = ventaSub * 0.16
   const ventaTotal = ventaSub * 1.16
+  // Guardia de cambios sin guardar: si el formulario se tocó, confirma antes de salir.
+  const { requestClose, guard } = useUnsavedGuard(p, onClose)
   const save = () => {
     dispatch({ type: 'SAVE_PROJECT', project: { ...p, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } })
     onClose()
@@ -335,9 +339,9 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
     <Modal width={720} icon={isNew ? 'plus' : 'edit'}
       title={isNew ? 'Registrar venta / proyecto' : 'Editar proyecto'}
       sub={isNew ? 'Captura los datos iniciales de la venta' : p.code}
-      onClose={onClose}
+      onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50 cursor-not-allowed' : '')} disabled={!valid} onClick={save}>
           <Icon name="check" size={15} /> {isNew ? 'Registrar proyecto' : 'Guardar cambios'}
         </button>
@@ -392,6 +396,8 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
           ))}
         </div>
       </div>
+
+      {guard}
     </Modal>
   )
 }

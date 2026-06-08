@@ -11,6 +11,7 @@ import type {
   Commission,
   OcStatus,
   Order,
+  PayStatus,
   Payment,
   Project,
   Seller,
@@ -213,6 +214,35 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     })
   }, [reloadAll])
 
+  // Reconciliación de un proyecto a partir de sus datos:
+  //  1) Finiquito: "paid" si el cliente cubrió el total con IVA (bidireccional).
+  //  2) Etapa: auto-avance SOLO hacia adelante y a partir de "creación"
+  //     (registro→creación es confirmación manual).
+  const reconcileProject = React.useCallback((ns: AppState, pid: string) => {
+    const proj = ns.projects.find(p => p.id === pid)
+    if (!proj) return
+    // 1) Finiquito reflejo de la cobranza.
+    const total = sel.projectTotalConIva(proj)
+    const finiquito: PayStatus = total > 0 && sel.projectCobrado(ns, pid) >= total - 0.5 ? 'paid' : 'pending'
+    // 2) Etapa.
+    let stage = proj.stage
+    if (stageIndex(proj.stage) >= stageIndex('creacion')) {
+      const target = autoStageFor(ns, proj)
+      if (target && stageIndex(target) > stageIndex(proj.stage)) stage = target
+    }
+    if (stage === proj.stage && finiquito === proj.finiquito) return    // nada que cambiar
+    const updated: Project = { ...proj, stage, finiquito, updated: today() }
+    rawDispatch({ type: 'UPSERT_PROJECT', project: updated })
+    const thunks: (() => Promise<void>)[] = [() => saveProject(updated)]
+    if (stage !== proj.stage) {                                          // hubo avance de etapa
+      const stg = STAGE_MAP[stage]
+      const activity: Activity = { id: uid('a'), t: nowISO(), icon: stg.icon, who: 'Sistema', txt: `avanzó automáticamente a ${stg.short}`, tgt: proj.code, kind: 'info' }
+      rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+      thunks.push(() => saveActivity(activity))
+    }
+    persist(thunks)
+  }, [persist])
+
   // dispatch PÚBLICO: aplica el cambio localmente (optimista) y lo persiste.
   const dispatch = React.useCallback((action: Action) => {
     const s = stateRef.current
@@ -332,6 +362,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [persist])
 
+  // Reconciliación: tras cualquier cambio en proyectos / OC / pagos / cobros
+  // (incluida la carga inicial), recalcula etapa y finiquito de cada proyecto.
+  // Idempotente: una vez correcto no hace nada, así que converge. También cubre
+  // el avance por FECHA (entrega estimada) al recargar.
+  React.useEffect(() => {
+    for (const p of state.projects) reconcileProject(state, p.id)
+  }, [state, reconcileProject])
+
   // Sesión Supabase: al montar restaura la sesión (si la hay) y, cuando hay
   // usuario, carga su perfil + TODOS los datos. Al cerrar sesión, limpia.
   React.useEffect(() => {
@@ -422,4 +460,36 @@ export const sel = {
     state.clientPayments.filter(c => c.projectId === pid && c.status === 'Cobrado').reduce((a, c) => a + c.amount, 0),
   /** Saldo por cobrar = total con IVA − cobrado. */
   projectSaldoCliente: (state: AppState, p: Project) => sel.projectTotalConIva(p) - sel.projectCobrado(state, p.id),
+  /** ¿El proyecto ya tiene el anticipo del cliente COBRADO? (al menos un cobro real).
+   *  Regla de negocio: no se puede emitir la OC al proveedor sin antes asegurar el ingreso. */
+  projectHasAnticipo: (state: AppState, pid: string) =>
+    state.clientPayments.some(c => c.projectId === pid && c.status === 'Cobrado' && c.amount > 0),
+  /** ¿Se pagó (status "Pagado") algún abono/anticipo al proveedor en las OC del proyecto? */
+  projectAnticipoProveedor: (state: AppState, pid: string) =>
+    sel.ordersForProject(state, pid).some(o => sel.ocPaid(state, o.id) > 0),
+}
+
+/* ============================================================
+   AUTO-AVANCE DE ETAPA (según las acciones del flujo)
+   ============================================================
+   Calcula la etapa que le corresponde a un proyecto por sus DATOS, dentro del
+   tramo AUTOMÁTICO (asignación → pago). Devuelve null si aún no cumple ninguna
+   condición automática. Las etapas manuales —registro, creación (confirmación
+   del cliente) y las de logística (coordinación, instalación, finalizado)— NO
+   las decide esta función. La reconciliación del store solo avanza, nunca
+   regresa, y respeta el candado manual registro→creación. */
+export function autoStageFor(state: AppState, p: Project): StageId | null {
+  // 7 · Pago Recibido — el cliente cubrió el total con IVA (incluye finiquito).
+  const total = sel.projectTotalConIva(p)
+  if (total > 0 && sel.projectCobrado(state, p.id) >= total - 0.5) return 'pago'
+  const anticipoProveedor = sel.projectAnticipoProveedor(state, p.id)
+  // 6 · Entrega Estimada — material en fabricación y ya llegó la fecha ETA del proyecto.
+  if (anticipoProveedor && p.eta && p.eta <= TODAY_ISO) return 'entrega_est'
+  // 5 · Fabricación — se pagó anticipo al proveedor.
+  if (anticipoProveedor) return 'fabricacion'
+  // 4 · Orden de Compra — ya existe la OC del proyecto.
+  if (sel.ordersForProject(state, p.id).length > 0) return 'compra'
+  // 3 · Asignación — hay proveedor asignado (aún sin OC).
+  if (p.suppliers.length > 0) return 'asignacion'
+  return null
 }

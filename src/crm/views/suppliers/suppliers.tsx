@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtDate, fmtK } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, Rating, Badge, OCStatus, Empty, Confirm } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, Rating, Badge, OCStatus, Empty, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Supplier, SupplierInput } from '../../core/types'
 
@@ -15,10 +15,11 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
   const [s, setS] = React.useState<SupplierInput>(() => supplier ? { ...supplier } : { name: '', cat: CATS[0], contact: '', phone: '', email: '', city: '', rating: 4, active: true, notes: '' })
   const set = (k: keyof SupplierInput, v: unknown) => setS(o => ({ ...o, [k]: v }))
   const valid = s.name
+  const { requestClose, guard } = useUnsavedGuard(s, onClose)
   return (
-    <Modal width={580} icon={supplier ? 'edit' : 'plus'} title={supplier ? 'Editar proveedor' : 'Nuevo proveedor'} onClose={onClose}
+    <Modal width={580} icon={supplier ? 'edit' : 'plus'} title={supplier ? 'Editar proveedor' : 'Nuevo proveedor'} onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={() => { dispatch({ type: 'SAVE_SUPPLIER', supplier: s }); onClose() }}><Icon name="check" size={15} /> Guardar</button>
       </>}>
       <div className="grid grid-cols-2 gap-3.5">
@@ -50,6 +51,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
         </Field>
         <Field label="Notas" span={2}><TextArea value={s.notes} onChange={e => set('notes', e.target.value)} /></Field>
       </div>
+      {guard}
     </Modal>
   )
 }

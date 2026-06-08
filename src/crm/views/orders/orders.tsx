@@ -5,8 +5,9 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween, MESES, uid, TODAY_ISO } from '../../core/data'
-import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip } from '../../core/ui'
+import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
+import { CobroForm } from '../projects/project_views'
 import type { AppState, OcItem, Order, OrderInput, Payment, PaymentInput, PaymentStatus, Project } from '../../core/types'
 
 const PAY_STATES: PaymentStatus[] = ['Pagado', 'Programado', 'Cancelado']
@@ -36,8 +37,8 @@ function printOC(state: AppState, o: Order, items: OcItem[]) {
   const w = window.open('', '_blank', 'width=820,height=1000')
   if (!w) { alert('Permite las ventanas emergentes para generar el PDF.'); return }
   const rows = items.length
-    ? items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.description)}</td><td class=r>${it.qty}</td><td class=r>${m(it.unitPrice)}</td><td class=r>${m((it.qty || 0) * (it.unitPrice || 0))}</td></tr>`).join('')
-    : `<tr><td colspan=5 style="text-align:center;color:#999">— Sin materiales capturados —</td></tr>`
+    ? items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.parte)}</td><td>${esc(it.color)}</td><td class=r>${it.qty}</td><td>${esc(it.material)}</td><td>${esc(it.description)}</td><td>${esc(it.dimensiones)}</td><td class=r>${m(it.unitPrice)}</td><td class=r>${m((it.qty || 0) * (it.unitPrice || 0))}</td></tr>`).join('')
+    : `<tr><td colspan=9 style="text-align:center;color:#999">— Sin materiales capturados —</td></tr>`
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(o.number)}</title><style>
     body{font-family:Arial,Helvetica,sans-serif;color:#1b2230;padding:34px;font-size:13px}
     .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #2f6feb;padding-bottom:12px;margin-bottom:18px}
@@ -62,7 +63,7 @@ function printOC(state: AppState, o: Order, items: OcItem[]) {
       <tr><td><b>Condiciones:</b></td><td>${esc(o.conditions || '—')}</td></tr>
       <tr><td><b>Responsable:</b></td><td>${esc(o.responsible || '—')}</td></tr>
     </table>
-    <table class="items"><thead><tr><th>#</th><th>Descripción</th><th class="r">Cant.</th><th class="r">P. Unitario</th><th class="r">Importe</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="items"><thead><tr><th>#</th><th>Parte</th><th>Color</th><th class="r">Cant.</th><th>Material</th><th>Descripción</th><th>Dimensiones</th><th class="r">P. Unitario</th><th class="r">Importe</th></tr></thead><tbody>${rows}</tbody></table>
     <table class="tot">
       <tr><td>Subtotal</td><td class="r">${m(subtotal)}</td></tr>
       <tr><td>IVA 16%</td><td class="r">${m(iva)}</td></tr>
@@ -87,15 +88,16 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
   })
   const set = (k: keyof AbonoFormState, v: unknown) => setA(s => ({ ...s, [k]: v }))
   const valid = a.date && a.amount
+  const { requestClose, guard } = useUnsavedGuard(a, onClose)
   const save = () => { dispatch({ type: 'SAVE_PAYMENT', payment: { ...a, n: +a.n || 1, amount: +a.amount || 0 } as PaymentInput }); onClose() }
   const total = order.amount
   const pagadoAntes = state.payments.filter(x => x.orderId === order.id && x.status === 'Pagado' && x.id !== a.id).reduce((acc, x) => acc + x.amount, 0)
   const pagado = pagadoAntes + (a.status === 'Pagado' ? (+a.amount || 0) : 0)
   const saldoRestante = total - pagado
   return (
-    <Modal width={480} icon={payment ? 'edit' : 'plus'} title={payment ? 'Editar abono' : 'Nuevo abono'} sub={order.number} onClose={onClose}
+    <Modal width={480} icon={payment ? 'edit' : 'plus'} title={payment ? 'Editar abono' : 'Nuevo abono'} sub={order.number} onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar abono</button>
       </>}>
       <div className="bg-bg-1 border border-line rounded-[8px] p-3 mb-3.5 grid grid-cols-3 gap-2 text-center">
@@ -111,6 +113,7 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
         <Field label="Método / Ref." span={2}><Input value={a.method} onChange={e => set('method', e.target.value)} placeholder="Transferencia, cheque, folio…" /></Field>
         <Field label="Comentarios" span={2}><Input value={a.comments} onChange={e => set('comments', e.target.value)} /></Field>
       </div>
+      {guard}
     </Modal>
   )
 }
@@ -170,19 +173,28 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
         <div className="mb-5">
           <div className="label-k mb-2">Materiales ({items.length})</div>
           <div className="border border-line rounded-[8px] overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="tbl">
-              <thead><tr><th>Descripción</th><th className="num">Cant.</th><th className="num">C. unit.</th><th className="num">Importe</th></tr></thead>
+              <thead><tr>
+                <th>Parte</th><th>Color</th><th className="num">Cant.</th><th>Material</th><th>Descripción</th><th>Dimensiones</th>
+                <th className="num">C. unit.</th><th className="num">Importe</th>
+              </tr></thead>
               <tbody>
                 {items.map(it => (
                   <tr key={it.id} style={{ cursor: 'default' }}>
-                    <td className="text-[12.5px]">{it.description}</td>
+                    <td className="text-[12px]">{it.parte || '—'}</td>
+                    <td className="text-[12px]">{it.color || '—'}</td>
                     <td className="num">{it.qty}</td>
+                    <td className="text-[12px]">{it.material || '—'}</td>
+                    <td className="text-[12.5px]">{it.description || '—'}</td>
+                    <td className="text-[12px]">{it.dimensiones || '—'}</td>
                     <td className="num">{fmtMoney2(it.unitPrice)}</td>
                     <td className="num">{fmtMoney2((it.qty || 0) * (it.unitPrice || 0))}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
@@ -222,6 +234,40 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
 /* ============================================================
    Formulario de OC (con proyecto, condiciones libres y materiales)
    ============================================================ */
+/* ---- Importar materiales desde el Excel (hoja "Cotizador Selectivo") ---- */
+async function importMaterialsFromExcel(file: File): Promise<OcItem[]> {
+  const XLSX = await import('xlsx')            // carga diferida (no infla el bundle)
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+  const sheetName = wb.SheetNames.find(n => /cotizador\s*selectivo/i.test(n))
+  if (!sheetName) throw new Error('El Excel no tiene la hoja "Cotizador Selectivo".')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sheetName], { header: 1, blankrows: false, defval: '' })
+  const items: OcItem[] = []
+  let inTable = false
+  for (const r of rows) {
+    const parte = String(r[0] ?? '').trim().toLowerCase()
+    const material = String(r[3] ?? '').trim()
+    if (parte === 'parte' && material.toLowerCase() === 'material') { inTable = true; continue } // encabezado de tabla
+    if (!inTable) continue
+    const qty = Number(r[2])
+    if (!material || !Number.isFinite(qty) || qty <= 0) { inTable = false; continue }            // fin de la tabla
+    items.push({
+      id: uid('it'),
+      parte: String(r[0] ?? '').trim(),
+      color: String(r[1] ?? '').trim(),
+      material,
+      description: String(r[4] ?? '').trim(),
+      dimensiones: r[5] === '' || r[5] == null ? '' : String(r[5]).trim(),
+      qty: Math.round(qty * 100) / 100,
+      unitPrice: 0,
+    })
+  }
+  if (!items.length) throw new Error('No se encontraron materiales en la hoja.')
+  return items
+}
+
+const CELL = 'bg-bg-2 border border-line-2 rounded-[6px] px-1.5 py-1 text-[11.5px] outline-none focus:border-acc'
+
 type OcFormState = {
   id?: string; number: string; date: string; supplierId: string; projectId?: string
   description: string; conditions: string; amount: number | string; responsible: string
@@ -259,24 +305,58 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
   const addItem = () => setO(s => ({ ...s, items: [...s.items, { id: uid('it'), description: '', qty: 1, unitPrice: 0 }] }))
   const updItem = (i: number, k: keyof OcItem, v: unknown) => setO(s => ({ ...s, items: s.items.map((it, idx) => idx === i ? { ...it, [k]: v } : it) }))
   const delItem = (i: number) => setO(s => ({ ...s, items: s.items.filter((_, idx) => idx !== i) }))
+  const fileRef = React.useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = React.useState(false)
+  const [importErr, setImportErr] = React.useState('')
+  const onImport = async (file: File) => {
+    setImporting(true); setImportErr('')
+    try {
+      const nuevos = await importMaterialsFromExcel(file)
+      setO(s => ({ ...s, items: [...s.items, ...nuevos] }))
+    } catch (e) {
+      setImportErr(e instanceof Error ? e.message : 'No se pudo leer el Excel.')
+    } finally { setImporting(false) }
+  }
 
   const { subtotal, iva, total } = itemsTotals(o.items)
   const hasItems = o.items.length > 0
-  const valid = o.number && o.supplierId && (hasItems ? total > 0 : !!o.amount)
+  // ---- Candado de anticipo: si la OC está ligada a un proyecto, exige que el
+  //      cliente ya tenga el anticipo COBRADO antes de emitir la OC al proveedor.
+  //      Solo se aplica al CREAR (al editar una OC existente ya no estorba).
+  const project = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
+  const hasAnticipo = o.projectId ? sel.projectHasAnticipo(state, o.projectId) : true
+  const needsAnticipo = !editing && !!o.projectId && !hasAnticipo
+  const [showCobro, setShowCobro] = React.useState(false)
+  const { requestClose, guard } = useUnsavedGuard(o, onClose)
+  const valid = o.number && o.supplierId && (hasItems ? total > 0 : !!o.amount) && !needsAnticipo
   const save = () => {
+    if (needsAnticipo) return
     const ord: OrderInput = { ...o, amount: hasItems ? total : (+o.amount || 0), items: o.items.length ? o.items : undefined }
     dispatch({ type: 'SAVE_ORDER', order: ord })
     onClose()
   }
 
   return (
-    <Modal width={760} icon={editing ? 'edit' : 'plus'} title={editing ? 'Editar orden de compra' : 'Nueva orden de compra'} onClose={onClose}
+    <Modal width={900} icon={editing ? 'edit' : 'plus'} title={editing ? 'Editar orden de compra' : 'Nueva orden de compra'} onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className="btn btn-ghost" disabled={!o.supplierId} onClick={() => printOC(state, { ...o, amount: hasItems ? total : (+o.amount || 0) } as Order, o.items)}><Icon name="download" size={14} /> Generar PDF</button>
+        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
+        <button className="btn btn-ghost" disabled={!o.supplierId || needsAnticipo} onClick={() => printOC(state, { ...o, amount: hasItems ? total : (+o.amount || 0) } as Order, o.items)}><Icon name="download" size={14} /> Generar PDF</button>
         <div className="flex-1"></div>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar OC</button>
       </>}>
+      {needsAnticipo && (
+        <div className="flex items-start gap-3 mb-4 p-3 rounded-[8px] border" style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 10%, transparent)' }}>
+          <Icon name="alert" size={18} className="mt-0.5 flex-none" style={{ color: 'var(--warn)' }} />
+          <div className="flex-1">
+            <div className="font-semibold text-[13px]" style={{ color: 'var(--warn)' }}>Falta el anticipo del cliente</div>
+            <div className="text-[12px] text-tx-2 mt-0.5">
+              No puedes emitir esta OC al proveedor hasta registrar el <strong>cobro del anticipo</strong> de{' '}
+              {project ? <span className="mono">{project.code} · {sel.clientName(state, project.client)}</span> : 'el proyecto'}.
+            </div>
+          </div>
+          <button type="button" className="btn btn-primary btn-sm flex-none" onClick={() => setShowCobro(true)}><Icon name="plus" size={13} /> Registrar anticipo</button>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="No. de OC"><Input className="input mono" value={o.number} onChange={e => set('number', e.target.value)} /></Field>
         <Field label="Fecha OC"><Input type="date" value={o.date} onChange={e => set('date', e.target.value)} /></Field>
@@ -308,22 +388,35 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
       <div className="mt-4">
         <div className="spread mb-2">
           <span className="label-k">Materiales (lista del vendedor)</span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={addItem}><Icon name="plus" size={13} /> Agregar material</button>
+          <div className="flex gap-2">
+            <button type="button" className="btn btn-ghost btn-sm" disabled={importing} onClick={() => fileRef.current?.click()}><Icon name="doc" size={13} /> {importing ? 'Importando…' : 'Importar de Excel'}</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={addItem}><Icon name="plus" size={13} /> Agregar material</button>
+          </div>
         </div>
+        {importErr && <div className="text-[11.5px] mb-2" style={{ color: 'var(--danger)' }}>{importErr}</div>}
+        <input ref={fileRef} type="file" accept=".xlsx,.xlsm,.xls" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) onImport(f); e.currentTarget.value = '' }} />
         {!hasItems ? (
           <div className="bg-bg-1 border border-line rounded-[8px] p-3 text-center text-tx-3 text-[12px]">Sin materiales. Agrega partidas (calcula subtotal, IVA y total) o captura el monto manualmente.</div>
         ) : (
           <div className="border border-line rounded-[8px] overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="tbl">
-              <thead><tr><th>Descripción</th><th className="num">Cant.</th><th className="num">C. unit.</th><th className="num">Importe</th><th>Proveedor</th><th></th></tr></thead>
+              <thead><tr>
+                <th>Parte</th><th>Color</th><th className="num">Cant.</th><th>Material</th><th>Descripción</th><th>Dimensiones</th>
+                <th className="num">C. unit.</th><th className="num">Importe</th><th>Proveedor</th><th></th>
+              </tr></thead>
               <tbody>
                 {o.items.map((it, i) => (
                   <tr key={it.id} style={{ cursor: 'default' }}>
-                    <td><input className="w-full bg-bg-2 border border-line-2 rounded-[6px] px-2 py-1 text-[12px] outline-none focus:border-acc" value={it.description} onChange={e => updItem(i, 'description', e.target.value)} placeholder="Material / concepto" /></td>
-                    <td className="num"><input type="number" className="w-[58px] bg-bg-2 border border-line-2 rounded-[6px] px-2 py-1 text-[12px] text-right outline-none focus:border-acc" value={it.qty} onChange={e => updItem(i, 'qty', +e.target.value || 0)} /></td>
-                    <td className="num"><input type="number" className="w-[90px] bg-bg-2 border border-line-2 rounded-[6px] px-2 py-1 text-[12px] text-right outline-none focus:border-acc" value={it.unitPrice} onChange={e => updItem(i, 'unitPrice', +e.target.value || 0)} /></td>
-                    <td className="num text-[12px]">{fmtMoney2((it.qty || 0) * (it.unitPrice || 0))}</td>
-                    <td><select className="bg-bg-2 border border-line-2 rounded-[6px] px-1 py-1 text-[11.5px] outline-none focus:border-acc max-w-[130px]" value={it.supplierId || ''} onChange={e => updItem(i, 'supplierId', e.target.value || undefined)}>
+                    <td><input className={CELL + ' w-[44px]'} value={it.parte || ''} onChange={e => updItem(i, 'parte', e.target.value)} /></td>
+                    <td><input className={CELL + ' w-[72px]'} value={it.color || ''} onChange={e => updItem(i, 'color', e.target.value)} /></td>
+                    <td className="num"><input type="number" className={CELL + ' w-[56px] text-right'} value={it.qty} onChange={e => updItem(i, 'qty', +e.target.value || 0)} /></td>
+                    <td><input className={CELL + ' w-[110px]'} value={it.material || ''} onChange={e => updItem(i, 'material', e.target.value)} placeholder="Material" /></td>
+                    <td><input className={CELL + ' w-[150px]'} value={it.description} onChange={e => updItem(i, 'description', e.target.value)} placeholder="Descripción" /></td>
+                    <td><input className={CELL + ' w-[110px]'} value={it.dimensiones || ''} onChange={e => updItem(i, 'dimensiones', e.target.value)} placeholder="Dimensiones" /></td>
+                    <td className="num"><input type="number" className={CELL + ' w-[86px] text-right'} value={it.unitPrice} onChange={e => updItem(i, 'unitPrice', +e.target.value || 0)} /></td>
+                    <td className="num"><input type="number" className={CELL + ' w-[92px] text-right'} value={Math.round((it.qty || 0) * (it.unitPrice || 0) * 100) / 100} onChange={e => { const imp = +e.target.value || 0; const q = it.qty || 0; updItem(i, 'unitPrice', q > 0 ? imp / q : 0) }} /></td>
+                    <td><select className="bg-bg-2 border border-line-2 rounded-[6px] px-1 py-1 text-[11px] outline-none focus:border-acc max-w-[110px]" value={it.supplierId || ''} onChange={e => updItem(i, 'supplierId', e.target.value || undefined)}>
                       <option value="">(de la OC)</option>
                       {state.suppliers.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                     </select></td>
@@ -332,6 +425,7 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
                 ))}
               </tbody>
             </table>
+            </div>
             <div className="flex justify-end gap-6 p-3 bg-bg-1 border-t border-line text-[13px]">
               <div className="text-right"><div className="label-k">Subtotal</div><div className="mono mt-0.5">{fmtMoney2(subtotal)}</div></div>
               <div className="text-right"><div className="label-k">IVA 16%</div><div className="mono mt-0.5">{fmtMoney2(iva)}</div></div>
@@ -349,6 +443,9 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
           </button>
         </Field>
       </div>
+
+      {showCobro && project && <CobroForm project={project} onClose={() => setShowCobro(false)} />}
+      {guard}
     </Modal>
   )
 }

@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, TODAY_ISO } from '../../core/data'
-import { Modal, Field, Input, Select, MoneyInput, PaymentBadge, Empty, KPI } from '../../core/ui'
+import { Modal, Field, Input, Select, MoneyInput, PaymentBadge, Empty, KPI, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Payment, PaymentInput, PaymentStatus } from '../../core/types'
 
@@ -32,6 +32,7 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
     setP(s => ({ ...s, orderId: oid, n: payment ? s.n : nextN }))
   }
   const valid = p.orderId && p.date && p.amount
+  const { requestClose, guard } = useUnsavedGuard(p, onClose)
   const save = () => {
     const pay: PaymentInput = { ...p, n: +p.n || 1, amount: +p.amount || 0 }
     dispatch({ type: 'SAVE_PAYMENT', payment: pay })
@@ -43,9 +44,9 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
   const pagado = pagadoAntes + (p.status === 'Pagado' ? (+p.amount || 0) : 0)
   const saldoRestante = total - pagado
   return (
-    <Modal width={520} icon={payment ? 'edit' : 'plus'} title={payment ? 'Editar abono' : 'Nuevo abono'} onClose={onClose}
+    <Modal width={520} icon={payment ? 'edit' : 'plus'} title={payment ? 'Editar abono' : 'Nuevo abono'} onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <button className="btn btn-danger" style={{ visibility: payment ? 'visible' : 'hidden' }} onClick={() => { if (payment) dispatch({ type: 'DELETE_PAYMENT', id: payment.id }); onClose() }}><Icon name="trash" size={14} /> Eliminar</button>
         <div className="flex-1"></div>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
@@ -75,6 +76,7 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
         <Field label="Método / Ref." span={2}><Input value={p.method} onChange={e => set('method', e.target.value)} placeholder="Transferencia, cheque, folio…" /></Field>
         <Field label="Comentarios" span={2}><Input value={p.comments} onChange={e => set('comments', e.target.value)} /></Field>
       </div>
+      {guard}
     </Modal>
   )
 }

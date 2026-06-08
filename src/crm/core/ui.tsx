@@ -413,6 +413,29 @@ export function Confirm({ title, message, confirmLabel = 'Eliminar', danger = tr
   )
 }
 
+/* ---- Guardia de cambios sin guardar ----
+   Compara una "foto" del estado del formulario contra su valor inicial. Si hay
+   cambios, intercepta el cierre y pide confirmación antes de descartar.
+   Uso:  const { requestClose, guard } = useUnsavedGuard(formState, onClose)
+         <Modal onClose={requestClose} ...>  // y el botón Cancelar → requestClose
+         ... {guard}  // se renderiza dentro del modal */
+export function useUnsavedGuard(snapshot: unknown, onClose: () => void) {
+  const initial = React.useRef(JSON.stringify(snapshot)).current
+  const dirty = JSON.stringify(snapshot) !== initial
+  const [confirmExit, setConfirmExit] = React.useState(false)
+  const requestClose = () => { if (dirty) setConfirmExit(true); else onClose() }
+  const guard = confirmExit ? (
+    <Confirm
+      title="Salir sin guardar"
+      message="Tienes cambios sin guardar. Si sales ahora se perderán. ¿Seguro que quieres salir?"
+      confirmLabel="Salir sin guardar"
+      onConfirm={onClose}
+      onClose={() => setConfirmExit(false)}
+    />
+  ) : null
+  return { requestClose, guard, dirty }
+}
+
 /* ---- Section header ---- */
 export function SecTitle({ title, sub, right }: { title: React.ReactNode; sub?: React.ReactNode; right?: React.ReactNode }) {
   return (

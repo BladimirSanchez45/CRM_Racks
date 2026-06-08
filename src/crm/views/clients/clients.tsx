@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtK, fmtDate, fmtMoney2, REGIMEN_FISCAL, regimenLabel } from '../../core/data'
-import { Modal, Field, Input, Select, StageBadge, PayBadge, Badge, Avatar, Empty, Confirm } from '../../core/ui'
+import { Modal, Field, Input, Select, StageBadge, PayBadge, Badge, Avatar, Empty, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Client, ClientInput, Project } from '../../core/types'
 
@@ -12,9 +12,10 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
   const [c, setC] = React.useState<ClientInput>(() => client ? { ...client } : { name: '', city: '', contact: '', phone: '', email: '' })
   const set = (k: keyof ClientInput, v: unknown) => setC(o => ({ ...o, [k]: v }))
   const setNum = (k: keyof ClientInput, v: string) => setC(o => ({ ...o, [k]: v === '' ? undefined : Number(v) }))
+  const { requestClose, guard } = useUnsavedGuard(c, onClose)
   return (
-    <Modal width={620} icon={client ? 'edit' : 'plus'} title={client ? 'Editar cliente' : 'Nuevo cliente'} onClose={onClose}
-      footer={<><button className="btn btn-ghost" onClick={onClose}>Cancelar</button><button className={'btn btn-primary' + (!c.name ? ' opacity-50' : '')} disabled={!c.name} onClick={() => { dispatch({ type: 'SAVE_CLIENT', client: c }); onClose() }}><Icon name="check" size={15} /> Guardar</button></>}>
+    <Modal width={620} icon={client ? 'edit' : 'plus'} title={client ? 'Editar cliente' : 'Nuevo cliente'} onClose={requestClose}
+      footer={<><button className="btn btn-ghost" onClick={requestClose}>Cancelar</button><button className={'btn btn-primary' + (!c.name ? ' opacity-50' : '')} disabled={!c.name} onClick={() => { dispatch({ type: 'SAVE_CLIENT', client: c }); onClose() }}><Icon name="check" size={15} /> Guardar</button></>}>
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="Nombre comercial" span={2}><Input value={c.name} onChange={e => set('name', e.target.value)} /></Field>
         <Field label="Razón social" span={2}><Input value={c.razonSocial || ''} onChange={e => set('razonSocial', e.target.value)} /></Field>
@@ -34,6 +35,7 @@ function ClientForm({ client, onClose }: { client?: Client; onClose: () => void 
         <Field label="Días de crédito"><Input type="number" value={c.diasCredito ?? ''} onChange={e => setNum('diasCredito', e.target.value)} /></Field>
         <Field label="Límite de crédito"><Input type="number" value={c.limiteCredito ?? ''} onChange={e => setNum('limiteCredito', e.target.value)} /></Field>
       </div>
+      {guard}
     </Modal>
   )
 }

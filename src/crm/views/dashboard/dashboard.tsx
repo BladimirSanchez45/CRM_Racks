@@ -19,7 +19,7 @@ function PipelineChart({ projects, onPick }: { projects: Project[]; onPick?: (st
           </div>
           <div className="flex-1 h-[22px] bg-bg-1 border border-line relative">
             <div className="h-full opacity-85" style={{ width: `${(n / max) * 100}%`, background: s.color, minWidth: n ? 3 : 0, transition: 'width .5s ease' }}></div>
-            {v > 0 && <span className="mono absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-tx-2">{fmtK(v)}</span>}
+            {v > 0 && <span className="mono absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-white" style={{ textShadow: '0 1px 2px rgba(0,0,0,.65)' }}>{fmtK(v)}</span>}
           </div>
           <span className="mono w-[22px] text-right text-[13px] font-semibold" style={{ color: n ? 'var(--tx-0)' : 'var(--tx-3)' }}>{n}</span>
         </div>

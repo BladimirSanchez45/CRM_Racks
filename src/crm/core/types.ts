@@ -112,7 +112,11 @@ export type PaymentStatus = 'Pagado' | 'Programado' | 'Cancelado'
 /** Partida de material dentro de una OC (lista que sube el vendedor). */
 export interface OcItem {
   id: string
-  description: string       // material / concepto
+  parte?: string            // No. de parte (del cotizador)
+  color?: string            // Color
+  material?: string         // Material (ej. Columna, Viga Primaria)
+  description: string       // Descripción
+  dimensiones?: string      // Dimensiones
   qty: number               // cantidad
   unitPrice: number         // costo unitario
   supplierId?: string       // proveedor de esta partida (puede diferir del de la OC)
