@@ -17,12 +17,13 @@ import { ClientsPage } from './views/clients/clients'
 import { CommissionsPage } from './views/commissions/commissions'
 import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
+import { SettingsPage } from './views/settings/settings'
 import { LoginPage } from './views/login/login'
 import type { Project } from './core/types'
 import strakkLogo from '../assets/logos/strakk_logo.png'
 import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 
-type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin'
+type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean }[] = [
@@ -38,7 +39,7 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', projects: 'Proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
-  admin: 'Administración',
+  admin: 'Administración', settings: 'Configuración',
 }
 
 /* ---- accent helpers ---- */
@@ -90,6 +91,10 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
         ))}
       </nav>
       <div className="sidebar-foot">
+        <div className={'nav-item' + (route === 'settings' ? ' active' : '')} onClick={() => setRoute('settings')} title="Configuración">
+          <Icon name="gear" size={18} />
+          <span className="nav-label">Configuración</span>
+        </div>
         <div className="user-chip">
           <span className="avatar">{me?.initials ?? '?'}</span>
           <div className="brand-text flex-1 min-w-0">
@@ -123,6 +128,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'cobranza':    return <CobranzaPage />
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
       case 'commissions': return <CommissionsPage />
+      case 'settings':    return <SettingsPage />
       case 'admin':       return me?.role === 'admin' ? <AdminPage /> : <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
       default: return null
     }

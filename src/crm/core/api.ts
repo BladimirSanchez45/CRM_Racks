@@ -92,6 +92,12 @@ export async function signOut(): Promise<void> {
   await supabase.auth.signOut()
 }
 
+/** Cambia la contraseña del usuario en sesión (no requiere ser admin). */
+export async function changeMyPassword(password: string): Promise<void> {
+  const { error } = await supabase.auth.updateUser({ password })
+  if (error) throw error
+}
+
 /** Perfil (public.users) del usuario autenticado, o null si no hay sesión. */
 export async function fetchMyProfile(): Promise<User | null> {
   const { data: auth } = await supabase.auth.getUser()
