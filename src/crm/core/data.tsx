@@ -20,6 +20,7 @@ import type {
   Stage,
   StageId,
   StateAction,
+  User,
   Supplier,
 } from './types'
 import {
@@ -48,6 +49,19 @@ export const roleLabel = (role?: Role | null) => (role ? ROLE_LABELS[role] : '�
 export const isAdminRole = (role?: Role | null) => role === 'admin' || role === 'superadmin'
 /** Solo el programador: cosas exclusivas como suplantar usuarios o asignar el rol superadmin. */
 export const isSuperadmin = (role?: Role | null) => role === 'superadmin'
+/** Rol Ventas: acceso restringido (solo sus proyectos/OC, sin pagos/cobranza/etc.). */
+export const isVentasRole = (role?: Role | null) => role === 'ventas'
+
+/** ¿El usuario puede EDITAR este proyecto?
+ *  - Admin / Super Admin: siempre.
+ *  - Ventas: solo el suyo y solo ANTES de confirmar la venta (etapa "registro").
+ *  - Otros roles: no. */
+export const canEditProject = (user: User | null | undefined, p: Project) => {
+  if (!user) return false
+  if (isAdminRole(user.role)) return true
+  if (user.role === 'ventas') return p.seller === user.id && p.stage === 'registro'
+  return false
+}
 
 /* ---- The 9 pipeline stages (exact, in order) ---- */
 export const STAGES: Stage[] = [
@@ -474,6 +488,13 @@ export const sel = {
   client: (state: AppState, id: string) => state.clients.find(c => c.id === id),
   seller: (state: AppState, id: string) => state.sellers.find(s => s.id === id),
   sellerName: (state: AppState, id: string) => (state.sellers.find(s => s.id === id) || ({} as Seller)).name || '—',
+  /** Vendedores "reales": registros de comisión que SÍ venden (standalone sin login,
+   *  o usuarios de rol Ventas). Excluye a empleados de otros roles que solo cobran
+   *  override. Úsalo para el catálogo de Vendedores y para asignar proyectos. */
+  vendedores: (state: AppState) => state.sellers.filter(s => {
+    const u = state.users.find(x => x.id === s.id)
+    return !u || u.role === 'ventas'
+  }),
   supplier: (state: AppState, id: string) => state.suppliers.find(s => s.id === id),
   ordersForProject: (state: AppState, pid: string) => state.orders.filter(o => o.projectId === pid),
   ordersForSupplier: (state: AppState, sid: string) => state.orders.filter(o => o.supplierId === sid),

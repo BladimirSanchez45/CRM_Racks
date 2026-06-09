@@ -10,12 +10,13 @@ import { Icon } from '../../core/icons'
 import type { Project, StageId } from '../../core/types'
 
 /* ---------- Kanban card ---------- */
-function KanbanCard({ p, onOpen, onDragStart, onDragEnd, dragging }: {
+function KanbanCard({ p, onOpen, onDragStart, onDragEnd, dragging, draggable = true }: {
   p: Project
   onOpen: (p: Project) => void
   onDragStart: (p: Project) => void
   onDragEnd: () => void
   dragging: boolean
+  draggable?: boolean
 }) {
   const { state } = useStore()
   const client = sel.client(state, p.client)
@@ -24,8 +25,8 @@ function KanbanCard({ p, onOpen, onDragStart, onDragEnd, dragging }: {
   const dc = docCount(p)
   const stage = STAGE_MAP[p.stage]
   return (
-    <div draggable
-      onDragStart={(e) => { e.dataTransfer.effectAllowed = 'move'; onDragStart(p) }}
+    <div draggable={draggable}
+      onDragStart={(e) => { if (!draggable) return; e.dataTransfer.effectAllowed = 'move'; onDragStart(p) }}
       onDragEnd={onDragEnd}
       onClick={() => onOpen(p)}
       className="kan-card bg-bg-2 border border-line-2 py-[11px] px-3 cursor-pointer shadow-[var(--shadow-1)]"
@@ -60,14 +61,14 @@ function KanbanCard({ p, onOpen, onDragStart, onDragEnd, dragging }: {
 }
 
 /* ---------- Kanban board ---------- */
-export function Kanban({ projects, onOpen }: { projects: Project[]; onOpen: (p: Project) => void }) {
+export function Kanban({ projects, onOpen, canMove = true }: { projects: Project[]; onOpen: (p: Project) => void; canMove?: boolean }) {
   const { dispatch } = useStore()
   const [drag, setDrag] = React.useState<Project | null>(null)
   const [over, setOver] = React.useState<StageId | null>(null)
 
   const cols = STAGES.map(s => ({ stage: s, items: projects.filter(p => p.stage === s.id) }))
   const drop = (stageId: StageId) => {
-    if (drag && drag.stage !== stageId) dispatch({ type: 'MOVE_STAGE', id: drag.id, stage: stageId })
+    if (canMove && drag && drag.stage !== stageId) dispatch({ type: 'MOVE_STAGE', id: drag.id, stage: stageId })
     setDrag(null); setOver(null)
   }
 
@@ -100,7 +101,7 @@ export function Kanban({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
               }}>
               {items.length === 0 && <div className="text-center text-tx-3 text-[11px] py-6 font-mono">— vacío —</div>}
               {items.map(p => (
-                <KanbanCard key={p.id} p={p} onOpen={onOpen}
+                <KanbanCard key={p.id} p={p} onOpen={onOpen} draggable={canMove}
                   dragging={!!drag && drag.id === p.id}
                   onDragStart={setDrag} onDragEnd={() => { setDrag(null); setOver(null) }} />
               ))}
@@ -215,13 +216,17 @@ function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
 /* ---------- Projects page ---------- */
 export function ProjectsPage() {
   const { state } = useStore()
+  const me = state.currentUser
+  const isVentas = me?.role === 'ventas'
+  // Ventas solo ve SUS proyectos (donde es el vendedor).
+  const mine = isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects
   const [view, setView] = React.useState('kanban')
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [form, setForm] = React.useState<object | null>(null) // {} para nuevo
   const [editing, setEditing] = React.useState(false)
   const [f, setF] = React.useState({ q: '', stage: '', client: '', supplier: '' })
 
-  const filtered = state.projects.filter(p => {
+  const filtered = mine.filter(p => {
     if (f.stage && p.stage !== f.stage) return false
     if (f.client && p.client !== f.client) return false
     if (f.supplier && !p.suppliers.includes(f.supplier)) return false
@@ -240,7 +245,7 @@ export function ProjectsPage() {
       <div className="spread mb-[18px] flex-wrap">
         <div className="sec-title m-0">
           <h2>Proyectos</h2>
-          <span className="sub">{filtered.length} de {state.projects.length}</span>
+          <span className="sub">{filtered.length} de {mine.length}</span>
         </div>
         <div className="flex gap-2.5 items-center">
           <Seg value={view} onChange={setView} options={[{ value: 'kanban', icon: 'kanban', label: 'Tablero' }, { value: 'table', icon: 'list', label: 'Tabla' }]} />
@@ -269,7 +274,7 @@ export function ProjectsPage() {
         {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', stage: '', client: '', supplier: '' })}><Icon name="close" size={13} /> Limpiar</button>}
       </div>
 
-      {view === 'kanban' ? <Kanban projects={filtered} onOpen={openDetail} /> : <ProjectsTable projects={filtered} onOpen={openDetail} />}
+      {view === 'kanban' ? <Kanban projects={filtered} onOpen={openDetail} canMove={!isVentas} /> : <ProjectsTable projects={filtered} onOpen={openDetail} />}
 
       {detail && !editing && <ProjectDetail project={detail} onClose={() => setDetail(null)} onEdit={() => setEditing(true)} />}
       {detail && editing && <ProjectForm project={state.projects.find(x => x.id === detail.id)} onClose={() => { setEditing(false) }} />}

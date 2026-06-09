@@ -19,7 +19,7 @@ import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
 import { LoginPage } from './views/login/login'
-import type { Project } from './core/types'
+import type { Project, Role } from './core/types'
 import strakkLogo from '../assets/logos/strakk_logo.png'
 import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 
@@ -36,6 +36,16 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'clients',     label: 'Clientes',     icon: 'clients' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions' },
 ]
+// Rutas permitidas por rol RESTRINGIDO. Los roles NO listados aquí (admin,
+// superadmin, dirección…) ven todo. Para acotar un rol nuevo —p. ej. logística—
+// agrega su entrada con las rutas que sí puede ver (incluidas las vistas nuevas
+// que se creen para él). `settings` (Configuración) conviene incluirla siempre.
+const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
+  ventas: ['dashboard', 'projects', 'orders', 'settings'],
+  // logistica: ['dashboard', /* …vistas propias de logística (pendiente) */, 'settings'],
+}
+/** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
+const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', projects: 'Proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
@@ -71,7 +81,11 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
     payments: state.payments.length,
     clients: state.clients.length,
   }
-  const nav = NAV.filter(n => !n.adminOnly || isAdminRole(me?.role))
+  const allowed = allowedRoutes(me?.role)
+  const nav = NAV.filter(n => {
+    if (n.adminOnly) return isAdminRole(me?.role)
+    return allowed ? allowed.includes(n.id) : true
+  })
   return (
     <aside className="sidebar">
       <div className="brand flex-col items-stretch gap-2">
@@ -119,6 +133,11 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
   const onOpenProject = (p: Project) => { setOpenProj(p); setEditProj(null) }
 
   const page = () => {
+    // Un rol restringido solo puede entrar a sus rutas; cualquier otra cae al panel.
+    const allowed = allowedRoutes(me?.role)
+    if (allowed && !allowed.includes(route)) {
+      return <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
+    }
     switch (route) {
       case 'dashboard':   return <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
       case 'projects':    return <ProjectsPage />

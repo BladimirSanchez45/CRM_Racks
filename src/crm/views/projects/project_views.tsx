@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS, TODAY_ISO } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS, TODAY_ISO, canEditProject } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
@@ -161,6 +161,13 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
   const ventaSub = p.ventaSubtotal || 0
   const ventaIva = ventaSub * 0.16
   const ventaTotal = ventaSub * 1.16
+  // Utilidad = venta − compras/gastos (OCs del proyecto, sin contar las canceladas).
+  // Order.amount es el total con IVA; el subtotal se deriva dividiendo entre 1.16.
+  const comprasTotal = ocs.filter(o => !o.cancelled).reduce((a, o) => a + (o.amount || 0), 0)
+  const comprasSub = comprasTotal / 1.16
+  const utilSub = ventaSub - comprasSub
+  const utilTotal = ventaTotal - comprasTotal
+  const margen = ventaSub > 0 ? (utilSub / ventaSub) * 100 : null
   const cobros = sel.clientPaymentsForProject(state, p.id)
   const cobrado = sel.projectCobrado(state, p.id)
   const saldoCli = sel.projectSaldoCliente(state, p)
@@ -171,9 +178,10 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
       title={<span className="flex items-center gap-3">{p.code} <StageBadge stage={p.stage} withNum /></span>}
       sub={`${client ? client.name : ''} · ${p.city}`}
       footer={<>
-        <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar datos</button>
+        {canEditProject(state.currentUser, p) && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar datos</button>}
         <div className="flex-1"></div>
-        <MoveStage project={p} />
+        {/* Avanzar de etapa (confirmar/mover) solo para roles con gestión, no para Ventas. */}
+        {state.currentUser?.role !== 'ventas' && <MoveStage project={p} />}
       </>}>
 
       {/* stage stepper full */}
@@ -213,6 +221,19 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
             <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>IVA 16%</span><span className="mono">{fmtMoney(ventaIva)}</span></div>
             <div className="flex justify-between items-baseline mt-1"><span className="label-k">Total con IVA</span><span className="font-display font-extrabold text-[19px]">{fmtMoney(ventaTotal)}</span></div>
           </div>
+
+          <div className="label-k mb-2">Utilidad</div>
+          <div className="bg-bg-1 border border-line p-3.5 mb-3.5">
+            <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Subtotal de la venta</span><span className="mono">{fmtMoney(ventaSub)}</span></div>
+            <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (sin IVA)</span><span className="mono">−{fmtMoney(comprasSub)}</span></div>
+            <div className="flex justify-between text-[12.5px] py-[3px]"><span className="text-tx-1 font-semibold">Utilidad sin IVA</span><span className="mono font-semibold" style={{ color: utilSub >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilSub)}</span></div>
+            <div className="h-px bg-line my-2"></div>
+            <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Total con IVA</span><span className="mono">{fmtMoney(ventaTotal)}</span></div>
+            <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (con IVA)</span><span className="mono">−{fmtMoney(comprasTotal)}</span></div>
+            <div className="flex justify-between items-baseline mt-1"><span className="label-k">Utilidad con IVA</span><span className="font-display font-extrabold text-[19px]" style={{ color: utilTotal >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilTotal)}</span></div>
+            {margen != null && <div className="flex justify-between text-[11px] text-tx-3 mt-1.5"><span>Margen sobre venta</span><span className="mono">{margen.toFixed(1)}%</span></div>}
+          </div>
+
           <div className="label-k mb-2">Proveedores asignados</div>
           <div className="flex flex-col gap-1.5">
             {p.suppliers.length === 0 && <span className="meta">Sin proveedor asignado</span>}
@@ -318,7 +339,11 @@ const blank = (): ProjectFormState => ({
 
 export function ProjectForm({ project, onClose }: { project?: Project; onClose: () => void }) {
   const { state, dispatch } = useStore()
-  const [p, setP] = React.useState<ProjectFormState>(() => project ? JSON.parse(JSON.stringify(project)) : { ...blank(), code: nextProjectCode(state.projects) })
+  const me = state.currentUser
+  const isVentas = me?.role === 'ventas'
+  const [p, setP] = React.useState<ProjectFormState>(() => project
+    ? JSON.parse(JSON.stringify(project))
+    : { ...blank(), code: nextProjectCode(state.projects), seller: isVentas ? me!.id : '' })
   const isNew = !project
   const set = (k: keyof ProjectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   const setDoc = (k: keyof ProjectDocs, v: { name: string; path: string }) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name: v.name, ok: !!v.name, ...(v.path ? { path: v.path } : {}) } } }))
@@ -331,7 +356,9 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
   // Guardia de cambios sin guardar: si el formulario se tocó, confirma antes de salir.
   const { requestClose, guard } = useUnsavedGuard(p, onClose)
   const save = () => {
-    dispatch({ type: 'SAVE_PROJECT', project: { ...p, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } })
+    // Ventas: el vendedor SIEMPRE es él mismo (no puede registrar ventas a nombre de otro).
+    const seller = isVentas ? me!.id : p.seller
+    dispatch({ type: 'SAVE_PROJECT', project: { ...p, seller, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } })
     onClose()
   }
 
@@ -356,13 +383,13 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
         <Field label="Sistema vendido"><Input value={p.sistemaVendido || ''} onChange={e => set('sistemaVendido', e.target.value)} placeholder="Ej. Rack selectivo" /></Field>
 
         <Field label="Vendedor">
-          <Select value={p.seller} onChange={e => set('seller', e.target.value)}>
+          <Select value={p.seller} onChange={e => set('seller', e.target.value)} disabled={isVentas}>
             <option value="">Selecciona…</option>
-            {state.sellers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            {sel.vendedores(state).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
         </Field>
         <Field label="Etapa actual">
-          <Select value={p.stage} onChange={e => set('stage', e.target.value)}>
+          <Select value={p.stage} onChange={e => set('stage', e.target.value)} disabled={isVentas}>
             {STAGES.map(s => <option key={s.id} value={s.id}>{String(s.n).padStart(2,'0')} · {s.label}</option>)}
           </Select>
         </Field>

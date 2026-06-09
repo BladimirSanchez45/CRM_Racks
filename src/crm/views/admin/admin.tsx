@@ -2,7 +2,7 @@
 //  ADMINISTRACIÓN — gestión de usuarios (solo rol admin)
 // ============================================================
 import * as React from 'react'
-import { useStore, roleLabel, isAdminRole, isSuperadmin, ROLE_LABELS } from '../../core/data'
+import { useStore, sel, roleLabel, isAdminRole, isSuperadmin, ROLE_LABELS } from '../../core/data'
 import { createUser, updateUser, toggleUser, removeUser, fetchUsers, saveSeller, deleteSeller, fetchSellers, impersonateUser } from '../../core/api'
 import { Modal, Field, Input, Select, Empty, Confirm } from '../../core/ui'
 import { Icon } from '../../core/icons'
@@ -41,17 +41,17 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
   const linkedSeller = user ? state.sellers.find(s => s.id === user.id) : undefined
   const [u, setU] = React.useState<UserFormState>(() => user
     ? { id: user.id, name: user.name, email: user.email, password: '', role: user.role, title: user.title || '', active: user.active,
-        ratePct: linkedSeller ? pctStr(linkedSeller.rate) : '4', overridePct: linkedSeller?.overrideRate ? pctStr(linkedSeller.overrideRate) : '' }
-    : { name: '', email: '', password: '', role: 'ventas', title: '', active: true, ratePct: '4', overridePct: '' })
+        ratePct: linkedSeller ? pctStr(linkedSeller.rate) : '', overridePct: linkedSeller?.overrideRate ? pctStr(linkedSeller.overrideRate) : '' }
+    : { name: '', email: '', password: '', role: 'ventas', title: '', active: true, ratePct: '', overridePct: '' })
   const set = (k: keyof UserFormState, v: unknown) => setU(s => ({ ...s, [k]: v }))
   const [error, setError] = React.useState('')
   const [saving, setSaving] = React.useState(false)
   const isVentas = u.role === 'ventas'
 
   // Al crear se exige contraseña; al editar es opcional (vacío = no cambiarla).
-  // Si es vendedor, la comisión debe ser un número válido.
-  const valid = u.name.trim() && u.email.trim() && (!!user || u.password.trim())
-    && (!isVentas || (u.ratePct.trim() && !isNaN(Number(u.ratePct)) && (!u.overridePct.trim() || !isNaN(Number(u.overridePct)))))
+  // Los % son opcionales para cualquier rol; si se ponen, deben ser numéricos.
+  const numOk = (s: string) => !s.trim() || !isNaN(Number(s))
+  const valid = !!(u.name.trim() && u.email.trim() && (!!user || u.password.trim()) && numOk(u.ratePct) && numOk(u.overridePct))
   const save = async () => {
     setError('')
     setSaving(true)
@@ -72,11 +72,16 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
         const res = await createUser({ ...base, password: u.password })
         userId = res?.id
       }
-      // Sincroniza el catálogo de vendedores: un usuario de rol Ventas ES un vendedor
-      // (mismo id). Si cambia a otro rol, se elimina su vendedor ligado.
+      // Registro de comisiones (tabla sellers, mismo id que el usuario). Se crea si es
+      // rol Ventas (vendedor; comisión sobre ventas propias, 4% por defecto) o si tiene
+      // comisión/override (cualquier rol; cobra vía override). Los NO-ventas se ocultan
+      // del catálogo de Vendedores y de la asignación de proyectos (ver sel.vendedores).
       if (userId) {
-        if (isVentas) {
-          await saveSeller({ id: userId, name: base.name, initials: base.initials, rate: Number(u.ratePct) / 100, overrideRate: u.overridePct.trim() ? Number(u.overridePct) / 100 : 0 })
+        const rate = u.ratePct.trim() ? Number(u.ratePct) / 100 : (isVentas ? 0.04 : 0)
+        const overrideRate = u.overridePct.trim() ? Number(u.overridePct) / 100 : 0
+        const earnsCommission = isVentas || rate > 0 || overrideRate > 0
+        if (earnsCommission) {
+          await saveSeller({ id: userId, name: base.name, initials: base.initials, rate, overrideRate })
         } else if (linkedSeller) {
           await deleteSeller(userId)
         }
@@ -111,11 +116,13 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
           </Select>
         </Field>
         <Field label="Puesto"><Input value={u.title} onChange={e => set('title', e.target.value)} placeholder="Ejecutivo de ventas" /></Field>
-        {isVentas && <>
-          <Field label="Comisión (%)"><Input value={u.ratePct} onChange={e => set('ratePct', e.target.value)} placeholder="4" /></Field>
-          <Field label="Override otras ventas (%)"><Input value={u.overridePct} onChange={e => set('overridePct', e.target.value)} placeholder="0" /></Field>
-          <div className="meta col-span-2 -mt-1">Como es rol Ventas, también se registra como <b>vendedor</b> (se le pueden asignar ventas y comisiones). Override: % que gana sobre las ventas de los demás.</div>
-        </>}
+        <Field label="Comisión (%)"><Input value={u.ratePct} onChange={e => set('ratePct', e.target.value)} placeholder={isVentas ? '4' : '0'} /></Field>
+        <Field label="Override otras ventas (%)"><Input value={u.overridePct} onChange={e => set('overridePct', e.target.value)} placeholder="0" /></Field>
+        <div className="meta col-span-2 -mt-1">
+          {isVentas
+            ? <>Rol Ventas: se registra como <b>vendedor</b>. <b>Comisión</b> = % sobre sus ventas propias (4% por defecto). <b>Override</b> = % sobre las ventas de los demás.</>
+            : <>Puedes asignarle comisión a cualquier empleado. Como no es Ventas, <b>no</b> aparece como vendedor; lo que cobra es el <b>Override</b> (% sobre todas las ventas), y se ve en Comisiones.</>}
+        </div>
         <Field label="Estado" span={2}>
           <button type="button" className="btn h-[38px] justify-center" onClick={() => set('active', !u.active)}
             style={{ background: u.active ? 'var(--acc-ghost-2)' : 'var(--bg-1)', borderColor: u.active ? 'var(--acc)' : 'var(--line)', color: u.active ? 'var(--acc-bright)' : 'var(--tx-2)' }}>
@@ -272,7 +279,7 @@ export function AdminPage() {
           <table className="tbl">
             <thead><tr><th>Vendedor</th><th>Comisión</th><th className="text-right">Acciones</th></tr></thead>
             <tbody>
-              {state.sellers.map(v => {
+              {sel.vendedores(state).map(v => {
                 const fromUser = state.users.some(us => us.id === v.id)
                 return (
                 <tr key={v.id} onClick={() => fromUser ? undefined : setSellerForm(v)}>
@@ -297,7 +304,7 @@ export function AdminPage() {
             </tbody>
           </table>
         </div>
-        {state.sellers.length === 0 && <Empty icon="clients">Sin vendedores</Empty>}
+        {sel.vendedores(state).length === 0 && <Empty icon="clients">Sin vendedores</Empty>}
       </div>
 
       {form && <UserForm user={'id' in form ? form : undefined} onClose={() => setForm(null)} />}

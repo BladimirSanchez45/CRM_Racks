@@ -123,6 +123,7 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
    ============================================================ */
 function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
+  const isVentas = state.currentUser?.role === 'ventas'   // solo lectura
   const o = state.orders.find(x => x.id === order.id) || order
   const supplier = sel.supplier(state, o.supplierId)
   const project = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
@@ -141,11 +142,11 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
       title={<span className="flex items-center gap-3">{o.number} <OCStatus status={sel.ocStatus(state, o)} /></span>}
       sub={`${supplier ? supplier.name : '—'} · ${ocDesc(state, o)}`}
       footer={<>
-        <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar OC</button>
+        {!isVentas && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar OC</button>}
         <button className="btn btn-ghost" onClick={() => printOC(state, o, items)}><Icon name="download" size={14} /> PDF</button>
-        <button className="btn btn-danger" onClick={() => { dispatch({ type: 'DELETE_ORDER', id: o.id }); onClose() }}><Icon name="trash" size={14} /></button>
+        {!isVentas && <button className="btn btn-danger" onClick={() => { dispatch({ type: 'DELETE_ORDER', id: o.id }); onClose() }}><Icon name="trash" size={14} /></button>}
         <div className="flex-1"></div>
-        <button className="btn btn-primary" onClick={() => setAbono({})}><Icon name="plus" size={15} /> Agregar abono</button>
+        {!isVentas && <button className="btn btn-primary" onClick={() => setAbono({})}><Icon name="plus" size={15} /> Agregar abono</button>}
       </>}>
 
       <div className="grid grid-cols-3 gap-3.5 mb-5">
@@ -215,10 +216,10 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
                   <td className="num text-[12px]">{fmtMoney(acum)}<div className="meta">de {fmtMoney(o.amount)}</div></td>
                   <td className="text-tx-1 text-[12px]">{p.method || '—'}{p.comments ? <div className="meta mt-px">{p.comments}</div> : null}</td>
                   <td><PaymentBadge status={p.status} /></td>
-                  <td><div className="flex gap-1 justify-end">
+                  <td>{!isVentas && <div className="flex gap-1 justify-end">
                     <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setAbono(p)}><Icon name="edit" size={13} /></button>
                     <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => dispatch({ type: 'DELETE_PAYMENT', id: p.id })}><Icon name="trash" size={13} /></button>
-                  </div></td>
+                  </div>}</td>
                 </tr>
               ) })}
             </tbody>
@@ -517,6 +518,8 @@ function MonthlyChart({ state }: { state: AppState }) {
    ============================================================ */
 export function OrdersPage() {
   const { state } = useStore()
+  const me = state.currentUser
+  const isVentas = me?.role === 'ventas'
   const [view, setView] = React.useState('oc')
   const [detail, setDetail] = React.useState<Order | null>(null)
   const [form, setForm] = React.useState<Partial<Order> | null>(null)
@@ -525,20 +528,24 @@ export function OrdersPage() {
   const [fSupplier, setFSupplier] = React.useState('')
 
   const ocStatusOf = (o: Order) => sel.ocStatus(state, o)
-  const list = state.orders.filter(o => (!fStatus || ocStatusOf(o) === fStatus) && (!fSupplier || o.supplierId === fSupplier))
-  const supplierOpts = state.suppliers.filter(s => state.orders.some(o => o.supplierId === s.id))
-  const sinAsignar = state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado')
+  // Ventas solo ve las OC asociadas a SUS proyectos (donde es el vendedor).
+  const orders = isVentas
+    ? state.orders.filter(o => { const proj = state.projects.find(p => p.id === o.projectId); return !!proj && proj.seller === me!.id })
+    : state.orders
+  const list = orders.filter(o => (!fStatus || ocStatusOf(o) === fStatus) && (!fSupplier || o.supplierId === fSupplier))
+  const supplierOpts = state.suppliers.filter(s => orders.some(o => o.supplierId === s.id))
+  const sinAsignar = isVentas ? [] : state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado')
 
   // KPIs
-  const totalOC = state.orders.reduce((a, o) => a + o.amount, 0)
-  const totalPaid = state.orders.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
+  const totalOC = orders.reduce((a, o) => a + o.amount, 0)
+  const totalPaid = orders.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
   const saldo = totalOC - totalPaid
-  const vencidas = state.orders.filter(o => ocStatusOf(o) === 'Vencida').length
-  const prox7 = state.orders.filter(o => {
+  const vencidas = orders.filter(o => ocStatusOf(o) === 'Vencida').length
+  const prox7 = orders.filter(o => {
     const n = sel.ocNextPayment(state, o.id); if (!n) return false
     const d = daysBetween(n); return d != null && d >= 0 && d <= 7 && sel.ocBalance(state, o) > 0
   }).length
-  const statusCounts = OC_STATES.map(s => ({ s, n: state.orders.filter(o => ocStatusOf(o) === s).length }))
+  const statusCounts = OC_STATES.map(s => ({ s, n: orders.filter(o => ocStatusOf(o) === s).length }))
   const maxCount = Math.max(1, ...statusCounts.map(c => c.n))
 
   const openOcForProject = (project: Project, sid: string) => {
@@ -551,8 +558,8 @@ export function OrdersPage() {
       <div className="spread mb-[18px] flex-wrap gap-3">
         <div className="sec-title m-0"><h2>Órdenes de compra</h2><span className="sub">Control de OC y pagos a proveedores</span></div>
         <div className="flex gap-2.5 items-center">
-          <Seg value={view} onChange={setView} options={[{ value: 'oc', label: 'Órdenes de compra' }, { value: 'sinasignar', label: `Sin asignar (${sinAsignar.length})` }]} />
-          <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nueva OC</button>
+          {!isVentas && <Seg value={view} onChange={setView} options={[{ value: 'oc', label: 'Órdenes de compra' }, { value: 'sinasignar', label: `Sin asignar (${sinAsignar.length})` }]} />}
+          {!isVentas && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nueva OC</button>}
         </div>
       </div>
 
@@ -619,7 +626,7 @@ export function OrdersPage() {
               {supplierOpts.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
             {(fStatus || fSupplier) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier('') }}><Icon name="close" size={13} /> Limpiar</button>}
-            <span className="meta">{list.length} de {state.orders.length}</span>
+            <span className="meta">{list.length} de {orders.length}</span>
           </div>
 
           <div className="card overflow-hidden">

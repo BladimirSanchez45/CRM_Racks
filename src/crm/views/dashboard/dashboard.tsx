@@ -82,11 +82,17 @@ function Alerts({ projects, state, onOpen }: { projects: Project[]; state: AppSt
 
 export function DashboardPage({ onNavigate, onOpenProject }: { onNavigate: (route: string) => void; onOpenProject: (p: Project) => void }) {
   const { state } = useStore()
-  const active = state.projects.filter(p => p.stage !== 'finalizado')
-  const revenue = state.projects.filter(p => p.stage === 'finalizado').reduce((a, p) => a + sel.budget(p), 0)
+  const me = state.currentUser
+  const isVentas = me?.role === 'ventas'
+  // Ventas: el panel se limita a SUS proyectos (y a la actividad sobre ellos).
+  const myProjects = isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects
+  const active = myProjects.filter(p => p.stage !== 'finalizado')
+  const revenue = myProjects.filter(p => p.stage === 'finalizado').reduce((a, p) => a + sel.budget(p), 0)
   const pendingPay = active.filter(p => p.finiquito === 'pending' && stageIndex(p.stage) >= 4).reduce((a, p) => a + sel.budget(p), 0)
   const finishingThisMonth = active.filter(p => p.eta && p.eta.startsWith('2026-06'))
   const pipelineValue = active.reduce((a, p) => a + sel.budget(p), 0)
+  const myCodes = new Set(myProjects.map(p => p.code))
+  const myActivity = isVentas ? state.activity.filter(a => myCodes.has(a.tgt)) : state.activity
 
   return (
     <div>
@@ -109,7 +115,7 @@ export function DashboardPage({ onNavigate, onOpenProject }: { onNavigate: (rout
             <span className="flex-1"></span>
             <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('projects')}>Ver tablero <Icon name="arrowRight" size={13} /></button>
           </div>
-          <div className="card-b"><PipelineChart projects={state.projects} onPick={() => onNavigate('projects')} /></div>
+          <div className="card-b"><PipelineChart projects={myProjects} onPick={() => onNavigate('projects')} /></div>
         </div>
 
         {/* alerts */}
@@ -118,7 +124,7 @@ export function DashboardPage({ onNavigate, onOpenProject }: { onNavigate: (rout
             <Icon name="bell" size={17} className="text-warn" />
             <span className="ttl">Alertas</span>
           </div>
-          <div className="card-b"><Alerts projects={state.projects} state={state} onOpen={onOpenProject} /></div>
+          <div className="card-b"><Alerts projects={myProjects} state={state} onOpen={onOpenProject} /></div>
         </div>
       </div>
 
@@ -129,7 +135,7 @@ export function DashboardPage({ onNavigate, onOpenProject }: { onNavigate: (rout
             <Icon name="layers" size={17} className="text-st-5" />
             <span className="ttl">Actividad reciente</span>
           </div>
-          <div className="card-b pt-1 pb-1"><ActivityFeed activity={state.activity} /></div>
+          <div className="card-b pt-1 pb-1"><ActivityFeed activity={myActivity} /></div>
         </div>
 
         {/* finishing this month */}
