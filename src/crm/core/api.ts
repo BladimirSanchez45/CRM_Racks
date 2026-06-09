@@ -6,7 +6,7 @@
 import { supabase } from './supabase'
 import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
-  ClientPayment, Commission, Activity, AppState,
+  ClientPayment, Commission, Activity, Notification, AppState,
 } from './types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -310,6 +310,44 @@ export async function fetchActivity(): Promise<Activity[]> {
 export const saveActivity = (a: Activity) =>
   upsert('activity', { id: a.id, t: a.t, icon: a.icon, who: a.who, txt: a.txt, tgt: orNull(a.tgt), kind: a.kind })
 
+/* ---- Notificaciones (dirigidas a un usuario; RLS las acota al destinatario) ---- */
+function mapNotification(r: any): Notification {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    kind: r.kind,
+    title: r.title ?? '',
+    body: r.body ?? '',
+    read: !!r.read,
+    createdAt: r.created_at,
+    ...(r.project_id ? { projectId: r.project_id } : {}),
+    ...(r.actor_name ? { actorName: r.actor_name } : {}),
+  }
+}
+/** Trae las notificaciones del usuario en sesión (RLS filtra por destinatario). */
+export async function fetchNotifications(): Promise<Notification[]> {
+  const { data, error } = await supabase.from('notifications').select('*').order('created_at', { ascending: false }).limit(60)
+  if (error) throw error
+  return (data ?? []).map(mapNotification)
+}
+export const saveNotification = (n: Notification) =>
+  upsert('notifications', {
+    id: n.id, user_id: n.userId, kind: n.kind, title: n.title, body: n.body,
+    read: n.read, created_at: n.createdAt, project_id: n.projectId ?? null, actor_name: n.actorName ?? null,
+  })
+/** Marca una notificación como leída. */
+export async function markNotificationRead(id: string): Promise<void> {
+  const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id)
+  if (error) throw error
+}
+/** Marca como leídas todas las notificaciones del usuario en sesión. */
+export async function markAllNotificationsRead(): Promise<void> {
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return
+  const { error } = await supabase.from('notifications').update({ read: true }).eq('user_id', auth.user.id).eq('read', false)
+  if (error) throw error
+}
+
 /* ---- Clientes / Proveedores (escritura; lectura ya existe arriba) ---- */
 export const saveClientRow = (c: Client) => upsert('clients', {
   id: c.id, name: c.name, city: c.city, contact: c.contact, phone: c.phone, email: c.email,
@@ -353,10 +391,10 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, activity] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
-      fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(), fetchActivity(),
+      fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, activity }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, activity, notifications }
 }

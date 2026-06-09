@@ -235,6 +235,23 @@ export interface Activity {
   kind: 'done' | 'money' | 'new' | 'work' | 'info'
 }
 
+/** Tipos de notificación. Por ahora solo "proyecto asignado a un vendedor". */
+export type NotificationKind = 'project_assigned'
+
+/** Notificación dirigida a un usuario concreto (a diferencia del feed de
+ *  actividad, que es global). Se entrega por id de usuario destinatario. */
+export interface Notification {
+  id: string
+  userId: string          // destinatario (id de usuario)
+  kind: NotificationKind
+  title: string
+  body: string
+  read: boolean
+  createdAt: string       // ISO
+  projectId?: string      // entidad relacionada (para abrir el detalle)
+  actorName?: string      // quién la originó
+}
+
 /** Estado global de la aplicación. */
 export interface AppState {
   projects: Project[]
@@ -246,6 +263,7 @@ export interface AppState {
   sellers: Seller[]
   commissions: Commission[]
   activity: Activity[]
+  notifications: Notification[]
   users: User[]
   currentUser: User | null
 }
@@ -287,6 +305,8 @@ export type Action =
   | { type: 'TOGGLE_COMMISSION'; id: string }
   | { type: 'SAVE_SELLER'; seller: SellerInput }
   | { type: 'DELETE_SELLER'; id: string }
+  | { type: 'MARK_NOTIFICATION_READ'; id: string }
+  | { type: 'MARK_ALL_NOTIFICATIONS_READ' }
   | { type: 'LOGIN'; user: User }
   | { type: 'LOGOUT' }
 
@@ -312,3 +332,5 @@ export type StateAction =
   | { type: 'UPSERT_SELLER'; seller: Seller }
   | { type: 'REMOVE_SELLER'; id: string }
   | { type: 'PUSH_ACTIVITY'; activity: Activity }
+  | { type: 'UPSERT_NOTIFICATION'; notification: Notification }
+  | { type: 'MARK_ALL_NOTIFICATIONS_READ' }

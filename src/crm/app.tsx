@@ -16,6 +16,7 @@ import { CobranzaPage } from './views/cobranza/cobranza'
 import { ClientsPage } from './views/clients/clients'
 import { CommissionsPage } from './views/commissions/commissions'
 import { AdminPage } from './views/admin/admin'
+import { NotificationsBell } from './views/notifications/notifications'
 import { LoginPage } from './views/login/login'
 import type { Project } from './core/types'
 import strakkLogo from '../assets/logos/strakk_logo.png'
@@ -147,10 +148,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
           <button className="icon-btn" onClick={() => setTweak('light', !t.light)} title={t.light ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
             <Icon name={t.light ? 'sun' : 'moon'} size={17} />
           </button>
-          <button className="icon-btn relative" title="Notificaciones">
-            <Icon name="bell" size={17} />
-            <span className="absolute top-[7px] right-[7px] w-1.5 h-1.5 rounded-full bg-danger"></span>
-          </button>
+          <NotificationsBell onOpenProject={onOpenProject} />
         </header>
         <main className="content blueprint">
           <div className="content-inner" key={route}>{page()}</div>

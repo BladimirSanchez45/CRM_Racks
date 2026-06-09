@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore } from '../../core/data'
-import { createUser, updateUser, toggleUser, removeUser, fetchUsers } from '../../core/api'
+import { createUser, updateUser, toggleUser, removeUser, fetchUsers, saveSeller, deleteSeller, fetchSellers } from '../../core/api'
 import { Modal, Field, Input, Select, Empty, Confirm } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { User, Role, Seller } from '../../core/types'
@@ -19,6 +19,8 @@ const roleClass = (r: Role) => `role-${r}`
 const roleLabel = (r: Role) => ROLES.find(x => x.id === r)?.label ?? r
 const initialsOf = (name: string) =>
   name.trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?'
+/** Fracción (0.04) → texto de porcentaje limpio ("4"). */
+const pctStr = (frac: number) => String((frac * 100).toFixed(2).replace(/\.?0+$/, ''))
 
 /* ---- Formulario de usuario ---- */
 type UserFormState = {
@@ -29,18 +31,26 @@ type UserFormState = {
   role: Role
   title: string
   active: boolean
+  ratePct: string
+  overridePct: string
 }
 function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
-  const { dispatch } = useStore()
+  const { state, dispatch } = useStore()
+  // Si el usuario ya tiene un vendedor ligado (mismo id), precarga sus % de comisión.
+  const linkedSeller = user ? state.sellers.find(s => s.id === user.id) : undefined
   const [u, setU] = React.useState<UserFormState>(() => user
-    ? { id: user.id, name: user.name, email: user.email, password: '', role: user.role, title: user.title || '', active: user.active }
-    : { name: '', email: '', password: '', role: 'ventas', title: '', active: true })
+    ? { id: user.id, name: user.name, email: user.email, password: '', role: user.role, title: user.title || '', active: user.active,
+        ratePct: linkedSeller ? pctStr(linkedSeller.rate) : '4', overridePct: linkedSeller?.overrideRate ? pctStr(linkedSeller.overrideRate) : '' }
+    : { name: '', email: '', password: '', role: 'ventas', title: '', active: true, ratePct: '4', overridePct: '' })
   const set = (k: keyof UserFormState, v: unknown) => setU(s => ({ ...s, [k]: v }))
   const [error, setError] = React.useState('')
   const [saving, setSaving] = React.useState(false)
+  const isVentas = u.role === 'ventas'
 
   // Al crear se exige contraseña; al editar es opcional (vacío = no cambiarla).
+  // Si es vendedor, la comisión debe ser un número válido.
   const valid = u.name.trim() && u.email.trim() && (!!user || u.password.trim())
+    && (!isVentas || (u.ratePct.trim() && !isNaN(Number(u.ratePct)) && (!u.overridePct.trim() || !isNaN(Number(u.overridePct)))))
   const save = async () => {
     setError('')
     setSaving(true)
@@ -53,14 +63,26 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
         initials: initialsOf(u.name),
         active: u.active,
       }
+      // Crea/edita el usuario y obtén su id (la Edge Function lo devuelve al crear).
+      let userId = user?.id
       if (user) {
         await updateUser({ id: user.id, ...base, ...(u.password.trim() ? { password: u.password } : {}) })
       } else {
-        await createUser({ ...base, password: u.password })
+        const res = await createUser({ ...base, password: u.password })
+        userId = res?.id
       }
-      // Refresca la lista desde la base.
-      const users = await fetchUsers()
-      dispatch({ type: 'HYDRATE', data: { users } })
+      // Sincroniza el catálogo de vendedores: un usuario de rol Ventas ES un vendedor
+      // (mismo id). Si cambia a otro rol, se elimina su vendedor ligado.
+      if (userId) {
+        if (isVentas) {
+          await saveSeller({ id: userId, name: base.name, initials: base.initials, rate: Number(u.ratePct) / 100, overrideRate: u.overridePct.trim() ? Number(u.overridePct) / 100 : 0 })
+        } else if (linkedSeller) {
+          await deleteSeller(userId)
+        }
+      }
+      // Refresca usuarios y vendedores desde la base.
+      const [users, sellers] = await Promise.all([fetchUsers(), fetchSellers()])
+      dispatch({ type: 'HYDRATE', data: { users, sellers } })
       onClose()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar el usuario.')
@@ -86,6 +108,11 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
           </Select>
         </Field>
         <Field label="Puesto"><Input value={u.title} onChange={e => set('title', e.target.value)} placeholder="Ejecutivo de ventas" /></Field>
+        {isVentas && <>
+          <Field label="Comisión (%)"><Input value={u.ratePct} onChange={e => set('ratePct', e.target.value)} placeholder="4" /></Field>
+          <Field label="Override otras ventas (%)"><Input value={u.overridePct} onChange={e => set('overridePct', e.target.value)} placeholder="0" /></Field>
+          <div className="meta col-span-2 -mt-1">Como es rol Ventas, también se registra como <b>vendedor</b> (se le pueden asignar ventas y comisiones). Override: % que gana sobre las ventas de los demás.</div>
+        </>}
         <Field label="Estado" span={2}>
           <button type="button" className="btn h-[38px] justify-center" onClick={() => set('active', !u.active)}
             style={{ background: u.active ? 'var(--acc-ghost-2)' : 'var(--bg-1)', borderColor: u.active ? 'var(--acc)' : 'var(--line)', color: u.active ? 'var(--acc-bright)' : 'var(--tx-2)' }}>
@@ -106,8 +133,8 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
 function SellerForm({ seller, onClose }: { seller?: Seller; onClose: () => void }) {
   const { dispatch } = useStore()
   const [name, setName] = React.useState(seller?.name ?? '')
-  const [ratePct, setRatePct] = React.useState(seller ? String((seller.rate * 100).toFixed(2).replace(/\.?0+$/, '')) : '4')
-  const [overridePct, setOverridePct] = React.useState(seller?.overrideRate ? String((seller.overrideRate * 100).toFixed(2).replace(/\.?0+$/, '')) : '')
+  const [ratePct, setRatePct] = React.useState(seller ? pctStr(seller.rate) : '4')
+  const [overridePct, setOverridePct] = React.useState(seller?.overrideRate ? pctStr(seller.overrideRate) : '')
 
   const valid = name.trim() && ratePct.trim() && !isNaN(Number(ratePct)) && (!overridePct.trim() || !isNaN(Number(overridePct)))
   const save = () => {
@@ -229,21 +256,28 @@ export function AdminPage() {
           <table className="tbl">
             <thead><tr><th>Vendedor</th><th>Comisión</th><th className="text-right">Acciones</th></tr></thead>
             <tbody>
-              {state.sellers.map(v => (
-                <tr key={v.id} onClick={() => setSellerForm(v)}>
+              {state.sellers.map(v => {
+                const fromUser = state.users.some(us => us.id === v.id)
+                return (
+                <tr key={v.id} onClick={() => fromUser ? undefined : setSellerForm(v)}>
                   <td>
                     <div className="flex items-center gap-2.5">
                       <span className="avatar">{v.initials}</span>
                       <span className="font-semibold text-[12.5px]">{v.name}</span>
+                      {fromUser && <span className="meta">· usuario</span>}
                     </div>
                   </td>
                   <td className="num font-semibold">{(v.rate * 100).toFixed(1)}%{v.overrideRate ? <span className="meta font-normal"> + {(v.overrideRate * 100).toFixed(1)}% override</span> : null}</td>
                   <td className="text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                    <button className="btn btn-ghost btn-sm" title="Editar vendedor" onClick={() => setSellerForm(v)}><Icon name="edit" size={14} /></button>
-                    <button className="btn btn-ghost btn-sm text-danger" onClick={() => setSellerDel(v)}><Icon name="trash" size={14} /></button>
+                    {fromUser
+                      ? <span className="meta">Se gestiona desde Usuarios</span>
+                      : <>
+                          <button className="btn btn-ghost btn-sm" title="Editar vendedor" onClick={() => setSellerForm(v)}><Icon name="edit" size={14} /></button>
+                          <button className="btn btn-ghost btn-sm text-danger" onClick={() => setSellerDel(v)}><Icon name="trash" size={14} /></button>
+                        </>}
                   </td>
                 </tr>
-              ))}
+              ) })}
             </tbody>
           </table>
         </div>

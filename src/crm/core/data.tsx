@@ -9,6 +9,7 @@ import type {
   Client,
   ClientPayment,
   Commission,
+  Notification,
   OcStatus,
   Order,
   PayStatus,
@@ -28,6 +29,7 @@ import {
   saveClientPayment, deleteClientPayment as apiDeleteClientPayment,
   saveCommission, saveClientRow, deleteClient as apiDeleteClient, saveSupplierRow, deleteSupplier as apiDeleteSupplier, saveSeller, deleteSeller as apiDeleteSeller,
   saveActivity,
+  saveNotification, markNotificationRead, markAllNotificationsRead,
 } from './api'
 import { supabase } from './supabase'
 
@@ -143,7 +145,7 @@ export const regimenLabel = (code?: string) =>
 // ============================================================
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
-  clients: [], sellers: [], commissions: [], activity: [],
+  clients: [], sellers: [], commissions: [], activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
 
@@ -182,6 +184,8 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'UPSERT_SELLER': return { ...state, sellers: upsertBy(state.sellers, a.seller) }
     case 'REMOVE_SELLER': return { ...state, sellers: state.sellers.filter(s => s.id !== a.id) }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
+    case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
+    case 'MARK_ALL_NOTIFICATIONS_READ': return { ...state, notifications: state.notifications.map(n => n.read ? n : { ...n, read: true }) }
     default: return state
   }
 }
@@ -290,6 +294,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'flag', who: whoName(s), txt: 'registró nueva venta', tgt: full.code, kind: 'new' }
           rawDispatch({ type: 'PUSH_ACTIVITY', activity })
           thunks.push(() => saveActivity(activity))
+          // Notifica al vendedor asignado (si es un usuario del sistema y no es quien la creó).
+          const recipient = s.users.find(u => u.id === full.seller)
+          if (recipient && recipient.id !== s.currentUser?.id) {
+            const clientName = sel.clientName(s, full.client)
+            const notification: Notification = {
+              id: uid('nt'), userId: recipient.id, kind: 'project_assigned',
+              title: `Nuevo proyecto: ${full.code}`,
+              body: `${whoName(s)} te asignó como vendedor${clientName ? ` del cliente ${clientName}` : ''}.`,
+              read: false, createdAt: nowISO(), projectId: full.id, actorName: whoName(s),
+            }
+            // No se agrega al estado local: la notificación es para OTRO usuario,
+            // que la verá al cargar su sesión (RLS la acota al destinatario).
+            thunks.push(() => saveNotification(notification))
+          }
         }
         persist(thunks); return
       }
@@ -368,6 +386,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case 'DELETE_SELLER':
         rawDispatch({ type: 'REMOVE_SELLER', id: action.id })
         persist([() => apiDeleteSeller(action.id)]); return
+
+      case 'MARK_NOTIFICATION_READ': {
+        const n = s.notifications.find(x => x.id === action.id); if (!n || n.read) return
+        rawDispatch({ type: 'UPSERT_NOTIFICATION', notification: { ...n, read: true } })
+        persist([() => markNotificationRead(action.id)]); return
+      }
+      case 'MARK_ALL_NOTIFICATIONS_READ': {
+        if (!s.notifications.some(n => !n.read)) return
+        rawDispatch({ type: 'MARK_ALL_NOTIFICATIONS_READ' })
+        persist([() => markAllNotificationsRead()]); return
+      }
     }
   }, [persist])
 

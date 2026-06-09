@@ -54,12 +54,12 @@ interface AlertItem { p: Project; kind: 'danger' | 'warn' | 'info'; icon: IconNa
 function Alerts({ projects, state, onOpen }: { projects: Project[]; state: AppState; onOpen: (p: Project) => void }) {
   const overdue = projects.filter(p => p.stage !== 'finalizado' && p.eta && (daysBetween(p.eta) as number) < 0)
   const pendingPay = projects.filter(p => p.stage !== 'finalizado' && p.finiquito === 'pending' && stageIndex(p.stage) >= 4)
-  const missingDocs = projects.filter(p => p.stage !== 'finalizado' && p.stage !== 'registro' && docCount(p).done < 3)
+  const missingDocs = projects.filter(p => p.stage !== 'finalizado' && p.stage !== 'registro' && docCount(p).done < docCount(p).total)
 
   const items: AlertItem[] = [
     ...overdue.map((p): AlertItem => ({ p, kind: 'danger', icon: 'alert', txt: `ETA vencida hace ${-(daysBetween(p.eta) as number)} días` })),
     ...pendingPay.map((p): AlertItem => ({ p, kind: 'warn', icon: 'money', txt: 'Finiquito pendiente del cliente' })),
-    ...missingDocs.map((p): AlertItem => ({ p, kind: 'info', icon: 'doc', txt: `Documentos incompletos (${docCount(p).done}/4)` })),
+    ...missingDocs.map((p): AlertItem => ({ p, kind: 'info', icon: 'doc', txt: `Documentos incompletos (${docCount(p).done}/${docCount(p).total})` })),
   ]
   const cmap: Record<string, string> = { danger: 'var(--danger)', warn: 'var(--warn)', info: 'var(--st-5)' }
 
