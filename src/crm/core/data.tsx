@@ -257,11 +257,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'UPSERT_PROJECT', project: updated })
         const thunks: (() => Promise<void>)[] = [() => saveProject(updated)]
         if (action.stage === 'finalizado' && !s.commissions.some(c => c.projectId === action.id)) {
+          const base = proj.freight + proj.install
           const seller = s.sellers.find(x => x.id === proj.seller)
-          const amount = Math.round((proj.freight + proj.install) * (seller ? seller.rate : 0.04))
+          const amount = Math.round(base * (seller ? seller.rate : 0.04))
           const commission: Commission = { id: uid('cm'), projectId: action.id, seller: proj.seller, amount, status: 'pending', month: curMonth() }
           rawDispatch({ type: 'UPSERT_COMMISSION', commission })
           thunks.push(() => saveCommission(commission))
+          // Override: vendedores con overrideRate ganan ese % sobre las ventas de los DEMÁS.
+          s.sellers
+            .filter(v => v.overrideRate && v.overrideRate > 0 && v.id !== proj.seller)
+            .forEach(v => {
+              const ov: Commission = { id: uid('cm'), projectId: action.id, seller: v.id, amount: Math.round(base * v.overrideRate!), status: 'pending', month: curMonth() }
+              rawDispatch({ type: 'UPSERT_COMMISSION', commission: ov })
+              thunks.push(() => saveCommission(ov))
+            })
         }
         const stg = STAGE_MAP[action.stage]
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: stg.icon, who: whoName(s), txt: `movió a ${stg.short}`, tgt: proj.code, kind: 'info' }

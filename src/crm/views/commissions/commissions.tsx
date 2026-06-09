@@ -60,13 +60,15 @@ export function CommissionsPage() {
               <tbody>
                 {filtered.map(r => {
                   const base = sel.budget(r.project!)
+                  const isOverride = !!(r.seller && r.project && r.seller.id !== r.project.seller)
+                  const pct = base > 0 ? (r.amount / base) * 100 : (r.seller ? r.seller.rate * 100 : 0)
                   return (
                     <tr key={r.id} className="cursor-default">
                       <td><span className="mono text-acc font-semibold">{r.project!.code}</span><div className="meta mt-0.5">Cerrado {r.project!.closedOn ? fmtDate(r.project!.closedOn) : '—'}</div></td>
                       <td>{sel.clientName(state, r.project!.client)}</td>
-                      <td><span className="inline-flex items-center gap-[7px]"><Avatar name={r.seller ? r.seller.name : ''} size={22} /> {r.seller ? r.seller.name : '—'}</span></td>
+                      <td><span className="inline-flex items-center gap-[7px]"><Avatar name={r.seller ? r.seller.name : ''} size={22} /> {r.seller ? r.seller.name : '—'}{isOverride && <Badge color="var(--st-5)">override</Badge>}</span></td>
                       <td className="num text-tx-2">{fmtMoney(base)}</td>
-                      <td className="num font-semibold">{fmtMoney2(r.amount)}<div className="meta mt-0.5">{r.seller ? (r.seller.rate * 100).toFixed(1) : 0}%</div></td>
+                      <td className="num font-semibold">{fmtMoney2(r.amount)}<div className="meta mt-0.5">{pct.toFixed(1)}%</div></td>
                       <td>{r.status === 'paid' ? <Badge color="var(--ok)">Pagada</Badge> : <Badge color="var(--warn)">Pendiente</Badge>}</td>
                       <td>
                         <button className={'btn btn-sm ' + (r.status === 'paid' ? 'btn-ghost' : 'btn-primary')} onClick={() => dispatch({ type: 'TOGGLE_COMMISSION', id: r.id })}>

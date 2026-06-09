@@ -32,6 +32,9 @@ export interface Seller {
   name: string
   initials: string
   rate: number
+  /** Comisión "override": % que este vendedor gana sobre las ventas de TODOS los demás
+   *  (además de su propio `rate` en sus ventas). Solo lo tienen casos especiales. 0 / undefined = sin override. */
+  overrideRate?: number
 }
 
 /** Roles de acceso. Por ahora todos ven todo; a futuro se limitará por rol. */

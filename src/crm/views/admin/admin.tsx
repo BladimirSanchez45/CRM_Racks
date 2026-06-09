@@ -107,8 +107,9 @@ function SellerForm({ seller, onClose }: { seller?: Seller; onClose: () => void 
   const { dispatch } = useStore()
   const [name, setName] = React.useState(seller?.name ?? '')
   const [ratePct, setRatePct] = React.useState(seller ? String((seller.rate * 100).toFixed(2).replace(/\.?0+$/, '')) : '4')
+  const [overridePct, setOverridePct] = React.useState(seller?.overrideRate ? String((seller.overrideRate * 100).toFixed(2).replace(/\.?0+$/, '')) : '')
 
-  const valid = name.trim() && ratePct.trim() && !isNaN(Number(ratePct))
+  const valid = name.trim() && ratePct.trim() && !isNaN(Number(ratePct)) && (!overridePct.trim() || !isNaN(Number(overridePct)))
   const save = () => {
     dispatch({
       type: 'SAVE_SELLER',
@@ -117,6 +118,7 @@ function SellerForm({ seller, onClose }: { seller?: Seller; onClose: () => void 
         name: name.trim(),
         initials: initialsOf(name),
         rate: Number(ratePct) / 100,
+        overrideRate: overridePct.trim() ? Number(overridePct) / 100 : 0,
       },
     })
     onClose()
@@ -132,6 +134,8 @@ function SellerForm({ seller, onClose }: { seller?: Seller; onClose: () => void 
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="Nombre completo" span={2}><Input value={name} onChange={e => setName(e.target.value)} placeholder="Ej. Ana Robles" /></Field>
         <Field label="Comisión (%)"><Input value={ratePct} onChange={e => setRatePct(e.target.value)} placeholder="4" /></Field>
+        <Field label="Override otras ventas (%)"><Input value={overridePct} onChange={e => setOverridePct(e.target.value)} placeholder="0" /></Field>
+        <div className="meta col-span-2 -mt-1">Override: % que gana sobre las ventas de los <b>demás</b> vendedores. Déjalo en blanco si no aplica.</div>
       </div>
     </Modal>
   )
@@ -198,6 +202,7 @@ export function AdminPage() {
                     </span>
                   </td>
                   <td className="text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <button className="btn btn-ghost btn-sm" title="Editar usuario" onClick={() => setForm(u)}><Icon name="edit" size={14} /></button>
                     <button className="btn btn-ghost btn-sm" disabled={isMe || lastAdmin || busy}
                       title={isMe ? 'No puedes desactivar tu propia cuenta' : lastAdmin ? 'Debe existir al menos un administrador' : ''}
                       onClick={() => onToggle(u.id)}>{u.active ? 'Desactivar' : 'Activar'}</button>
@@ -232,8 +237,9 @@ export function AdminPage() {
                       <span className="font-semibold text-[12.5px]">{v.name}</span>
                     </div>
                   </td>
-                  <td className="num font-semibold">{(v.rate * 100).toFixed(1)}%</td>
+                  <td className="num font-semibold">{(v.rate * 100).toFixed(1)}%{v.overrideRate ? <span className="meta font-normal"> + {(v.overrideRate * 100).toFixed(1)}% override</span> : null}</td>
                   <td className="text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <button className="btn btn-ghost btn-sm" title="Editar vendedor" onClick={() => setSellerForm(v)}><Icon name="edit" size={14} /></button>
                     <button className="btn btn-ghost btn-sm text-danger" onClick={() => setSellerDel(v)}><Icon name="trash" size={14} /></button>
                   </td>
                 </tr>

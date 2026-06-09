@@ -160,7 +160,7 @@ async function removeRow(table: string, id: string): Promise<void> {
 
 /* ---- Vendedores ---- */
 function mapSeller(r: any): Seller {
-  return { id: r.id, name: r.name ?? '', initials: r.initials ?? '', rate: Number(r.rate ?? 0) }
+  return { id: r.id, name: r.name ?? '', initials: r.initials ?? '', rate: Number(r.rate ?? 0), overrideRate: Number(r.override_rate ?? 0) }
 }
 export async function fetchSellers(): Promise<Seller[]> {
   const { data, error } = await supabase.from('sellers').select('*').order('name')
@@ -168,7 +168,7 @@ export async function fetchSellers(): Promise<Seller[]> {
   return (data ?? []).map(mapSeller)
 }
 export const saveSeller = (s: Seller) =>
-  upsert('sellers', { id: s.id, name: s.name, initials: s.initials, rate: s.rate })
+  upsert('sellers', { id: s.id, name: s.name, initials: s.initials, rate: s.rate, override_rate: s.overrideRate ?? 0 })
 export const deleteSeller = (id: string) => removeRow('sellers', id)
 
 /* ---- Proyectos ---- */
