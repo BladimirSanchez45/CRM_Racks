@@ -4,7 +4,7 @@
 //  dos columnas (descripción | controles). Pensada para crecer.
 // ============================================================
 import * as React from 'react'
-import { useStore } from '../../core/data'
+import { useStore, roleLabel } from '../../core/data'
 import { changeMyPassword } from '../../core/api'
 import { Field, Input, Avatar } from '../../core/ui'
 import { Icon } from '../../core/icons'
@@ -44,7 +44,7 @@ function ProfileHero() {
         <div className="text-[19px] font-bold leading-tight truncate">{me?.name || 'Usuario'}</div>
         <div className="meta font-mono mt-0.5 truncate">{me?.email}</div>
         <div className="flex items-center gap-2 mt-2">
-          <span className={'badge-role ' + (me?.role === 'admin' ? 'role-admin' : 'role-ventas')}>{me?.role === 'admin' ? 'Administrador' : 'Ventas'}</span>
+          <span className={'badge-role role-' + (me?.role ?? 'ventas')}>{roleLabel(me?.role)}</span>
           {me?.title && <span className="meta">{me.title}</span>}
         </div>
       </div>
@@ -59,7 +59,7 @@ function AccountControls() {
     <>
       <InfoRow label="Nombre"><span className="text-[13px] font-semibold">{me?.name || '—'}</span></InfoRow>
       <InfoRow label="Correo"><span className="text-[13px] font-mono">{me?.email || '—'}</span></InfoRow>
-      <InfoRow label="Rol"><span className="text-[13px] font-semibold">{me?.role === 'admin' ? 'Administrador' : 'Ventas'}</span></InfoRow>
+      <InfoRow label="Rol"><span className="text-[13px] font-semibold">{roleLabel(me?.role)}</span></InfoRow>
       <InfoRow label="Puesto" last><span className="text-[13px]">{me?.title || '—'}</span></InfoRow>
     </>
   )

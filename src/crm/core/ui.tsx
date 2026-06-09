@@ -2,6 +2,7 @@
 //  UI PRIMITIVES — badges, modal, fields, KPI, doc chips
 // ============================================================
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { Icon, type IconName } from './icons'
 import { STAGES, STAGE_MAP, stageIndex } from './data'
 import { uploadDoc, deleteDoc, signedDocUrl } from './api'
@@ -306,7 +307,10 @@ export function Modal({ title, sub, icon, onClose, children, footer, width = 640
     document.body.style.overflow = 'hidden'
     return () => { window.removeEventListener('keydown', h); document.body.style.overflow = '' }
   }, [])
-  return (
+  // Portal a <body>: evita que el modal quede atrapado en el stacking context de
+  // un ancestro con transform/filter/backdrop-filter (p. ej. el topbar) y aparezca
+  // detrás del contenido.
+  return createPortal(
     <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal" style={{ maxWidth: width }} onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-h">
@@ -320,7 +324,8 @@ export function Modal({ title, sub, icon, onClose, children, footer, width = 640
         <div className="modal-b">{children}</div>
         {footer && <div className="modal-f">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

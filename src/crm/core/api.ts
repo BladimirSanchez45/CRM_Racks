@@ -146,6 +146,15 @@ export function toggleUser(id: string) {
 export function removeUser(id: string) {
   return callAdminUsers({ action: 'delete', id })
 }
+/** Inicia sesión COMO otro usuario (suplantación, solo admin / testing).
+ *  Reemplaza la sesión actual: quien llama queda logueado como el destino. */
+export async function impersonateUser(id: string): Promise<void> {
+  const res = await callAdminUsers({ action: 'impersonate', id })
+  const tokenHash = res?.token_hash
+  if (!tokenHash) throw new Error('No se pudo generar el acceso de suplantación.')
+  const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'magiclink' })
+  if (error) throw error
+}
 
 /* ============================================================
    ENTIDADES OPERATIVAS — lectura y escritura
@@ -336,11 +345,17 @@ export async function fetchNotifications(): Promise<Notification[]> {
   if (error) throw error
   return (data ?? []).map(mapNotification)
 }
-export const saveNotification = (n: Notification) =>
-  upsert('notifications', {
+/** Crea una notificación (para OTRO usuario). Usa INSERT puro y `return=minimal`
+ *  (sin .select()): con `upsert` el ON CONFLICT DO UPDATE haría que el RLS evalúe
+ *  la política de UPDATE sobre una fila ajena → 42501. El INSERT solo evalúa la
+ *  política de INSERT (with check true). Los ids ya son únicos, no hay upsert que valga. */
+export async function saveNotification(n: Notification): Promise<void> {
+  const { error } = await supabase.from('notifications').insert({
     id: n.id, user_id: n.userId, kind: n.kind, title: n.title, body: n.body,
     read: n.read, created_at: n.createdAt, project_id: n.projectId ?? null, actor_name: n.actorName ?? null,
   })
+  if (error) throw error
+}
 /** Marca una notificación como leída. */
 export async function markNotificationRead(id: string): Promise<void> {
   const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id)

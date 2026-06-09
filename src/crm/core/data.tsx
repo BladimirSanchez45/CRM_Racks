@@ -15,6 +15,7 @@ import type {
   PayStatus,
   Payment,
   Project,
+  Role,
   Seller,
   Stage,
   StageId,
@@ -32,6 +33,21 @@ import {
   saveNotification, markNotificationRead, markAllNotificationsRead,
 } from './api'
 import { supabase } from './supabase'
+
+/* ---- Roles ---- */
+export const ROLE_LABELS: Record<Role, string> = {
+  superadmin: 'Super Admin',
+  admin: 'Administrador',
+  ventas: 'Ventas',
+  logistica: 'Logística',
+  almacen: 'Almacén',
+  direccion: 'Dirección',
+}
+export const roleLabel = (role?: Role | null) => (role ? ROLE_LABELS[role] : '—')
+/** Acceso a nivel administrador (panel admin, gestión de usuarios). */
+export const isAdminRole = (role?: Role | null) => role === 'admin' || role === 'superadmin'
+/** Solo el programador: cosas exclusivas como suplantar usuarios o asignar el rol superadmin. */
+export const isSuperadmin = (role?: Role | null) => role === 'superadmin'
 
 /* ---- The 9 pipeline stages (exact, in order) ---- */
 export const STAGES: Stage[] = [
@@ -77,7 +93,12 @@ export const ago = (d: string) => {
   return `hace ${Math.round(diff/30)} meses`
 }
 let _id = 1000
-export const uid = (p = 'id') => `${p}-${++_id}`
+// Id ÚNICO entre sesiones. Antes era solo `${p}-${++_id}` con un contador que se
+// reinicia en cada recarga; como guardamos con upsert (INSERT ... ON CONFLICT DO
+// UPDATE), un id repetido SOBREESCRIBE un registro existente en vez de crear uno
+// nuevo (data-loss silencioso). El timestamp en base36 lo hace único por sesión y
+// el contador evita choques dentro del mismo milisegundo. Cabe en VARCHAR(20).
+export const uid = (p = 'id') => `${p}-${Date.now().toString(36)}${(++_id).toString(36)}`
 
 /** Abreviación de estado a partir de la ciudad ("Monterrey, N.L." → "N.L."). */
 const CITY_ABBR: Record<string, string> = {
@@ -304,9 +325,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               body: `${whoName(s)} te asignó como vendedor${clientName ? ` del cliente ${clientName}` : ''}.`,
               read: false, createdAt: nowISO(), projectId: full.id, actorName: whoName(s),
             }
-            // No se agrega al estado local: la notificación es para OTRO usuario,
-            // que la verá al cargar su sesión (RLS la acota al destinatario).
-            thunks.push(() => saveNotification(notification))
+            // Best-effort: la notificación NO va en el lote del proyecto. Si falla
+            // (p. ej. la tabla/RLS aún no está lista) NO debe romper ni alertar el
+            // guardado de la venta; solo se registra en consola. No se agrega al
+            // estado local porque es para OTRO usuario (RLS la acota al destinatario).
+            saveNotification(notification).catch(err =>
+              console.error('[notif] no se pudo crear la notificación para', recipient.email, err))
           }
         }
         persist(thunks); return

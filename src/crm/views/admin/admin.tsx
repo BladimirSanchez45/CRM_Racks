@@ -2,21 +2,22 @@
 //  ADMINISTRACIÓN — gestión de usuarios (solo rol admin)
 // ============================================================
 import * as React from 'react'
-import { useStore } from '../../core/data'
-import { createUser, updateUser, toggleUser, removeUser, fetchUsers, saveSeller, deleteSeller, fetchSellers } from '../../core/api'
+import { useStore, roleLabel, isAdminRole, isSuperadmin, ROLE_LABELS } from '../../core/data'
+import { createUser, updateUser, toggleUser, removeUser, fetchUsers, saveSeller, deleteSeller, fetchSellers, impersonateUser } from '../../core/api'
 import { Modal, Field, Input, Select, Empty, Confirm } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { User, Role, Seller } from '../../core/types'
 
+// Roles asignables. 'superadmin' solo lo puede otorgar otro superadmin (se filtra abajo).
 const ROLES: { id: Role; label: string }[] = [
-  { id: 'admin', label: 'Administrador' },
-  { id: 'ventas', label: 'Ventas' },
-  { id: 'logistica', label: 'Logística' },
-  { id: 'almacen', label: 'Almacén' },
-  { id: 'direccion', label: 'Dirección' },
+  { id: 'superadmin', label: ROLE_LABELS.superadmin },
+  { id: 'admin', label: ROLE_LABELS.admin },
+  { id: 'ventas', label: ROLE_LABELS.ventas },
+  { id: 'logistica', label: ROLE_LABELS.logistica },
+  { id: 'almacen', label: ROLE_LABELS.almacen },
+  { id: 'direccion', label: ROLE_LABELS.direccion },
 ]
 const roleClass = (r: Role) => `role-${r}`
-const roleLabel = (r: Role) => ROLES.find(x => x.id === r)?.label ?? r
 const initialsOf = (name: string) =>
   name.trim().split(/\s+/).slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?'
 /** Fracción (0.04) → texto de porcentaje limpio ("4"). */
@@ -104,7 +105,9 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
         <Field label="Contraseña" span={2}><Input value={u.password} onChange={e => set('password', e.target.value)} placeholder="••••••••" /></Field>
         <Field label="Rol">
           <Select value={u.role} onChange={e => set('role', e.target.value as Role)}>
-            {ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+            {/* 'superadmin' SOLO se asigna desde la base de datos. En la UI solo aparece
+                si el usuario ya lo es, para no perderlo al editar sus otros datos. */}
+            {ROLES.filter(r => r.id !== 'superadmin' || isSuperadmin(user?.role)).map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
           </Select>
         </Field>
         <Field label="Puesto"><Input value={u.title} onChange={e => set('title', e.target.value)} placeholder="Ejecutivo de ventas" /></Field>
@@ -120,9 +123,11 @@ function UserForm({ user, onClose }: { user?: User; onClose: () => void }) {
           </button>
         </Field>
       </div>
-      {u.role === 'admin' && (
+      {isAdminRole(u.role) && (
         <div className="mt-3.5 flex items-start gap-2 text-[12px] text-tx-2 rounded-[8px] p-3" style={{ background: 'var(--acc-ghost)' }}>
-          <Icon name="shield" size={15} /> <span>Los administradores tienen acceso total, incluido este panel para crear y gestionar usuarios.</span>
+          <Icon name="shield" size={15} /> <span>{isSuperadmin(u.role)
+            ? 'El Super Admin tiene acceso total, incluido suplantar usuarios y otorgar este mismo rol. Resérvalo para el programador.'
+            : 'Los administradores tienen acceso total, incluido este panel para crear y gestionar usuarios.'}</span>
         </div>
       )}
     </Modal>
@@ -175,9 +180,10 @@ export function AdminPage() {
   const [busy, setBusy] = React.useState(false)
   const [sellerForm, setSellerForm] = React.useState<Seller | {} | null>(null)
   const [sellerDel, setSellerDel] = React.useState<Seller | null>(null)
+  const [impersonate, setImpersonate] = React.useState<User | null>(null)
   const me = state.currentUser
 
-  const admins = state.users.filter(u => u.role === 'admin').length
+  const admins = state.users.filter(u => isAdminRole(u.role)).length
 
   const refresh = async () => {
     const users = await fetchUsers()
@@ -195,6 +201,12 @@ export function AdminPage() {
     catch (e) { alert(e instanceof Error ? e.message : 'No se pudo eliminar el usuario.') }
     finally { setBusy(false); setDel(null) }
   }
+  const onImpersonate = async (id: string) => {
+    setBusy(true)
+    try { await impersonateUser(id) }   // al cambiar la sesión, el store recarga todo como ese usuario
+    catch (e) { alert(e instanceof Error ? e.message : 'No se pudo iniciar sesión como el usuario.'); setBusy(false) }
+    finally { setImpersonate(null) }
+  }
 
   return (
     <div>
@@ -208,9 +220,10 @@ export function AdminPage() {
           <table className="tbl">
             <thead><tr><th>Usuario</th><th>Correo</th><th>Rol</th><th>Puesto</th><th>Estado</th><th className="text-right">Acciones</th></tr></thead>
             <tbody>
-              {state.users.map(u => {
+              {/* Las cuentas Super Admin solo son visibles para otro Super Admin */}
+              {state.users.filter(u => !isSuperadmin(u.role) || isSuperadmin(me?.role)).map(u => {
                 const isMe = me?.id === u.id
-                const lastAdmin = u.role === 'admin' && admins <= 1
+                const lastAdmin = isAdminRole(u.role) && admins <= 1
                 return (
                 <tr key={u.id} onClick={() => setForm(u)}>
                   <td>
@@ -229,6 +242,9 @@ export function AdminPage() {
                     </span>
                   </td>
                   <td className="text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    {isSuperadmin(me?.role) && !isMe && u.active && (
+                      <button className="btn btn-ghost btn-sm" title="Iniciar sesión como este usuario" disabled={busy} onClick={() => setImpersonate(u)}><Icon name="logout" size={14} /> Entrar como</button>
+                    )}
                     <button className="btn btn-ghost btn-sm" title="Editar usuario" onClick={() => setForm(u)}><Icon name="edit" size={14} /></button>
                     <button className="btn btn-ghost btn-sm" disabled={isMe || lastAdmin || busy}
                       title={isMe ? 'No puedes desactivar tu propia cuenta' : lastAdmin ? 'Debe existir al menos un administrador' : ''}
@@ -290,6 +306,9 @@ export function AdminPage() {
       {sellerForm && <SellerForm seller={'id' in sellerForm ? sellerForm : undefined} onClose={() => setSellerForm(null)} />}
       {sellerDel && <Confirm title="Eliminar vendedor" message={`¿Eliminar a ${sellerDel.name}?`}
         onConfirm={() => { dispatch({ type: 'DELETE_SELLER', id: sellerDel.id }); setSellerDel(null) }} onClose={() => setSellerDel(null)} />}
+      {impersonate && <Confirm title="Iniciar sesión como usuario" confirmLabel="Entrar como" danger={false}
+        message={`Se cerrará tu sesión de administrador y entrarás como ${impersonate.name}. Para volver a tu cuenta, cierra sesión y vuelve a entrar como tú.`}
+        onConfirm={() => onImpersonate(impersonate.id)} onClose={() => setImpersonate(null)} />}
     </div>
   )
 }

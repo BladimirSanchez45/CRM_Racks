@@ -2,7 +2,7 @@
 //  APP SHELL — sidebar, topbar, routing, tweaks
 // ============================================================
 import * as React from 'react'
-import { StoreProvider, useStore } from './core/data'
+import { StoreProvider, useStore, isAdminRole, isSuperadmin, roleLabel } from './core/data'
 import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { Icon, type IconName } from './core/icons'
@@ -71,7 +71,7 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
     payments: state.payments.length,
     clients: state.clients.length,
   }
-  const nav = NAV.filter(n => !n.adminOnly || me?.role === 'admin')
+  const nav = NAV.filter(n => !n.adminOnly || isAdminRole(me?.role))
   return (
     <aside className="sidebar">
       <div className="brand flex-col items-stretch gap-2">
@@ -99,7 +99,7 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
           <span className="avatar">{me?.initials ?? '?'}</span>
           <div className="brand-text flex-1 min-w-0">
             <div className="text-[12.5px] font-semibold truncate">{me?.name ?? 'Invitado'}</div>
-            <div className="meta text-[10.5px] truncate">{me?.title || (me?.role === 'admin' ? 'Administrador' : 'Ventas')}</div>
+            <div className="meta text-[10.5px] truncate">{me?.title || roleLabel(me?.role)}</div>
           </div>
           <button className="icon-btn shrink-0" title="Cerrar sesión" onClick={() => { void signOut(); dispatch({ type: 'LOGOUT' }) }}><Icon name="logout" size={16} /></button>
         </div>
@@ -129,7 +129,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
       case 'commissions': return <CommissionsPage />
       case 'settings':    return <SettingsPage />
-      case 'admin':       return me?.role === 'admin' ? <AdminPage /> : <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
+      case 'admin':       return isAdminRole(me?.role) ? <AdminPage /> : <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
       default: return null
     }
   }
@@ -145,8 +145,8 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
             <div className="crumb">CC Racks Industriales</div>
           </div>
           <div className="flex-1"></div>
-          {me && <span className={'badge-role mr-1 ' + (me.role === 'admin' ? 'role-admin' : 'role-ventas')}>{me.role === 'admin' ? 'Admin' : 'Ventas'}</span>}
-          {me?.role === 'admin' && (
+          {me && <span className={'badge-role mr-1 role-' + me.role}>{isSuperadmin(me.role) ? 'Super' : roleLabel(me.role)}</span>}
+          {isAdminRole(me?.role) && (
             <button className={'icon-btn' + (route === 'admin' ? ' active' : '')} onClick={() => setRoute('admin')} title="Administración">
               <Icon name="shield" size={17} />
             </button>
