@@ -4,7 +4,10 @@
 //  asignar" y se asigna proveedor → 3) se crea la OC (PDF).
 // ============================================================
 import * as React from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween, MESES, uid, TODAY_ISO } from '../../core/data'
+import { uploadDoc } from '../../core/api'
 import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { CobroForm } from '../projects/project_views'
@@ -28,53 +31,141 @@ const ocDesc = (state: AppState, o: Order) => {
   return o.description
 }
 
-/* ---- Generar PDF de la OC (vista de impresión del navegador) ---- */
-function printOC(state: AppState, o: Order, items: OcItem[]) {
+/* ---- Carga una imagen (logo) para incrustarla en el PDF; null si no existe ---- */
+function loadImage(url: string): Promise<HTMLImageElement | null> {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => resolve(null)
+    img.src = url
+  })
+}
+
+/* ---- Construye el PDF (vector) de la orden de compra y lo devuelve como Blob ----
+   Mismo estilo que la remisión: logo, barras, marca de agua y tabla con totales. */
+export async function buildOcPdf(state: AppState, o: Order, items: OcItem[]): Promise<Blob> {
   const supplier = sel.supplier(state, o.supplierId)
   const project = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
   const { subtotal, iva, total } = itemsTotals(items)
-  const esc = (s: unknown) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
-  const m = (n: number) => '$' + (n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const w = window.open('', '_blank', 'width=820,height=1000')
-  if (!w) { alert('Permite las ventanas emergentes para generar el PDF.'); return }
-  const rows = items.length
-    ? items.map((it, i) => `<tr><td>${i + 1}</td><td>${esc(it.parte)}</td><td>${esc(it.color)}</td><td class=r>${it.qty}</td><td>${esc(it.material)}</td><td>${esc(it.description)}</td><td>${esc(it.dimensiones)}</td><td class=r>${m(it.unitPrice)}</td><td class=r>${m((it.qty || 0) * (it.unitPrice || 0))}</td></tr>`).join('')
-    : `<tr><td colspan=9 style="text-align:center;color:#999">— Sin materiales capturados —</td></tr>`
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(o.number)}</title><style>
-    body{font-family:Arial,Helvetica,sans-serif;color:#1b2230;padding:34px;font-size:13px}
-    .head{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #2f6feb;padding-bottom:12px;margin-bottom:18px}
-    .brand{font-size:24px;font-weight:800;color:#2f6feb;letter-spacing:.5px}
-    h1{font-size:20px;margin:0}
-    table.meta td{padding:2px 10px 2px 0}
-    table.items{width:100%;border-collapse:collapse;margin-top:16px}
-    table.items th,table.items td{border:1px solid #d0d4da;padding:7px 9px}
-    table.items th{background:#f1f3f6;text-align:left}
-    .r{text-align:right}
-    table.tot{margin-top:12px;width:300px;margin-left:auto;border-collapse:collapse}
-    table.tot td{padding:5px 9px}
-    table.tot tr.g td{font-weight:800;font-size:15px;border-top:2px solid #1b2230}
-    .foot{margin-top:40px;color:#999;font-size:11px}
-    @media print{.noprint{display:none}}
-  </style></head><body>
-    <div class="head"><div><div class="brand">CC RACKS</div><div style="color:#666">Orden de Compra</div></div>
-      <div style="text-align:right"><h1>${esc(o.number)}</h1><div style="color:#666">${esc(o.date)}</div></div></div>
-    <table class="meta">
-      <tr><td><b>Proveedor:</b></td><td>${esc(supplier ? supplier.name : '—')}</td></tr>
-      <tr><td><b>Proyecto:</b></td><td>${project ? esc(project.code + ' · ' + sel.clientName(state, project.client)) : '—'}</td></tr>
-      <tr><td><b>Condiciones:</b></td><td>${esc(o.conditions || '—')}</td></tr>
-      <tr><td><b>Responsable:</b></td><td>${esc(o.responsible || '—')}</td></tr>
-    </table>
-    <table class="items"><thead><tr><th>#</th><th>Parte</th><th>Color</th><th class="r">Cant.</th><th>Material</th><th>Descripción</th><th>Dimensiones</th><th class="r">P. Unitario</th><th class="r">Importe</th></tr></thead><tbody>${rows}</tbody></table>
-    <table class="tot">
-      <tr><td>Subtotal</td><td class="r">${m(subtotal)}</td></tr>
-      <tr><td>IVA 16%</td><td class="r">${m(iva)}</td></tr>
-      <tr class="g"><td>Total</td><td class="r">${m(total)}</td></tr>
-    </table>
-    <div class="foot">Generado con STRAKK CRM</div>
-    <button class="noprint" onclick="window.print()" style="margin-top:24px;padding:10px 22px;background:#2f6feb;color:#fff;border:0;border-radius:8px;cursor:pointer">Imprimir / Guardar PDF</button>
-  </body></html>`)
-  w.document.close()
-  setTimeout(() => { try { w.focus(); w.print() } catch { /* el usuario puede usar el botón */ } }, 400)
+  const money = (n: number) => '$' + (n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const logo = await loadImage(window.location.origin + '/ccracks_logo.png')
+
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  const W = doc.internal.pageSize.getWidth()
+  const M = 14
+  const BLUE: [number, number, number] = [23, 58, 138]
+  const RED: [number, number, number] = [192, 57, 43]
+
+  // ---- Encabezado ----
+  let y = M
+  if (logo) {
+    const h = 30, w = h * (logo.naturalWidth / logo.naturalHeight)
+    doc.addImage(logo, 'PNG', M, y, w, h)
+  }
+  doc.setFont('helvetica', 'bolditalic'); doc.setTextColor(...BLUE); doc.setFontSize(21)
+  doc.text('ORDEN DE COMPRA', W / 2, y + 17, { align: 'center' })
+  doc.setFontSize(10); doc.setTextColor(30)
+  doc.setFont('helvetica', 'bold'); doc.text('FECHA:', W - M - 50, y + 11)
+  doc.setFont('helvetica', 'normal'); doc.text(fmtDate(o.date), W - M - 32, y + 11)
+  doc.setFont('helvetica', 'bold'); doc.text('No. OC:', W - M - 50, y + 17)
+  doc.text(o.number, W - M - 32, y + 17)
+  y += 36
+
+  const bar = (label: string) => {
+    doc.setFillColor(...RED); doc.rect(M, y, W - 2 * M, 6, 'F')
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(10)
+    doc.text(label, W / 2, y + 4.2, { align: 'center' })
+    y += 9
+  }
+  const row = (k: string, v: string, k2?: string, v2?: string) => {
+    doc.setFontSize(9.5)
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(30); doc.text(k, M, y)
+    doc.setFont('helvetica', 'italic'); doc.setTextColor(...BLUE); doc.text(v || '', M + 32, y)
+    if (k2) {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(30); doc.text(k2, W - M - 60, y)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(30); doc.text(v2 || '', W - M - 40, y)
+    }
+    y += 5.5
+  }
+
+  bar('PROVEEDOR')
+  row('Proveedor:', supplier ? supplier.name : '—', 'Telefono:', supplier ? supplier.phone : '')
+  if (supplier && supplier.direccion) row('Direccion:', supplier.direccion)
+  row('Condiciones:', o.conditions || '—')
+  row('Responsable:', o.responsible || '—')
+  y += 2
+
+  bar('DATOS DE LA ORDEN')
+  // En la OC al proveedor NO se muestra el cliente: solo el código de proyecto.
+  row('Proyecto:', project ? project.code : '—')
+  // Oculta la descripción autollenada (que es "código · cliente"); muestra solo descripciones reales.
+  const autoDesc = project ? `${project.code} · ${sel.clientName(state, project.client)}` : ''
+  if (o.description && o.description !== autoDesc) row('Descripcion:', o.description)
+  row('Fecha entrega:', o.deliveryDate ? fmtDate(o.deliveryDate) : '—')
+  y += 2
+
+  // ---- Marca de agua tenue detrás de la tabla ----
+  const tableStart = y
+  if (logo) {
+    try {
+      const GS = (doc as unknown as { GState?: new (o: object) => unknown }).GState
+      const setGS = (doc as unknown as { setGState: (g: unknown) => void }).setGState
+      if (GS) setGS(new GS({ opacity: 0.07 }))
+      const ww = 120, wh = ww * (logo.naturalHeight / logo.naturalWidth)
+      doc.addImage(logo, 'PNG', (W - ww) / 2, tableStart + 26, ww, wh)
+      if (GS) setGS(new GS({ opacity: 1 }))
+    } catch { /* sin marca de agua si no hay soporte de opacidad */ }
+  }
+
+  // ---- Tabla de materiales ----
+  const body: string[][] = items.length
+    ? items.map((it, i) => [String(i + 1), it.parte || '', it.color || '', String(it.qty ?? ''), it.material || '', it.description || '', it.dimensiones || '', money(it.unitPrice), money((it.qty || 0) * (it.unitPrice || 0))])
+    : [['', '', '', '', '— Sin materiales capturados —', '', '', '', '']]
+  autoTable(doc, {
+    startY: tableStart,
+    head: [['#', 'Parte', 'Color', 'Cant', 'Material', 'Descripcion', 'Dimensiones', 'P.Unit', 'Importe']],
+    body,
+    theme: 'grid',
+    styles: { fontSize: 7.5, cellPadding: 1.4, lineColor: [216, 221, 228], textColor: 30, fillColor: false as unknown as undefined, overflow: 'linebreak' },
+    headStyles: { fillColor: BLUE, textColor: 255, halign: 'center', fontStyle: 'bold', fontSize: 7.5 },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 7 }, 3: { halign: 'center', cellWidth: 11 },
+      7: { halign: 'right', cellWidth: 20 }, 8: { halign: 'right', cellWidth: 22 },
+    },
+    margin: { left: M, right: M },
+  })
+
+  // ---- Totales (caja inferior derecha) ----
+  let fy = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 7
+  const boxX = W - M - 70
+  doc.setFontSize(9.5); doc.setTextColor(30)
+  const totRow = (label: string, val: string, bold = false) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal')
+    doc.text(label, boxX, fy); doc.text(val, W - M, fy, { align: 'right' })
+    fy += 5.5
+  }
+  totRow('Subtotal', money(subtotal))
+  totRow('IVA 16%', money(iva))
+  doc.setDrawColor(...BLUE); doc.setLineWidth(0.4); doc.line(boxX, fy - 3.5, W - M, fy - 3.5)
+  doc.setFontSize(11); totRow('TOTAL', money(total), true)
+
+  // ---- Firmas ----
+  fy += 16
+  doc.setDrawColor(...BLUE); doc.setLineWidth(0.5)
+  const sigW = 60
+  doc.line(M + 14, fy, M + 14 + sigW, fy); doc.line(W - M - 14 - sigW, fy, W - M - 14, fy)
+  doc.setFont('helvetica', 'bolditalic'); doc.setFontSize(8.5); doc.setTextColor(...BLUE)
+  doc.text('AUTORIZA', M + 14 + sigW / 2, fy + 4, { align: 'center' })
+  doc.text('PROVEEDOR', W - M - 14 - sigW / 2, fy + 4, { align: 'center' })
+
+  return doc.output('blob')
+}
+
+/* ---- Genera el PDF de la OC y lo abre en una pestaña (no lo sube). ---- */
+export async function printOC(state: AppState, o: Order, items: OcItem[]) {
+  const blob = await buildOcPdf(state, o, items)
+  window.open(URL.createObjectURL(blob), '_blank')
 }
 
 /* ============================================================
@@ -247,7 +338,8 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
   const { state, dispatch } = useStore()
   const editing = !!order?.id
   const [o, setO] = React.useState<OcFormState>(() => ({
-    id: order?.id,
+    // id estable: "Generar PDF" y "Guardar OC" upsertan el mismo registro (sin duplicar).
+    id: order?.id || uid('oc'),
     number: order?.number || ('OC-' + String(Math.floor(Math.random() * 9000) + 1000)),
     date: order?.date || TODAY_ISO,
     supplierId: order?.supplierId || '',
@@ -305,12 +397,37 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
     dispatch({ type: 'SAVE_ORDER', order: ord })
     onClose()
   }
+  // Generar PDF: crea el PDF real, lo SUBE como "OC firmada", lo coloca en el documento
+  // "Orden de compra" del proyecto, guarda la OC y lo abre para ver/imprimir.
+  const [generating, setGenerating] = React.useState(false)
+  const genPdf = async () => {
+    if (!o.supplierId || needsAnticipo) return
+    setGenerating(true)
+    try {
+      const ord = { ...o, amount: hasItems ? total : (+o.amount || 0), items: o.items.length ? o.items : undefined } as Order
+      const blob = await buildOcPdf(state, ord, o.items)
+      const fileName = `OC_${o.number}.pdf`
+      const path = await uploadDoc(new File([blob], fileName, { type: 'application/pdf' }), `orders/${o.number || order?.id || 'nuevas'}`)
+      setO(s => ({ ...s, file: fileName, filePath: path }))
+      dispatch({ type: 'SAVE_ORDER', order: { ...ord, file: fileName, filePath: path } })
+      // También lo coloca en el documento "Orden de compra" del proyecto asociado.
+      const proj = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
+      if (proj) {
+        dispatch({ type: 'SAVE_PROJECT', project: { ...proj, docs: { ...proj.docs, ordenCompra: { name: fileName, ok: true, path } } } })
+      }
+      window.open(URL.createObjectURL(blob), '_blank')
+    } catch (e) {
+      alert('No se pudo generar/guardar el PDF: ' + (e instanceof Error ? e.message : 'error desconocido'))
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   return (
     <Modal width={900} icon={editing ? 'edit' : 'plus'} title={editing ? 'Editar orden de compra' : 'Nueva orden de compra'} onClose={requestClose}
       footer={<>
         <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
-        <button className="btn btn-ghost" disabled={!o.supplierId || needsAnticipo} onClick={() => printOC(state, { ...o, amount: hasItems ? total : (+o.amount || 0) } as Order, o.items)}><Icon name="download" size={14} /> Generar PDF</button>
+        <button className="btn btn-ghost" disabled={!o.supplierId || needsAnticipo || generating} onClick={genPdf} title="Genera el PDF, lo guarda en la OC y en el documento del proyecto"><Icon name="download" size={14} /> {generating ? 'Generando…' : 'Generar PDF'}</button>
         <div className="flex-1"></div>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar OC</button>
       </>}>

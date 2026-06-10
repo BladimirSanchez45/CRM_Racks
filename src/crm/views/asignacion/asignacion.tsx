@@ -99,6 +99,9 @@ function AssignForm({ project, onClose }: { project: Project; onClose: () => voi
   const costTotal = (+f.freightCost || 0) + (+f.installCost || 0)
   const budgetTotal = (project.freight || 0) + (project.install || 0)
   const overTotal = costTotal > budgetTotal && costTotal > 0
+  // Diferencia desde la óptica del AHORRO: positiva (verde) si va dentro del presupuesto,
+  // negativa (rojo) si se pasa.
+  const savings = budgetTotal - costTotal
 
   return (
     <Modal width={560} icon="handshake" title="Asignar servicios" sub={`${project.code} · ${sel.clientName(state, project.client)}`} onClose={requestClose}
@@ -116,8 +119,8 @@ function AssignForm({ project, onClose }: { project: Project; onClose: () => voi
           onSupplier={v => set('installSupplierId', v)} onCost={v => set('installCost', v)} />
         <div className="bg-bg-1 border border-line rounded-[8px] p-3 grid grid-cols-3 gap-2 text-center">
           <div><div className="label-k">Presupuesto total</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(budgetTotal)}</div></div>
-          <div><div className="label-k">Costo asignado</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: overTotal ? 'var(--danger)' : 'var(--ok)' }}>{fmtMoney(costTotal)}</div></div>
-          <div><div className="label-k">Diferencia</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: overTotal ? 'var(--danger)' : 'var(--tx-1)' }}>{fmtMoney(costTotal - budgetTotal)}</div></div>
+          <div><div className="label-k">Costo asignado</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: overTotal ? 'var(--danger)' : 'var(--acc)' }}>{fmtMoney(costTotal)}</div></div>
+          <div><div className="label-k">Diferencia</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: overTotal ? 'var(--danger)' : 'var(--ok)' }}>{savings > 0 ? '+' : ''}{fmtMoney(savings)}</div></div>
         </div>
         {overTotal && <div className="text-[11.5px] text-tx-2 leading-snug">⚠ El costo supera el presupuesto. El gasto real se descuenta de la utilidad cuando registres y marques como <b>Pagado</b> el pago interno correspondiente.</div>}
       </div>
@@ -188,7 +191,7 @@ export function AsignacionPage() {
                   <td className="text-[12px]">{iSup ? iSup.name : <span className="text-tx-3">—</span>}{p.installCost ? <div className="meta mono">{fmtMoney(p.installCost)}</div> : null}</td>
                   <td className="num text-[12px]">{fmtMoney(budget)}</td>
                   <td className="num text-[12px] font-semibold">{cost > 0 ? fmtMoney(cost) : <span className="text-tx-3">—</span>}</td>
-                  <td className="num text-[12px]" style={{ color: cost > 0 ? (over ? 'var(--danger)' : 'var(--ok)') : 'var(--tx-3)' }}>{cost > 0 ? fmtMoney(cost - budget) : '—'}</td>
+                  <td className="num text-[12px]" style={{ color: cost > 0 ? (over ? 'var(--danger)' : 'var(--ok)') : 'var(--tx-3)' }}>{cost > 0 ? `${budget - cost > 0 ? '' : ''}${fmtMoney(budget - cost)}` : '—'}</td>
                   <td><button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setAssign(p) }}><Icon name="edit" size={13} /> Asignar</button></td>
                 </tr>
               ) })}

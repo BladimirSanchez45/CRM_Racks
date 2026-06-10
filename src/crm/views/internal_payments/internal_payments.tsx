@@ -184,11 +184,20 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
   )
 }
 
-export function InternalPaymentsPage() {
+export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string | null; onConsumed?: () => void } = {}) {
   const { state } = useStore()
   const [detail, setDetail] = React.useState<InternalPayment | null>(null)
   const [form, setForm] = React.useState<InternalPayment | {} | null>(null)
   const [fStatus, setFStatus] = React.useState('')
+
+  // Abrir un pago concreto al llegar desde una notificación ("Ver pago").
+  React.useEffect(() => {
+    if (!openId) return
+    const p = state.internalPayments.find(x => x.id === openId)
+    if (p) setDetail(p)
+    onConsumed?.()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId])
 
   const rows = state.internalPayments
     .filter(p => !fStatus || p.status === fStatus)

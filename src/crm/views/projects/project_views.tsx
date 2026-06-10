@@ -5,6 +5,7 @@ import * as React from 'react'
 import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, TODAY_ISO, canEditProject, isAdminRole } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
+import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
 import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
 /* ---- badge de estado de cobro + formulario de cobro del cliente ---- */
@@ -316,6 +317,36 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
           </div>
         </div>
       )}
+
+      {/* remisiones de salida del proyecto */}
+      {(() => {
+        const rems = sel.remisionesForProject(state, p.id)
+        if (rems.length === 0) return null
+        return (
+          <div className="mt-5">
+            <div className="label-k mb-2">Remisiones de salida ({rems.length})</div>
+            <div className="border border-line rounded-[8px] overflow-hidden">
+              <table className="tbl">
+                <thead><tr><th>Folio</th><th>Fecha</th><th className="num">Partidas</th><th>Estatus</th><th></th></tr></thead>
+                <tbody>
+                  {rems.map(r => (
+                    <tr key={r.id} style={{ cursor: 'default' }}>
+                      <td><span className="mono text-acc font-semibold">{r.number}</span></td>
+                      <td className="num text-tx-1 text-[12px]">{fmtDateShort(r.date)}</td>
+                      <td className="num mono text-[12px]">{r.items.length}</td>
+                      <td>{remisionStatusBadge(r.status)}</td>
+                      <td><div className="flex gap-1 justify-end">
+                        {r.filePath && <DocChip doc={{ name: r.file || 'Remisión PDF', ok: true, path: r.filePath }} label="PDF" />}
+                        <button className="btn btn-ghost btn-sm" title="Generar / ver PDF" onClick={() => printRemision(state, r)}><Icon name="download" size={13} /> PDF</button>
+                      </div></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* cobros del cliente (ingresos del proyecto) */}
       <div className="mt-5">

@@ -330,6 +330,7 @@ function mapRemision(r: any): Remision {
     status: r.status, notes: r.notes ?? '', file: r.file ?? '',
     createdBy: r.created_by ?? '', createdAt: r.created_at,
     ...(r.carrier_id ? { carrierId: r.carrier_id } : {}),
+    ...(r.phone ? { phone: r.phone } : {}),
     ...(r.received_by ? { receivedBy: r.received_by } : {}),
     ...(r.file_path ? { filePath: r.file_path } : {}),
   }
@@ -337,7 +338,7 @@ function mapRemision(r: any): Remision {
 function remisionRow(r: Remision): Record<string, unknown> {
   return {
     id: r.id, number: r.number, project_id: r.projectId, date: orNull(r.date),
-    carrier_id: r.carrierId ?? null, destination: r.destination, received_by: orNull(r.receivedBy),
+    carrier_id: r.carrierId ?? null, destination: r.destination, phone: orNull(r.phone), received_by: orNull(r.receivedBy),
     items: r.items ?? [], status: r.status, notes: r.notes, file: r.file, file_path: r.filePath ?? null,
     created_by: r.createdBy, created_at: r.createdAt,
   }

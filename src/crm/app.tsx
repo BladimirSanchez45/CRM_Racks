@@ -29,18 +29,22 @@ import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
-const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean }[] = [
-  { id: 'dashboard',   label: 'Panel',        icon: 'dashboard' },
-  { id: 'projects',    label: 'Proyectos',    icon: 'kanban' },
-  { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers'},
-  { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders'},
-  { id: 'asignacion',  label: 'Asignación',   icon: 'handshake' },
-  { id: 'remisiones',  label: 'Remisiones',   icon: 'truck' },
-  { id: 'internal_payments', label: 'Pagos internos', icon: 'shield' },
-  { id: 'payments',    label: 'Pagos',        icon: 'money' },
-  { id: 'cobranza',    label: 'Cobranza',     icon: 'download' },
-  { id: 'clients',     label: 'Clientes',     icon: 'clients' },
-  { id: 'commissions', label: 'Comisiones',   icon: 'commissions' },
+// Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
+// queden sin ítems visibles (por el rol) se ocultan solas. `SECTIONS` define el orden.
+const SECTIONS = ['General', 'Comercial', 'Compras', 'Logística', 'Finanzas'] as const
+type Section = typeof SECTIONS[number]
+const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; section: Section }[] = [
+  { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
+  { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
+  { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
+  { id: 'commissions', label: 'Comisiones',   icon: 'commissions', section: 'Comercial' },
+  { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers',   section: 'Compras' },
+  { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders',  section: 'Compras' },
+  { id: 'asignacion',  label: 'Asignación',   icon: 'handshake',   section: 'Logística' },
+  { id: 'remisiones',  label: 'Remisiones',   icon: 'truck',       section: 'Logística' },
+  { id: 'payments',    label: 'Pagos',        icon: 'money',       section: 'Finanzas' },
+  { id: 'cobranza',    label: 'Cobranza',     icon: 'download',    section: 'Finanzas' },
+  { id: 'internal_payments', label: 'Pagos internos', icon: 'shield', section: 'Finanzas' },
 ]
 // Rutas permitidas por rol RESTRINGIDO. Los roles NO listados aquí (admin,
 // superadmin, dirección…) ven todo. Para acotar un rol nuevo —p. ej. logística—
@@ -104,14 +108,37 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
         </div>
       </div>
       <nav className="nav">
-        <div className="nav-sec">Operación</div>
-        {nav.map(n => (
-          <div key={n.id} className={'nav-item' + (route === n.id ? ' active' : '')} onClick={() => setRoute(n.id)} title={n.label}>
-            <Icon name={n.icon} size={18} />
-            <span className="nav-label">{n.label}</span>
-            {n.countKey && counts[n.countKey] != null && <span className="nav-count">{counts[n.countKey]}</span>}
-          </div>
-        ))}
+        {/* Solo admin/superadmin ven las vistas AGRUPADAS por área; el resto de roles
+            mantienen la lista plana de siempre ("Operación"). */}
+        {isAdminRole(me?.role) ? (
+          SECTIONS.map(section => {
+            const items = nav.filter(n => n.section === section)
+            if (items.length === 0) return null   // oculta secciones sin ítems visibles
+            return (
+              <React.Fragment key={section}>
+                <div className="nav-sec">{section}</div>
+                {items.map(n => (
+                  <div key={n.id} className={'nav-item' + (route === n.id ? ' active' : '')} onClick={() => setRoute(n.id)} title={n.label}>
+                    <Icon name={n.icon} size={18} />
+                    <span className="nav-label">{n.label}</span>
+                    {n.countKey && counts[n.countKey] != null && <span className="nav-count">{counts[n.countKey]}</span>}
+                  </div>
+                ))}
+              </React.Fragment>
+            )
+          })
+        ) : (
+          <>
+            <div className="nav-sec">Operación</div>
+            {nav.map(n => (
+              <div key={n.id} className={'nav-item' + (route === n.id ? ' active' : '')} onClick={() => setRoute(n.id)} title={n.label}>
+                <Icon name={n.icon} size={18} />
+                <span className="nav-label">{n.label}</span>
+                {n.countKey && counts[n.countKey] != null && <span className="nav-count">{counts[n.countKey]}</span>}
+              </div>
+            ))}
+          </>
+        )}
       </nav>
       <div className="sidebar-foot">
         <div className={'nav-item' + (route === 'settings' ? ' active' : '')} onClick={() => setRoute('settings')} title="Configuración">
@@ -138,6 +165,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
   const [collapsed, setCollapsed] = React.useState(false)
   const [openProj, setOpenProj] = React.useState<Project | null>(null)
   const [editProj, setEditProj] = React.useState<Project | null>(null)
+  const [openIPId, setOpenIPId] = React.useState<string | null>(null)   // pago interno a abrir (desde notificación)
 
   const onOpenProject = (p: Project) => { setOpenProj(p); setEditProj(null) }
 
@@ -154,7 +182,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'orders':      return <OrdersPage />
       case 'asignacion':  return <AsignacionPage />
       case 'remisiones':  return <RemisionesPage />
-      case 'internal_payments': return <InternalPaymentsPage />
+      case 'internal_payments': return <InternalPaymentsPage openId={openIPId} onConsumed={() => setOpenIPId(null)} />
       case 'payments':    return <PaymentsPage />
       case 'cobranza':    return <CobranzaPage />
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
@@ -185,7 +213,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
           <button className="icon-btn" onClick={() => setTweak('light', !t.light)} title={t.light ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
             <Icon name={t.light ? 'sun' : 'moon'} size={17} />
           </button>
-          <NotificationsBell onOpenProject={onOpenProject} />
+          <NotificationsBell onOpenProject={onOpenProject} onOpenInternalPayment={(id) => { setRoute('internal_payments'); setOpenIPId(id) }} />
         </header>
         <main className="content blueprint">
           <div className="content-inner" key={route}>{page()}</div>

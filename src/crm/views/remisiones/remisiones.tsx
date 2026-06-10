@@ -4,7 +4,10 @@
 //  partidas de material, estatus y PDF firmado.
 // ============================================================
 import * as React from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import { useStore, sel, fmtDateShort, fmtDate, TODAY_ISO, nextFolio, uid } from '../../core/data'
+import { uploadDoc } from '../../core/api'
 import { Modal, Field, Input, TextArea, Select, FileField, Badge, Empty, KPI, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { importMaterialsFromExcel } from '../../core/excel'
@@ -19,96 +22,140 @@ const ORIGEN = {
   telefono: '33 2170 9829',
 }
 
-/* ---- Generar PDF de la remisión (vista de impresión del navegador) ---- */
-function printRemision(state: AppState, r: Remision) {
+/* ---- Carga una imagen (logo) para incrustarla en el PDF; null si no existe ---- */
+function loadImage(url: string): Promise<HTMLImageElement | null> {
+  return new Promise(resolve => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => resolve(null)
+    img.src = url
+  })
+}
+
+/* ---- Construye el PDF (vector) de la remisión y lo devuelve como Blob ----
+   Replica el formato impreso: encabezado con logo, bloques ORIGEN/DESTINO,
+   tabla de material con marca de agua, y firmas. */
+export async function buildRemisionPdf(state: AppState, r: Remision): Promise<Blob> {
   const proj = state.projects.find(p => p.id === r.projectId)
   const client = proj ? sel.client(state, proj.client) : undefined
   const carrier = r.carrierId ? sel.supplier(state, r.carrierId) : undefined
-  const esc = (s: unknown) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]!))
-  const w = window.open('', '_blank', 'width=820,height=1000')
-  if (!w) { alert('Permite las ventanas emergentes para generar el PDF.'); return }
-  // Filas: las partidas + filas vacías hasta completar al menos 12 (como el formato impreso).
-  const minRows = 12
-  const blanks = Math.max(0, minRows - r.items.length)
-  const rows =
-    r.items.map(it => `<tr><td class="c">${esc(it.code)}</td><td>${esc(it.description)}</td><td class="c">${esc(it.qty)}</td></tr>`).join('') +
-    Array.from({ length: blanks }, () => '<tr><td>&nbsp;</td><td></td><td></td></tr>').join('')
-  const clienteNombre = r.receivedBy || (client ? client.name : '')
-  const envioNota = r.notes ? esc(r.notes) : ''
-  // Logo servido desde public/ (URL absoluta para que cargue en la ventana de impresión).
-  // Si el archivo no existe, cae al texto de marca.
-  const logoUrl = window.location.origin + '/ccracks_logo.png'
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Remisión ${esc(r.number)}</title><style>
-    body{font-family:Arial,Helvetica,sans-serif;color:#1b2230;padding:30px;font-size:12.5px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-    .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
-    .brand img{height:120px;display:block}
-    .brand-txt{font-size:30px;font-weight:800;color:#173a8a;letter-spacing:1px}
-    .brand-txt small{display:block;font-size:10px;color:#c0392b;font-weight:700;letter-spacing:.5px}
-    .ttl{font-size:30px;font-weight:800;color:#173a8a;font-style:italic}
-    table.meta{font-size:12px}
-    table.meta td{padding:1px 8px 1px 0}
-    .bar{background:#c0392b;color:#fff;font-weight:700;text-align:center;padding:4px;letter-spacing:.5px;margin:10px 0 6px}
-    table.blk{width:100%;border-collapse:collapse;font-size:12px}
-    table.blk td{padding:2px 6px;vertical-align:top}
-    table.blk td.k{font-weight:700;font-style:italic;width:90px}
-    table.blk td.v{font-style:italic;color:#173a8a}
-    .items-wrap{position:relative;margin-top:8px}
-    .watermark{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:0}
-    .watermark img{width:62%;opacity:.10}
-    table.items{width:100%;border-collapse:collapse;position:relative;z-index:1}
-    table.items th{background:#173a8a;color:#fff;padding:6px;font-size:12px;font-style:italic}
-    table.items td{border:1px solid #d8dde4;padding:5px 8px;height:20px;background:transparent}
-    table.items td.c{text-align:center}
-    .sign{display:flex;justify-content:space-around;margin-top:60px;text-align:center;font-size:11px;font-weight:700;font-style:italic}
-    .sign div{border-top:2px solid #173a8a;padding-top:6px;width:230px}
-    .sign2{display:flex;justify-content:center;margin-top:36px;text-align:center;font-size:11px;font-weight:700;font-style:italic}
-    .sign2 div{border-top:2px solid #173a8a;padding-top:6px;width:230px}
-    .foot{margin-top:40px;text-align:center;color:#666;font-size:11px;font-weight:700}
-    @media print{.noprint{display:none}}
-  </style></head><body>
-    <div class="head">
-      <div class="brand">
-        <img src="${logoUrl}" alt="CC Racks" onerror="this.style.display='none';document.getElementById('brandtxt').style.display='block'" />
-        <span id="brandtxt" class="brand-txt" style="display:none">CC<small>RACKS MÉXICO S.A. DE C.V.</small></span>
-      </div>
-      <div class="ttl">REMISION</div>
-      <table class="meta"><tr><td><b>FECHA:</b></td><td>${esc(fmtDate(r.date))}</td></tr><tr><td><b>FOLIO:</b></td><td><b>${esc(r.number)}</b></td></tr></table>
-    </div>
+  const logo = await loadImage(window.location.origin + '/ccracks_logo.png')
 
-    <div class="bar">ORIGEN</div>
-    <table class="blk"><tr>
-      <td class="k">Razon social:</td><td class="v">${esc(ORIGEN.razonSocial)}</td><td class="k" style="text-align:right">Telefono:</td><td>${esc(ORIGEN.telefono)}</td>
-    </tr><tr><td class="k">Calle:</td><td class="v">${esc(ORIGEN.calle)}</td></tr>
-    <tr><td class="k">Colonia:</td><td class="v">${esc(ORIGEN.colonia)}</td></tr>
-    <tr><td class="k">C.P:</td><td class="v">${esc(ORIGEN.cp)}</td></tr></table>
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  const W = doc.internal.pageSize.getWidth()
+  const M = 14
+  const BLUE: [number, number, number] = [23, 58, 138]
+  const RED: [number, number, number] = [192, 57, 43]
 
-    <div class="bar">DESTINO</div>
-    <table class="blk"><tr>
-      <td class="k">Cliente:</td><td class="v">${esc(clienteNombre)}</td><td class="k" style="text-align:right">Telefono:</td><td>${esc(client ? client.phone : '')}</td>
-    </tr><tr><td class="k">Domicilio:</td><td class="v" colspan="3">${esc(r.destination)}</td></tr>
-    <tr><td class="k">C.P:</td><td class="v" colspan="3">${esc(client ? client.cp : '')}</td></tr>
-    ${carrier ? `<tr><td class="k">Transporte:</td><td class="v" colspan="3">${esc(carrier.name)}</td></tr>` : ''}
-    ${envioNota ? `<tr><td class="k">Nota de envío:</td><td class="v" colspan="3" style="font-weight:700">${envioNota}</td></tr>` : ''}</table>
+  // ---- Encabezado ----
+  let y = M
+  if (logo) {
+    const h = 20, w = h * (logo.naturalWidth / logo.naturalHeight)
+    doc.addImage(logo, 'PNG', M, y, w, h)
+  }
+  doc.setFont('helvetica', 'bolditalic'); doc.setTextColor(...BLUE); doc.setFontSize(26)
+  doc.text('REMISION', W / 2, y + 13, { align: 'center' })
+  doc.setFontSize(10); doc.setTextColor(30)
+  doc.setFont('helvetica', 'bold'); doc.text('FECHA:', W - M - 48, y + 6)
+  doc.setFont('helvetica', 'normal'); doc.text(fmtDate(r.date), W - M - 30, y + 6)
+  doc.setFont('helvetica', 'bold'); doc.text('FOLIO:', W - M - 48, y + 12)
+  doc.text(r.number, W - M - 30, y + 12)
+  y += 26
 
-    <div class="items-wrap">
-      <div class="watermark"><img src="${logoUrl}" alt="" onerror="this.style.display='none'" /></div>
-      <table class="items"><thead><tr><th style="width:90px">CODIGO</th><th>DESCRIPCION</th><th style="width:90px">CANTIDAD</th></tr></thead><tbody>${rows}</tbody></table>
-    </div>
+  // ---- Helpers de bloque ----
+  const bar = (label: string) => {
+    doc.setFillColor(...RED); doc.rect(M, y, W - 2 * M, 6, 'F')
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(10)
+    doc.text(label, W / 2, y + 4.2, { align: 'center' })
+    y += 9
+  }
+  const row = (k: string, v: string, k2?: string, v2?: string) => {
+    doc.setFontSize(9.5)
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(30); doc.text(k, M, y)
+    doc.setFont('helvetica', 'italic'); doc.setTextColor(...BLUE); doc.text(v || '', M + 30, y)
+    if (k2) {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(30); doc.text(k2, W - M - 55, y)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(30); doc.text(v2 || '', W - M - 35, y)
+    }
+    y += 5.5
+  }
 
-    <div class="sign"><div>AUTORIZO SALIDA MATERIAL</div><div>RECIBIO</div></div>
-    <div class="sign2"><div>AUTORIZO FABRICACION</div></div>
-    <div class="foot">Con la firma de este documento doy por hecha la entrega,<br>asi como tambien el buen estado del material entregado.</div>
-    <button class="noprint" onclick="window.print()" style="margin-top:24px;padding:10px 22px;background:#173a8a;color:#fff;border:0;border-radius:8px;cursor:pointer">Imprimir / Guardar PDF</button>
-  </body></html>`)
-  w.document.close()
-  setTimeout(() => { try { w.focus(); w.print() } catch { /* el usuario puede usar el botón */ } }, 400)
+  bar('ORIGEN')
+  row('Razon social:', ORIGEN.razonSocial, 'Telefono:', ORIGEN.telefono)
+  row('Calle:', ORIGEN.calle)
+  row('Colonia:', ORIGEN.colonia)
+  row('C.P:', ORIGEN.cp)
+  y += 2
+
+  bar('DESTINO')
+  row('Cliente:', r.receivedBy || (client ? client.name : ''), 'Telefono:', r.phone || (client ? client.phone : ''))
+  row('Domicilio:', r.destination)
+  row('C.P:', client ? (client.cp || '') : '')
+  if (carrier) row('Transporte:', carrier.name)
+  if (r.notes) row('Nota de envio:', r.notes)
+  y += 2
+
+  // ---- Marca de agua (logo tenue) detrás de la tabla ----
+  const tableStart = y
+  if (logo) {
+    try {
+      const GS = (doc as unknown as { GState?: new (o: object) => unknown }).GState
+      if (GS) (doc as unknown as { setGState: (g: unknown) => void }).setGState(new GS({ opacity: 0.08 }))
+      const ww = 120, wh = ww * (logo.naturalHeight / logo.naturalWidth)
+      doc.addImage(logo, 'PNG', (W - ww) / 2, tableStart + 28, ww, wh)
+      if (GS) (doc as unknown as { setGState: (g: unknown) => void }).setGState(new GS({ opacity: 1 }))
+    } catch { /* sin marca de agua si el motor no soporta opacidad */ }
+  }
+
+  // ---- Tabla de material (mín. 12 filas como el formato) ----
+  const body: string[][] = r.items.map(it => [it.code || '', it.description || '', String(it.qty ?? '')])
+  while (body.length < 12) body.push(['', '', ''])
+  autoTable(doc, {
+    startY: tableStart,
+    head: [['CODIGO', 'DESCRIPCION', 'CANTIDAD']],
+    body,
+    theme: 'grid',
+    styles: { fontSize: 9, cellPadding: 1.8, lineColor: [216, 221, 228], textColor: 30, fillColor: false as unknown as undefined },
+    headStyles: { fillColor: BLUE, textColor: 255, halign: 'center', fontStyle: 'bolditalic' },
+    columnStyles: { 0: { halign: 'center', cellWidth: 28 }, 2: { halign: 'center', cellWidth: 28 } },
+    margin: { left: M, right: M },
+  })
+
+  // ---- Firmas + pie ----
+  let fy = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 22
+  doc.setDrawColor(...BLUE); doc.setLineWidth(0.5)
+  const sigW = 60
+  const leftX = M + 14, rightX = W - M - 14 - sigW
+  doc.line(leftX, fy, leftX + sigW, fy); doc.line(rightX, fy, rightX + sigW, fy)
+  doc.setFont('helvetica', 'bolditalic'); doc.setFontSize(8.5); doc.setTextColor(...BLUE)
+  doc.text('AUTORIZO SALIDA MATERIAL', leftX + sigW / 2, fy + 4, { align: 'center' })
+  doc.text('RECIBIO', rightX + sigW / 2, fy + 4, { align: 'center' })
+  fy += 18
+  const cX = (W - sigW) / 2
+  doc.line(cX, fy, cX + sigW, fy)
+  doc.text('AUTORIZO FABRICACION', cX + sigW / 2, fy + 4, { align: 'center' })
+  fy += 16
+  doc.setFont('helvetica', 'bold'); doc.setTextColor(120); doc.setFontSize(8)
+  doc.text('Con la firma de este documento doy por hecha la entrega,', W / 2, fy, { align: 'center' })
+  doc.text('asi como tambien el buen estado del material entregado.', W / 2, fy + 4, { align: 'center' })
+
+  return doc.output('blob')
+}
+
+/* ---- Genera el PDF y lo abre en una pestaña para ver/imprimir (no lo sube). ---- */
+export async function printRemision(state: AppState, r: Remision) {
+  const blob = await buildRemisionPdf(state, r)
+  const url = URL.createObjectURL(blob)
+  window.open(url, '_blank')
 }
 
 const STATUSES: RemisionStatus[] = ['Borrador', 'Emitida', 'Entregada', 'Cancelada']
 const STATUS_COLOR: Record<RemisionStatus, string> = {
   Borrador: 'var(--tx-2)', Emitida: 'var(--st-5)', Entregada: 'var(--ok)', Cancelada: 'var(--tx-3)',
 }
-const statusBadge = (s: RemisionStatus) => <Badge color={STATUS_COLOR[s]}>{s}</Badge>
+export const remisionStatusBadge = (s: RemisionStatus) => <Badge color={STATUS_COLOR[s]}>{s}</Badge>
+const statusBadge = remisionStatusBadge
 
 const FLETE_CAT = 'Fletes y transporte'
 
@@ -119,6 +166,7 @@ type FormState = {
   date: string
   carrierId: string
   destination: string
+  phone: string
   receivedBy: string
   items: RemisionItem[]
   status: RemisionStatus
@@ -131,18 +179,20 @@ type FormState = {
 function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const [r, setR] = React.useState<FormState>(() => remision ? {
-    ...remision, carrierId: remision.carrierId ?? '', receivedBy: remision.receivedBy ?? '',
+    ...remision, carrierId: remision.carrierId ?? '', phone: remision.phone ?? '', receivedBy: remision.receivedBy ?? '',
   } : {
-    number: nextFolio(state.remisiones, 'REM'), projectId: '', date: TODAY_ISO, carrierId: '',
-    destination: '', receivedBy: '', items: [], status: 'Borrador', notes: '', file: '',
+    // id estable desde el inicio: así "Generar PDF" y "Guardar" usan el mismo registro (upsert), sin duplicar.
+    id: uid('rm'), number: nextFolio(state.remisiones, 'REM'), projectId: '', date: TODAY_ISO, carrierId: '',
+    destination: '', phone: '', receivedBy: '', items: [], status: 'Borrador', notes: '', file: '',
   })
   const set = (k: keyof FormState, v: unknown) => setR(s => ({ ...s, [k]: v }))
   const { requestClose, guard } = useUnsavedGuard(r, onClose)
 
-  // Al elegir proyecto, precarga el destino (ciudad) si está vacío.
+  // Al elegir proyecto, precarga destino (ciudad) y teléfono del cliente si están vacíos.
   const onPickProject = (pid: string) => {
     const proj = state.projects.find(p => p.id === pid)
-    setR(s => ({ ...s, projectId: pid, destination: s.destination || (proj?.city ?? '') }))
+    const cli = proj ? sel.client(state, proj.client) : undefined
+    setR(s => ({ ...s, projectId: pid, destination: s.destination || (proj?.city ?? ''), phone: s.phone || (cli?.phone ?? '') }))
   }
 
   const addItem = () => setR(s => ({ ...s, items: [...s.items, { id: uid('ri'), code: '', description: '', qty: 1, unit: 'pza' }] }))
@@ -176,15 +226,39 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
   const valid = r.projectId && r.number && r.date
   const docFolder = `remisiones/${r.number || 'nuevas'}`
 
-  const save = () => {
-    const payload: RemisionInput = {
-      ...r,
-      carrierId: r.carrierId || undefined,
-      receivedBy: r.receivedBy || undefined,
-      items: r.items.map(it => ({ ...it, qty: +it.qty || 0 })),
+  const payload = (): RemisionInput => ({
+    ...r,
+    carrierId: r.carrierId || undefined,
+    receivedBy: r.receivedBy || undefined,
+    items: r.items.map(it => ({ ...it, qty: +it.qty || 0 })),
+  })
+  const save = () => { dispatch({ type: 'SAVE_REMISION', remision: payload() }); onClose() }
+  // Generar PDF: crea el PDF real, lo SUBE como "Remisión firmada" (queda guardado en el
+  // proyecto), actualiza el registro y lo abre para ver/imprimir.
+  const [generating, setGenerating] = React.useState(false)
+  const genPdf = async () => {
+    setGenerating(true)
+    try {
+      const rem = { ...payload(), createdBy: remision?.createdBy ?? '', createdAt: remision?.createdAt ?? '' } as Remision
+      const blob = await buildRemisionPdf(state, rem)
+      const fileName = `Remision_${r.number}.pdf`
+      const path = await uploadDoc(new File([blob], fileName, { type: 'application/pdf' }), `remisiones/${r.number || 'nuevas'}`)
+      setR(s => ({ ...s, file: fileName, filePath: path }))
+      dispatch({ type: 'SAVE_REMISION', remision: { ...payload(), file: fileName, filePath: path } })
+      // También lo coloca en el documento "Remisión de salida" del proyecto asociado.
+      const proj = state.projects.find(p => p.id === r.projectId)
+      if (proj) {
+        dispatch({
+          type: 'SAVE_PROJECT',
+          project: { ...proj, remision: r.number, docs: { ...proj.docs, remision: { name: fileName, ok: true, path } } },
+        })
+      }
+      window.open(URL.createObjectURL(blob), '_blank')
+    } catch (e) {
+      alert('No se pudo generar/guardar el PDF: ' + (e instanceof Error ? e.message : 'error desconocido'))
+    } finally {
+      setGenerating(false)
     }
-    dispatch({ type: 'SAVE_REMISION', remision: payload })
-    onClose()
   }
 
   return (
@@ -192,13 +266,8 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
       footer={<>
         <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         {remision && <button className="btn btn-danger" onClick={() => { dispatch({ type: 'DELETE_REMISION', id: remision.id }); onClose() }}><Icon name="trash" size={14} /> Eliminar</button>}
-        <button className={'btn btn-ghost' + (!valid ? ' opacity-50' : '')} disabled={!valid}
-          onClick={() => printRemision(state, {
-            ...r, carrierId: r.carrierId || undefined, receivedBy: r.receivedBy || undefined,
-            items: r.items.map(it => ({ ...it, qty: +it.qty || 0 })),
-            createdBy: remision?.createdBy ?? '', createdAt: remision?.createdAt ?? '',
-          } as Remision)}>
-          <Icon name="download" size={14} /> Generar PDF
+        <button className={'btn btn-ghost' + (!valid || generating ? ' opacity-50' : '')} disabled={!valid || generating} onClick={genPdf} title="Genera el PDF, lo guarda en la remisión del proyecto y lo abre">
+          <Icon name="download" size={14} /> {generating ? 'Generando…' : 'Generar PDF'}
         </button>
         <div className="flex-1"></div>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
@@ -224,7 +293,8 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
           </Select>
         </Field>
         <Field label="Destino" span={2}><Input value={r.destination} onChange={e => set('destination', e.target.value)} placeholder="Domicilio / ciudad de entrega" /></Field>
-        <Field label="Recibe (en destino)"><Input value={r.receivedBy} onChange={e => set('receivedBy', e.target.value)} placeholder="Nombre de quien recibe" /></Field>
+        <Field label="Teléfono"><Input value={r.phone} onChange={e => set('phone', e.target.value)} placeholder="Tel. de contacto en destino" /></Field>
+        <Field label="Recibe (en destino)" span={2}><Input value={r.receivedBy} onChange={e => set('receivedBy', e.target.value)} placeholder="Nombre de quien recibe" /></Field>
       </div>
 
       {/* partidas de material */}

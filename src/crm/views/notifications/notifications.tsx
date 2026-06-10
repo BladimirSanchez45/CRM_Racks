@@ -31,7 +31,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('es-MX')
 }
 
-export function NotificationsBell({ onOpenProject }: { onOpenProject: (p: Project) => void }) {
+export function NotificationsBell({ onOpenProject, onOpenInternalPayment }: { onOpenProject: (p: Project) => void; onOpenInternalPayment?: (id: string) => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
   const [open, setOpen] = React.useState(false)
@@ -81,6 +81,10 @@ export function NotificationsBell({ onOpenProject }: { onOpenProject: (p: Projec
   }
 
   const project = detail?.projectId ? state.projects.find(p => p.id === detail.projectId) : undefined
+  // Notificaciones de pago interno: llevan internalPaymentId (no proyecto).
+  const isIP = detail?.kind === 'internal_payment_requested' || detail?.kind === 'internal_payment_decided'
+  const ip = detail?.internalPaymentId ? state.internalPayments.find(p => p.id === detail.internalPaymentId) : undefined
+  const ipProject = ip?.projectId ? state.projects.find(p => p.id === ip.projectId) : undefined
 
   return (
     <>
@@ -130,11 +134,16 @@ export function NotificationsBell({ onOpenProject }: { onOpenProject: (p: Projec
       )}
 
       {detail && (
-        <Modal width={460} icon="bell" title={detail.title} sub={timeAgo(detail.createdAt)} onClose={() => setDetail(null)}
+        <Modal width={460} icon={isIP ? 'money' : 'bell'} title={detail.title} sub={timeAgo(detail.createdAt)} onClose={() => setDetail(null)}
           footer={<>
             <button className="btn btn-ghost" onClick={() => setDetail(null)}>Cerrar</button>
             <div className="flex-1"></div>
-            {project && (
+            {isIP && ip && onOpenInternalPayment && (
+              <button className="btn btn-primary" onClick={() => { onOpenInternalPayment(ip.id); setDetail(null) }}>
+                <Icon name="money" size={15} /> Ver pago
+              </button>
+            )}
+            {!isIP && project && (
               <button className="btn btn-primary" onClick={() => { onOpenProject(project); setDetail(null) }}>
                 <Icon name="kanban" size={15} /> Ver proyecto
               </button>
@@ -143,10 +152,22 @@ export function NotificationsBell({ onOpenProject }: { onOpenProject: (p: Projec
           <p className="text-[13px] text-tx-1 mb-3.5">{detail.body}</p>
           {detail.actorName && (
             <div className="flex items-center gap-2 mb-3.5 text-[12.5px]">
-              <Avatar name={detail.actorName} size={26} /> <span>Asignado por <b>{detail.actorName}</b></span>
+              <Avatar name={detail.actorName} size={26} /> <span>{isIP ? 'Por' : 'Asignado por'} <b>{detail.actorName}</b></span>
             </div>
           )}
-          {project ? (
+          {isIP ? (
+            ip ? (
+              <div className="rounded-[8px] border border-line p-3 bg-bg-1 flex flex-col gap-2 text-[12.5px]">
+                <div className="spread"><span className="text-tx-2">Concepto</span><span className="font-semibold">{ip.concept}</span></div>
+                <div className="spread"><span className="text-tx-2">Categoría</span><span>{ip.category}</span></div>
+                <div className="spread"><span className="text-tx-2">Monto</span><span className="font-semibold">{fmtMoney(ip.amount)}</span></div>
+                <div className="spread"><span className="text-tx-2">Estatus</span><span>{ip.status}</span></div>
+                {ipProject && <div className="spread"><span className="text-tx-2">Proyecto</span><span className="mono text-acc font-semibold">{ipProject.code}</span></div>}
+              </div>
+            ) : (
+              <div className="meta">El pago ya no está disponible.</div>
+            )
+          ) : project ? (
             <div className="rounded-[8px] border border-line p-3 bg-bg-1 flex flex-col gap-2 text-[12.5px]">
               <div className="spread"><span className="text-tx-2">Proyecto</span><span className="mono text-acc font-semibold">{project.code}</span></div>
               <div className="spread"><span className="text-tx-2">Cliente</span><span>{sel.clientName(state, project.client) || '—'}</span></div>

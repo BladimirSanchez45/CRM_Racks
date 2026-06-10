@@ -197,6 +197,7 @@ export interface Remision {
   date: string              // Fecha de salida
   carrierId?: string        // Proveedor de flete / transportista (Supplier)
   destination: string       // Domicilio / ciudad de entrega
+  phone?: string            // Teléfono de contacto en destino (autollenado del cliente, editable)
   receivedBy?: string       // Persona que recibe en destino
   items: RemisionItem[]     // Partidas de material que salen
   status: RemisionStatus
