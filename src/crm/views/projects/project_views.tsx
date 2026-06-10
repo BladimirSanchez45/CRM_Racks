@@ -2,10 +2,10 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS, TODAY_ISO, canEditProject, isAdminRole } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, TODAY_ISO, canEditProject, isAdminRole } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
-import type { ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
+import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
 /* ---- badge de estado de cobro + formulario de cobro del cliente ---- */
 const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)', Programado: 'var(--warn)', Cancelado: 'var(--tx-3)' }
@@ -79,6 +79,7 @@ type ProjectFormState = {
   client: string
   seller: string
   city: string
+  origen?: string
   sistemaVendido?: string
   ventaSubtotal?: number | string
   freight: number | string
@@ -150,6 +151,30 @@ function InfoRow({ k, children }: { k: React.ReactNode; children: React.ReactNod
   )
 }
 
+/* ---- Renglón de servicio asignado (flete/instalación): proveedor + presupuesto vs costo ---- */
+export function ServiceRow({ label, supplierId, budget, cost, state }: { label: string; supplierId?: string; budget?: number; cost?: number; state: AppState }) {
+  const supplier = supplierId ? sel.supplier(state, supplierId) : undefined
+  const hasCost = cost != null && cost > 0
+  const over = hasCost && (budget || 0) > 0 && (cost || 0) > (budget || 0)
+  const within = hasCost && !over
+  return (
+    <div className="flex items-center justify-between gap-3 text-[12.5px]">
+      <div className="min-w-0">
+        <div className="font-semibold text-tx-1">{label}</div>
+        <div className="meta truncate">{supplier ? supplier.name : 'Sin proveedor asignado'}</div>
+      </div>
+      <div className="text-right shrink-0">
+        <div className="meta">Presupuesto {fmtMoney(budget)}</div>
+        {hasCost
+          ? <div className="mono font-semibold" style={{ color: over ? 'var(--danger)' : within ? 'var(--ok)' : 'var(--tx-1)' }}>
+              {fmtMoney(cost)} {over ? '▲' : within ? '▼' : ''}
+            </div>
+          : <div className="meta">Sin costo</div>}
+      </div>
+    </div>
+  )
+}
+
 /* ---------- Project detail drawer ---------- */
 export function ProjectDetail({ project, onClose, onEdit }: { project: Project; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
@@ -165,8 +190,9 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
   // Misma fuente que la base de comisiones (sel.projectUtilidadSub).
   const comprasTotal = sel.projectComprasConIva(state, p.id)
   const comprasSub = comprasTotal / 1.16
+  const internalCost = sel.projectInternalPaymentsCost(state, p.id)
   const utilSub = sel.projectUtilidadSub(state, p)
-  const utilTotal = ventaTotal - comprasTotal
+  const utilTotal = ventaTotal - comprasTotal - internalCost
   const margen = ventaSub > 0 ? (utilSub / ventaSub) * 100 : null
   const cobros = sel.clientPaymentsForProject(state, p.id)
   const cobrado = sel.projectCobrado(state, p.id)
@@ -207,6 +233,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
         <div>
           <div className="label-k mb-2">Datos generales</div>
           <InfoRow k="Cliente">{client ? client.name : '—'}</InfoRow>
+          <InfoRow k="Origen">{p.origen || '—'}</InfoRow>
           <InfoRow k="Sistema vendido">{p.sistemaVendido || '—'}</InfoRow>
           <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}</InfoRow>
           <InfoRow k="Vendedor"><span className="inline-flex items-center gap-1.5"><Avatar name={seller ? seller.name : ''} size={20} /> {seller ? seller.name : '—'}</span></InfoRow>
@@ -231,12 +258,20 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
           <div className="bg-bg-1 border border-line p-3.5 mb-3.5">
             <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Subtotal de la venta</span><span className="mono">{fmtMoney(ventaSub)}</span></div>
             <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (sin IVA)</span><span className="mono">−{fmtMoney(comprasSub)}</span></div>
+            {internalCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Pagos internos (pagados)</span><span className="mono">−{fmtMoney(internalCost)}</span></div>}
             <div className="flex justify-between text-[12.5px] py-[3px]"><span className="text-tx-1 font-semibold">Utilidad sin IVA</span><span className="mono font-semibold" style={{ color: utilSub >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilSub)}</span></div>
             <div className="h-px bg-line my-2"></div>
             <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Total con IVA</span><span className="mono">{fmtMoney(ventaTotal)}</span></div>
             <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (con IVA)</span><span className="mono">−{fmtMoney(comprasTotal)}</span></div>
+            {internalCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Pagos internos (pagados)</span><span className="mono">−{fmtMoney(internalCost)}</span></div>}
             <div className="flex justify-between items-baseline mt-1"><span className="label-k">Utilidad con IVA</span><span className="font-display font-extrabold text-[19px]" style={{ color: utilTotal >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilTotal)}</span></div>
             {margen != null && <div className="flex justify-between text-[11px] text-tx-3 mt-1.5"><span>Margen sobre venta</span><span className="mono">{margen.toFixed(1)}%</span></div>}
+          </div>
+
+          <div className="label-k mb-2">Servicios asignados (logística)</div>
+          <div className="bg-bg-1 border border-line p-3.5 mb-3.5 flex flex-col gap-2.5">
+            <ServiceRow label="Flete" supplierId={p.freightSupplierId} budget={p.freight} cost={p.freightCost} state={state} />
+            <ServiceRow label="Instalación" supplierId={p.installSupplierId} budget={p.install} cost={p.installCost} state={state} />
           </div>
 
           <div className="label-k mb-2">Proveedores asignados</div>
@@ -335,12 +370,54 @@ const nextProjectCode = (projects: Project[]) => {
   return `PRY-2026-${String(max + 1).padStart(3, '0')}`
 }
 
+// Orígenes de la venta/lead (canal de captación).
+const ORIGENES = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack', 'Otro (Especificar)']
+
 const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
-  client: '', seller: '', city: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
+  client: '', seller: '', city: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending',
   docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: docNo(), finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
 })
+
+/* ---- Vista rápida de la info del cliente desde el formulario de proyecto ---- */
+function ClientInfoModal({ clientId, onClose }: { clientId: string; onClose: () => void }) {
+  const { state } = useStore()
+  const c = sel.client(state, clientId)
+  if (!c) return null
+  const sub = [c.rfc || c.city, c.since ? `Cliente desde ${fmtDate(c.since)}` : ''].filter(Boolean).join(' · ')
+  const Row = ({ k, v, mono }: { k: string; v?: React.ReactNode; mono?: boolean }) => (
+    <div className="flex justify-between gap-4 py-[7px] border-b border-line-soft">
+      <span className="label-k">{k}</span>
+      <span className={'text-right text-[13px] ' + (mono ? 'mono' : '')}>{v || '—'}</span>
+    </div>
+  )
+  return (
+    <Modal width={460} icon="clients" title={c.name} sub={sub} onClose={onClose}
+      footer={<button className="btn btn-ghost" onClick={onClose}>Cerrar</button>}>
+      <div className="flex flex-col gap-2.5 mb-4">
+        {c.contact && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="user" size={15} className="text-tx-2" /> {c.contact}</div>}
+        {c.phone && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="phone" size={15} className="text-tx-2" /> <span className="mono">{c.phone}</span></div>}
+        {c.email && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="mail" size={15} className="text-tx-2" /> {c.email}</div>}
+        {c.city && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="pin" size={15} className="text-tx-2" /> {c.city}</div>}
+      </div>
+      {(c.razonSocial || c.rfc || c.regimenFiscal || c.cp || c.usoCFDI || c.diasCredito != null || c.limiteCredito != null) && (
+        <>
+          <div className="label-k mb-1.5">Datos fiscales</div>
+          <div className="bg-bg-1 border border-line p-3">
+            <Row k="Razón social" v={c.razonSocial} />
+            <Row k="RFC" v={c.rfc} mono />
+            <Row k="Régimen fiscal" v={c.regimenFiscal} mono />
+            <Row k="Código postal" v={c.cp} mono />
+            <Row k="Uso de CFDI" v={c.usoCFDI} mono />
+            {c.diasCredito != null && <Row k="Días de crédito" v={String(c.diasCredito)} />}
+            {c.limiteCredito != null && <Row k="Límite de crédito" v={fmtMoney(c.limiteCredito)} />}
+          </div>
+        </>
+      )}
+    </Modal>
+  )
+}
 
 export function ProjectForm({ project, onClose }: { project?: Project; onClose: () => void }) {
   const { state, dispatch } = useStore()
@@ -351,6 +428,16 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
     : { ...blank(), code: nextProjectCode(state.projects), seller: isVentas ? me!.id : '' })
   const isNew = !project
   const set = (k: keyof ProjectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
+  // Origen: si el valor guardado no es uno de los presets, se considera "Otro" (texto libre).
+  const presetOrigenes = ORIGENES.slice(0, -1)
+  const [origenOtro, setOrigenOtro] = React.useState(() => !!p.origen && !presetOrigenes.includes(p.origen))
+  const [showClient, setShowClient] = React.useState(false)
+  // ETA proveedor automático: fecha base (creación o hoy) + semanas de entrega × 7 días.
+  const etaBase = (project?.created || '').slice(0, 10) || TODAY_ISO
+  const setWeeks = (v: string) => setP(s => {
+    const w = +v
+    return { ...s, weeks: v, eta: w > 0 ? addDays(Math.round(w * 7), etaBase) : s.eta }
+  })
   const setDoc = (k: keyof ProjectDocs, v: { name: string; path: string }) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name: v.name, ok: !!v.name, ...(v.path ? { path: v.path } : {}) } } }))
   const docFolder = `projects/${p.code || project?.id || 'nuevos'}`
 
@@ -381,11 +468,31 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
       <div className="grid grid-cols-3 gap-3.5">
         <Field label="Código de proyecto"><Input className="input mono" value={p.code} onChange={e => set('code', e.target.value)} /></Field>
         <Field label="Cliente">
-          <Combobox value={p.client} onChange={v => set('client', v)} placeholder="Buscar cliente…"
-            options={state.clients.map(c => ({ value: c.id, label: c.name, sub: c.rfc || c.city }))} />
+          <div className="flex gap-1.5 items-stretch">
+            <div className="flex-1 min-w-0">
+              <Combobox value={p.client} onChange={v => set('client', v)} placeholder="Buscar cliente…"
+                options={state.clients.map(c => ({ value: c.id, label: c.name, sub: c.rfc || c.city }))} />
+            </div>
+            <button type="button" className="btn btn-ghost px-2.5 shrink-0" disabled={!p.client}
+              title={p.client ? 'Ver información del cliente' : 'Selecciona un cliente'} onClick={() => setShowClient(true)}>
+              <Icon name="eye" size={15} />
+            </button>
+          </div>
         </Field>
         <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey, N.L." /></Field>
         <Field label="Sistema vendido"><Input value={p.sistemaVendido || ''} onChange={e => set('sistemaVendido', e.target.value)} placeholder="Ej. Rack selectivo" /></Field>
+
+        <Field label="Origen">
+          <Select value={origenOtro ? 'Otro (Especificar)' : (p.origen || '')} onChange={e => {
+            const v = e.target.value
+            if (v === 'Otro (Especificar)') { setOrigenOtro(true); set('origen', '') }
+            else { setOrigenOtro(false); set('origen', v) }
+          }}>
+            <option value="">Selecciona…</option>
+            {ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}
+          </Select>
+        </Field>
+        {origenOtro && <Field label="Especificar origen"><Input value={p.origen || ''} onChange={e => set('origen', e.target.value)} placeholder="Describe el origen" autoFocus /></Field>}
 
         <Field label="Vendedor">
           <Select value={p.seller} onChange={e => set('seller', e.target.value)} disabled={isVentas}>
@@ -398,11 +505,11 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
             {STAGES.map(s => <option key={s.id} value={s.id}>{String(s.n).padStart(2,'0')} · {s.label}</option>)}
           </Select>
         </Field>
-        <Field label="Semanas de entrega"><Input type="number" value={p.weeks} onChange={e => set('weeks', e.target.value)} placeholder="6" /></Field>
+        <Field label="Semanas de entrega"><Input type="number" value={p.weeks} onChange={e => setWeeks(e.target.value)} placeholder="6" /></Field>
 
         <Field label="Presupuesto flete (MXN)"><MoneyInput value={p.freight} onChange={v => set('freight', v)} placeholder="0" /></Field>
         <Field label="Presupuesto instalación (MXN)"><MoneyInput value={p.install} onChange={v => set('install', v)} placeholder="0" /></Field>
-        <Field label="ETA proveedor"><Input type="date" value={p.eta} onChange={e => set('eta', e.target.value)} /></Field>
+        <Field label={<>ETA proveedor <span className="meta font-normal">(auto)</span></>}><Input type="date" value={p.eta} onChange={e => set('eta', e.target.value)} /></Field>
       </div>
 
       {/* venta: subtotal (ya incluye flete e instalación) → IVA → total */}
@@ -430,6 +537,7 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
       </div>
 
       {guard}
+      {showClient && p.client && <ClientInfoModal clientId={p.client} onClose={() => setShowClient(false)} />}
     </Modal>
   )
 }

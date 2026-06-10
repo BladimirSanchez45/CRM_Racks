@@ -7,6 +7,7 @@ import { supabase } from './supabase'
 import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
+  Remision, InternalPayment,
 } from './types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -199,6 +200,10 @@ function mapProject(r: any): Project {
     ...(r.sistema_vendido ? { sistemaVendido: r.sistema_vendido } : {}),
     ...(r.venta_subtotal != null ? { ventaSubtotal: Number(r.venta_subtotal) } : {}),
     freight: Number(r.freight ?? 0), install: Number(r.install ?? 0), weeks: r.weeks ?? 0,
+    ...(r.freight_supplier_id ? { freightSupplierId: r.freight_supplier_id } : {}),
+    ...(r.freight_cost != null ? { freightCost: Number(r.freight_cost) } : {}),
+    ...(r.install_supplier_id ? { installSupplierId: r.install_supplier_id } : {}),
+    ...(r.install_cost != null ? { installCost: Number(r.install_cost) } : {}),
     obs: r.obs ?? '',
     docs: { ...emptyDocs(), ...(r.docs ?? {}) },
     suppliers: Array.isArray(r.suppliers) ? r.suppliers : [],
@@ -212,7 +217,10 @@ function projectRow(p: Project): Record<string, unknown> {
   return {
     id: p.id, code: p.code, stage: p.stage, client: p.client, seller: p.seller, city: p.city,
     sistema_vendido: p.sistemaVendido ?? null, venta_subtotal: p.ventaSubtotal ?? null,
-    freight: p.freight, install: p.install, weeks: p.weeks, obs: p.obs,
+    freight: p.freight, install: p.install,
+    freight_supplier_id: p.freightSupplierId ?? null, freight_cost: p.freightCost ?? null,
+    install_supplier_id: p.installSupplierId ?? null, install_cost: p.installCost ?? null,
+    weeks: p.weeks, obs: p.obs,
     docs: p.docs, suppliers: p.suppliers,
     eta: orNull(p.eta), finiquito: p.finiquito,
     created: p.created, updated: p.updated,
@@ -314,6 +322,66 @@ export const saveCommission = (c: Commission) =>
   upsert('commissions', { id: c.id, project_id: c.projectId, seller: c.seller, amount: c.amount, status: c.status, month: c.month })
 export const deleteCommission = (id: string) => removeRow('commissions', id)
 
+/* ---- Remisiones de salida ---- */
+function mapRemision(r: any): Remision {
+  return {
+    id: r.id, number: r.number ?? '', projectId: r.project_id ?? '', date: r.date ?? '',
+    destination: r.destination ?? '', items: Array.isArray(r.items) ? r.items : [],
+    status: r.status, notes: r.notes ?? '', file: r.file ?? '',
+    createdBy: r.created_by ?? '', createdAt: r.created_at,
+    ...(r.carrier_id ? { carrierId: r.carrier_id } : {}),
+    ...(r.received_by ? { receivedBy: r.received_by } : {}),
+    ...(r.file_path ? { filePath: r.file_path } : {}),
+  }
+}
+function remisionRow(r: Remision): Record<string, unknown> {
+  return {
+    id: r.id, number: r.number, project_id: r.projectId, date: orNull(r.date),
+    carrier_id: r.carrierId ?? null, destination: r.destination, received_by: orNull(r.receivedBy),
+    items: r.items ?? [], status: r.status, notes: r.notes, file: r.file, file_path: r.filePath ?? null,
+    created_by: r.createdBy, created_at: r.createdAt,
+  }
+}
+export async function fetchRemisiones(): Promise<Remision[]> {
+  const { data, error } = await supabase.from('remisiones').select('*').order('date', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapRemision)
+}
+export const saveRemision = (r: Remision) => upsert('remisiones', remisionRow(r))
+export const deleteRemision = (id: string) => removeRow('remisiones', id)
+
+/* ---- Pagos internos (con flujo de aprobación) ---- */
+function mapInternalPayment(r: any): InternalPayment {
+  return {
+    id: r.id, concept: r.concept ?? '', category: r.category, amount: Number(r.amount ?? 0),
+    status: r.status, requestedBy: r.requested_by ?? '', notes: r.notes ?? '', file: r.file ?? '',
+    createdAt: r.created_at,
+    ...(r.project_id ? { projectId: r.project_id } : {}),
+    ...(r.supplier_id ? { supplierId: r.supplier_id } : {}),
+    ...(r.scheduled_date ? { scheduledDate: r.scheduled_date } : {}),
+    ...(r.approved_by ? { approvedBy: r.approved_by } : {}),
+    ...(r.decided_at ? { decidedAt: r.decided_at } : {}),
+    ...(r.reject_reason ? { rejectReason: r.reject_reason } : {}),
+    ...(r.file_path ? { filePath: r.file_path } : {}),
+  }
+}
+function internalPaymentRow(p: InternalPayment): Record<string, unknown> {
+  return {
+    id: p.id, concept: p.concept, category: p.category, project_id: p.projectId ?? null,
+    supplier_id: p.supplierId ?? null, amount: p.amount, scheduled_date: orNull(p.scheduledDate),
+    status: p.status, requested_by: p.requestedBy, approved_by: p.approvedBy ?? null,
+    decided_at: p.decidedAt ?? null, reject_reason: orNull(p.rejectReason), notes: p.notes,
+    file: p.file, file_path: p.filePath ?? null, created_at: p.createdAt,
+  }
+}
+export async function fetchInternalPayments(): Promise<InternalPayment[]> {
+  const { data, error } = await supabase.from('internal_payments').select('*').order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapInternalPayment)
+}
+export const saveInternalPayment = (p: InternalPayment) => upsert('internal_payments', internalPaymentRow(p))
+export const deleteInternalPayment = (id: string) => removeRow('internal_payments', id)
+
 /* ---- Actividad ---- */
 function mapActivity(r: any): Activity {
   return { id: r.id, t: r.t, icon: r.icon, who: r.who, txt: r.txt, tgt: r.tgt ?? '', kind: r.kind }
@@ -337,6 +405,7 @@ function mapNotification(r: any): Notification {
     read: !!r.read,
     createdAt: r.created_at,
     ...(r.project_id ? { projectId: r.project_id } : {}),
+    ...(r.internal_payment_id ? { internalPaymentId: r.internal_payment_id } : {}),
     ...(r.actor_name ? { actorName: r.actor_name } : {}),
   }
 }
@@ -353,7 +422,8 @@ export async function fetchNotifications(): Promise<Notification[]> {
 export async function saveNotification(n: Notification): Promise<void> {
   const { error } = await supabase.from('notifications').insert({
     id: n.id, user_id: n.userId, kind: n.kind, title: n.title, body: n.body,
-    read: n.read, created_at: n.createdAt, project_id: n.projectId ?? null, actor_name: n.actorName ?? null,
+    read: n.read, created_at: n.createdAt, project_id: n.projectId ?? null,
+    internal_payment_id: n.internalPaymentId ?? null, actor_name: n.actorName ?? null,
   })
   if (error) throw error
 }
@@ -409,6 +479,8 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   clients: mapClient,
   suppliers: mapSupplier,
   sellers: mapSeller,
+  remisiones: mapRemision,
+  internal_payments: mapInternalPayment,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -478,10 +550,11 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
-      fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(), fetchActivity(), fetchNotifications(),
+      fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
+      fetchRemisiones(), fetchInternalPayments(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, activity, notifications }
 }

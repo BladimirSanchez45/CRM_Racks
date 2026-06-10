@@ -8,6 +8,7 @@ import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween,
 import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { CobroForm } from '../projects/project_views'
+import { importMaterialsFromExcel } from '../../core/excel'
 import type { AppState, OcItem, Order, OrderInput, Payment, PaymentInput, PaymentStatus, Project } from '../../core/types'
 
 const PAY_STATES: PaymentStatus[] = ['Pagado', 'Programado', 'Cancelado']
@@ -235,38 +236,6 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
 /* ============================================================
    Formulario de OC (con proyecto, condiciones libres y materiales)
    ============================================================ */
-/* ---- Importar materiales desde el Excel (hoja "Cotizador Selectivo") ---- */
-async function importMaterialsFromExcel(file: File): Promise<OcItem[]> {
-  const XLSX = await import('xlsx')            // carga diferida (no infla el bundle)
-  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
-  const sheetName = wb.SheetNames.find(n => /cotizador\s*selectivo/i.test(n))
-  if (!sheetName) throw new Error('El Excel no tiene la hoja "Cotizador Selectivo".')
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rows = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[sheetName], { header: 1, blankrows: false, defval: '' })
-  const items: OcItem[] = []
-  let inTable = false
-  for (const r of rows) {
-    const parte = String(r[0] ?? '').trim().toLowerCase()
-    const material = String(r[3] ?? '').trim()
-    if (parte === 'parte' && material.toLowerCase() === 'material') { inTable = true; continue } // encabezado de tabla
-    if (!inTable) continue
-    const qty = Number(r[2])
-    if (!material || !Number.isFinite(qty) || qty <= 0) { inTable = false; continue }            // fin de la tabla
-    items.push({
-      id: uid('it'),
-      parte: String(r[0] ?? '').trim(),
-      color: String(r[1] ?? '').trim(),
-      material,
-      description: String(r[4] ?? '').trim(),
-      dimensiones: r[5] === '' || r[5] == null ? '' : String(r[5]).trim(),
-      qty: Math.round(qty * 100) / 100,
-      unitPrice: 0,
-    })
-  }
-  if (!items.length) throw new Error('No se encontraron materiales en la hoja.')
-  return items
-}
-
 const CELL = 'bg-bg-2 border border-line-2 rounded-[6px] px-1.5 py-1 text-[11.5px] outline-none focus:border-acc'
 
 type OcFormState = {

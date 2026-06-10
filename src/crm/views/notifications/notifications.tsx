@@ -14,6 +14,8 @@ import type { Notification, NotificationKind, Project } from '../../core/types'
 const KIND_ICON: Record<NotificationKind, IconName> = {
   project_assigned: 'flag',
   project_created: 'flag',
+  internal_payment_requested: 'money',
+  internal_payment_decided: 'money',
 }
 
 /** Fecha relativa amigable ("hace 5 min"). */

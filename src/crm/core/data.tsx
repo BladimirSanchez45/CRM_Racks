@@ -22,6 +22,8 @@ import type {
   StateAction,
   User,
   Supplier,
+  Remision,
+  InternalPayment,
 } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
@@ -30,6 +32,8 @@ import {
   savePayment, deletePayment as apiDeletePayment,
   saveClientPayment, deleteClientPayment as apiDeleteClientPayment,
   saveCommission, deleteCommission, saveClientRow, deleteClient as apiDeleteClient, saveSupplierRow, deleteSupplier as apiDeleteSupplier, saveSeller, deleteSeller as apiDeleteSeller,
+  saveRemision, deleteRemision as apiDeleteRemision,
+  saveInternalPayment, deleteInternalPayment as apiDeleteInternalPayment,
   saveActivity,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
   subscribeToData,
@@ -52,6 +56,8 @@ export const isAdminRole = (role?: Role | null) => role === 'admin' || role === 
 export const isSuperadmin = (role?: Role | null) => role === 'superadmin'
 /** Rol Ventas: acceso restringido (solo sus proyectos/OC, sin pagos/cobranza/etc.). */
 export const isVentasRole = (role?: Role | null) => role === 'ventas'
+/** Rol Logística: ve todos los proyectos/OC + asignación, remisiones y pagos internos. */
+export const isLogisticaRole = (role?: Role | null) => role === 'logistica'
 
 /** ¿El usuario puede EDITAR este proyecto?
  *  - Admin / Super Admin: siempre.
@@ -99,6 +105,12 @@ export const fmtDateShort = (d?: string) => { if (!d) return '—'; const x = ne
 export const TODAY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })()
 export const TODAY_ISO = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, '0')}-${String(TODAY.getDate()).padStart(2, '0')}`
 export const daysBetween = (d?: string) => { if (!d) return null; const x = new Date(d + 'T00:00:00'); return Math.round((x.getTime() - TODAY.getTime()) / 86400000) }
+// Suma `days` días a una fecha ISO (o a hoy si no se da base) y devuelve ISO (YYYY-MM-DD).
+export const addDays = (days: number, base?: string) => {
+  const d = base ? new Date(base + 'T00:00:00') : new Date(TODAY)
+  d.setDate(d.getDate() + days)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 export const ago = (d: string) => {
   const x = new Date(d); const diff = Math.round((TODAY.getTime() - x.getTime()) / 86400000)
   if (diff <= 0) return 'hoy'
@@ -181,7 +193,8 @@ export const regimenLabel = (code?: string) =>
 // ============================================================
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
-  clients: [], sellers: [], commissions: [], activity: [], notifications: [],
+  clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
+  activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
 
@@ -246,6 +259,10 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_SUPPLIER': return { ...state, suppliers: state.suppliers.filter(s => s.id !== a.id) }
     case 'UPSERT_SELLER': return { ...state, sellers: upsertBy(state.sellers, a.seller) }
     case 'REMOVE_SELLER': return { ...state, sellers: state.sellers.filter(s => s.id !== a.id) }
+    case 'UPSERT_REMISION': return { ...state, remisiones: upsertBy(state.remisiones, a.remision) }
+    case 'REMOVE_REMISION': return { ...state, remisiones: state.remisiones.filter(r => r.id !== a.id) }
+    case 'UPSERT_INTERNAL_PAYMENT': return { ...state, internalPayments: upsertBy(state.internalPayments, a.payment) }
+    case 'REMOVE_INTERNAL_PAYMENT': return { ...state, internalPayments: state.internalPayments.filter(p => p.id !== a.id) }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
     case 'MARK_ALL_NOTIFICATIONS_READ': return { ...state, notifications: state.notifications.map(n => n.read ? n : { ...n, read: true }) }
@@ -488,6 +505,109 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'REMOVE_SELLER', id: action.id })
         persist([() => apiDeleteSeller(action.id)]); return
 
+      case 'SAVE_REMISION': {
+        const isNew = !action.remision.id || !s.remisiones.some(r => r.id === action.remision.id)
+        const full: Remision = {
+          ...(action.remision as Remision),
+          id: action.remision.id ?? uid('rm'),
+          createdBy: action.remision.createdBy ?? s.currentUser?.id ?? '',
+          createdAt: action.remision.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_REMISION', remision: full })
+        const thunks: (() => Promise<void>)[] = [() => saveRemision(full)]
+        if (isNew) {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'truck', who: whoName(s), txt: `creó la remisión ${full.number}`, tgt: full.number, kind: 'work' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        persist(thunks); return
+      }
+      case 'DELETE_REMISION':
+        rawDispatch({ type: 'REMOVE_REMISION', id: action.id })
+        persist([() => apiDeleteRemision(action.id)]); return
+
+      case 'SAVE_INTERNAL_PAYMENT': {
+        const isNew = !action.payment.id || !s.internalPayments.some(p => p.id === action.payment.id)
+        const full: InternalPayment = {
+          ...(action.payment as InternalPayment),
+          id: action.payment.id ?? uid('ip'),
+          requestedBy: action.payment.requestedBy ?? s.currentUser?.id ?? '',
+          createdAt: action.payment.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_INTERNAL_PAYMENT', payment: full })
+        const thunks: (() => Promise<void>)[] = [() => saveInternalPayment(full)]
+        if (isNew) {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `solicitó un pago interno (${full.category})`, tgt: full.concept, kind: 'money' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+          // Avisa a los administradores que hay un pago pendiente de aprobación.
+          if (full.status === 'Pendiente') {
+            const admins = s.users.filter(u => isAdminRole(u.role) && u.active && u.id !== s.currentUser?.id)
+            for (const adminUser of admins) {
+              const notification: Notification = {
+                id: uid('nt'), userId: adminUser.id, kind: 'internal_payment_requested',
+                title: `Pago interno por aprobar: ${full.concept}`,
+                body: `${whoName(s)} solicitó un pago de ${fmtMoney(full.amount)} (${full.category}). Requiere tu aprobación.`,
+                read: false, createdAt: nowISO(), internalPaymentId: full.id, actorName: whoName(s),
+              }
+              saveNotification(notification).catch(err =>
+                console.error('[notif] no se pudo crear la notificación para', adminUser.email, err))
+            }
+          }
+        }
+        // Si está ligado a un proyecto FINALIZADO, recalcula comisiones (cambia la utilidad).
+        const ipProj = full.projectId ? s.projects.find(p => p.id === full.projectId) : undefined
+        if (ipProj && ipProj.stage === 'finalizado') {
+          regenCommissions(ipProj, thunks, { ...s, internalPayments: upsertBy(s.internalPayments, full) })
+        }
+        persist(thunks); return
+      }
+      case 'DELETE_INTERNAL_PAYMENT': {
+        const ip = s.internalPayments.find(p => p.id === action.id)
+        rawDispatch({ type: 'REMOVE_INTERNAL_PAYMENT', id: action.id })
+        const thunks: (() => Promise<void>)[] = [() => apiDeleteInternalPayment(action.id)]
+        const proj = ip?.projectId ? s.projects.find(p => p.id === ip.projectId) : undefined
+        if (proj && proj.stage === 'finalizado') {
+          regenCommissions(proj, thunks, { ...s, internalPayments: s.internalPayments.filter(p => p.id !== action.id) })
+        }
+        persist(thunks); return
+      }
+
+      case 'DECIDE_INTERNAL_PAYMENT': {
+        const ip = s.internalPayments.find(p => p.id === action.id); if (!ip) return
+        const updated: InternalPayment = {
+          ...ip,
+          status: action.approve ? 'Aprobado' : 'Rechazado',
+          approvedBy: s.currentUser?.id ?? '',
+          decidedAt: nowISO(),
+          ...(action.approve ? {} : { rejectReason: action.reason ?? '' }),
+        }
+        rawDispatch({ type: 'UPSERT_INTERNAL_PAYMENT', payment: updated })
+        const thunks: (() => Promise<void>)[] = [() => saveInternalPayment(updated)]
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: action.approve ? 'check' : 'close', who: whoName(s), txt: `${action.approve ? 'aprobó' : 'rechazó'} el pago interno`, tgt: ip.concept, kind: action.approve ? 'done' : 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        // Avisa al solicitante la decisión.
+        if (ip.requestedBy && ip.requestedBy !== s.currentUser?.id) {
+          const notification: Notification = {
+            id: uid('nt'), userId: ip.requestedBy, kind: 'internal_payment_decided',
+            title: `Pago interno ${action.approve ? 'aprobado' : 'rechazado'}: ${ip.concept}`,
+            body: action.approve
+              ? `${whoName(s)} aprobó tu pago de ${fmtMoney(ip.amount)}. Ya puedes agendarlo.`
+              : `${whoName(s)} rechazó tu pago de ${fmtMoney(ip.amount)}.${action.reason ? ` Motivo: ${action.reason}` : ''}`,
+            read: false, createdAt: nowISO(), internalPaymentId: ip.id, actorName: whoName(s),
+          }
+          saveNotification(notification).catch(err =>
+            console.error('[notif] no se pudo crear la notificación de decisión', err))
+        }
+        // Un rechazo saca el gasto de la utilidad; si el proyecto está finalizado, recalcula comisiones.
+        const decProj = ip.projectId ? s.projects.find(p => p.id === ip.projectId) : undefined
+        if (decProj && decProj.stage === 'finalizado') {
+          regenCommissions(decProj, thunks, { ...s, internalPayments: upsertBy(s.internalPayments, updated) })
+        }
+        persist(thunks); return
+      }
+
       case 'MARK_NOTIFICATION_READ': {
         const n = s.notifications.find(x => x.id === action.id); if (!n || n.read) return
         rawDispatch({ type: 'UPSERT_NOTIFICATION', notification: { ...n, read: true } })
@@ -560,6 +680,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'clients':         rawDispatch({ type: 'REMOVE_CLIENT', id: c.id }); break
           case 'suppliers':       rawDispatch({ type: 'REMOVE_SUPPLIER', id: c.id }); break
           case 'sellers':         rawDispatch({ type: 'REMOVE_SELLER', id: c.id }); break
+          case 'remisiones':      rawDispatch({ type: 'REMOVE_REMISION', id: c.id }); break
+          case 'internal_payments': rawDispatch({ type: 'REMOVE_INTERNAL_PAYMENT', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -571,6 +693,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'clients':         rawDispatch({ type: 'UPSERT_CLIENT', client: c.row }); break
           case 'suppliers':       rawDispatch({ type: 'UPSERT_SUPPLIER', supplier: c.row }); break
           case 'sellers':         rawDispatch({ type: 'UPSERT_SELLER', seller: c.row }); break
+          case 'remisiones':      rawDispatch({ type: 'UPSERT_REMISION', remision: c.row }); break
+          case 'internal_payments': rawDispatch({ type: 'UPSERT_INTERNAL_PAYMENT', payment: c.row }); break
         }
       }
     })
@@ -645,9 +769,21 @@ export const sel = {
   /** Compras/gastos del proyecto CON IVA = suma de OC no canceladas (Order.amount ya trae IVA). */
   projectComprasConIva: (state: AppState, pid: string) =>
     state.orders.filter(o => o.projectId === pid && !o.cancelled).reduce((a, o) => a + (o.amount || 0), 0),
-  /** Utilidad SIN IVA = subtotal de la venta − subtotal de las compras (compras con IVA / 1.16). */
+  /** Costo REAL de servicios (flete + instalación) que asignó logística.
+   *  Es SOLO de control/comparación contra el presupuesto: NO resta utilidad por sí mismo.
+   *  El gasto real se descuenta cuando se paga vía un pago interno (projectInternalPaymentsCost). */
+  projectServiciosCost: (_state: AppState, p: Project) => (p.freightCost || 0) + (p.installCost || 0),
+  /** Gastos por pagos internos asociados al proyecto (flete, viáticos, maniobras…).
+   *  Solo cuentan los ya PAGADOS: un pago pendiente/aprobado/programado aún no resta utilidad.
+   *  Es el ÚNICO lugar por el que un gasto operativo baja la utilidad (evita doble conteo con Asignación). */
+  projectInternalPaymentsCost: (state: AppState, pid: string) =>
+    state.internalPayments
+      .filter(p => p.projectId === pid && p.status === 'Pagado')
+      .reduce((a, p) => a + (p.amount || 0), 0),
+  /** Utilidad SIN IVA = subtotal de la venta − subtotal de compras (OC) − pagos internos pagados. */
   projectUtilidadSub: (state: AppState, p: Project) =>
-    (p.ventaSubtotal || 0) - sel.projectComprasConIva(state, p.id) / 1.16,
+    (p.ventaSubtotal || 0) - sel.projectComprasConIva(state, p.id) / 1.16
+      - sel.projectInternalPaymentsCost(state, p.id),
   /** Base para calcular comisiones = utilidad sin IVA (nunca negativa). */
   projectComisionBase: (state: AppState, p: Project) => Math.max(0, sel.projectUtilidadSub(state, p)),
   /** Cobrado = suma de cobros con estado "Cobrado". */
@@ -662,6 +798,24 @@ export const sel = {
   /** ¿Se pagó (status "Pagado") algún abono/anticipo al proveedor en las OC del proyecto? */
   projectAnticipoProveedor: (state: AppState, pid: string) =>
     sel.ordersForProject(state, pid).some(o => sel.ocPaid(state, o.id) > 0),
+
+  /* ---- Remisiones de salida ---- */
+  remisionesForProject: (state: AppState, pid: string) =>
+    state.remisiones.filter(r => r.projectId === pid).sort((a, b) => (a.date < b.date ? 1 : -1)),
+
+  /* ---- Pagos internos ---- */
+  internalPaymentsForProject: (state: AppState, pid: string) =>
+    state.internalPayments.filter(p => p.projectId === pid),
+  userName: (state: AppState, id: string) => (state.users.find(u => u.id === id) || ({} as User)).name || '—',
+}
+
+/** Siguiente folio consecutivo con prefijo (ej. nextFolio(remisiones, 'REM') → "REM-2026-001"). */
+export function nextFolio(items: { number: string }[], prefix: string, year = new Date().getFullYear()): string {
+  const max = items.reduce((m, it) => {
+    const mt = /(\d+)\s*$/.exec(it.number || '')
+    return mt ? Math.max(m, parseInt(mt[1], 10)) : m
+  }, 0)
+  return `${prefix}-${year}-${String(max + 1).padStart(3, '0')}`
 }
 
 /* ============================================================

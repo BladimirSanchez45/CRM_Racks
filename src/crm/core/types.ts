@@ -173,6 +173,78 @@ export interface Payment {
   comments: string          // Comentarios
 }
 
+/* ============================================================
+   REMISIONES DE SALIDA DE MATERIAL (módulo de logística)
+   ============================================================ */
+
+/** Estatus de una remisión de salida. */
+export type RemisionStatus = 'Borrador' | 'Emitida' | 'Entregada' | 'Cancelada'
+
+/** Partida de material que sale en una remisión. */
+export interface RemisionItem {
+  id: string
+  code?: string             // Código del material (CODIGO en la remisión)
+  description: string       // Descripción del material
+  qty: number               // Cantidad
+  unit?: string             // Unidad (pza, tarima, ml…)
+}
+
+/** Remisión de salida del material hacia el destino del proyecto. */
+export interface Remision {
+  id: string
+  number: string            // Folio de remisión (ej. REM-2026-001)
+  projectId: string         // Proyecto asociado
+  date: string              // Fecha de salida
+  carrierId?: string        // Proveedor de flete / transportista (Supplier)
+  destination: string       // Domicilio / ciudad de entrega
+  receivedBy?: string       // Persona que recibe en destino
+  items: RemisionItem[]     // Partidas de material que salen
+  status: RemisionStatus
+  notes: string
+  file: string              // Archivo adjunto (remisión firmada) — nombre visible
+  filePath?: string         // Ruta del adjunto en Supabase Storage
+  createdBy: string         // userId de quien la creó
+  createdAt: string         // ISO
+}
+
+/* ============================================================
+   PAGOS INTERNOS (logística cotiza → admin aprueba → se paga)
+   ============================================================ */
+
+/** Categoría del pago interno (gasto operativo de logística). */
+export type InternalPaymentCategory = 'Flete' | 'Instalación' | 'Viáticos' | 'Maniobras' | 'Material' | 'Otro'
+
+/** Estatus del pago interno a lo largo del flujo de aprobación.
+ *  Pendiente → (admin) Aprobado | Rechazado → (logística) Programado → Pagado. */
+export type InternalPaymentStatus =
+  | 'Pendiente'     // creado por logística, espera aprobación del admin
+  | 'Aprobado'      // admin lo aprobó; listo para programar/pagar
+  | 'Rechazado'     // admin lo rechazó (con motivo)
+  | 'Programado'    // logística agendó la fecha de pago
+  | 'Pagado'        // ya se ejecutó el pago
+  | 'Cancelado'     // logística lo canceló
+
+/** Solicitud de pago interno (flete, instalación, viáticos…) que requiere
+ *  aprobación del administrador antes de proceder. */
+export interface InternalPayment {
+  id: string
+  concept: string                 // Concepto del pago
+  category: InternalPaymentCategory
+  projectId?: string              // Proyecto relacionado (opcional)
+  supplierId?: string             // Proveedor a pagar (opcional)
+  amount: number                  // Monto cotizado
+  scheduledDate?: string          // Fecha en que se quiere agendar el pago
+  status: InternalPaymentStatus
+  requestedBy: string             // userId del solicitante (logística)
+  approvedBy?: string             // userId del admin que decidió
+  decidedAt?: string              // ISO de la aprobación/rechazo
+  rejectReason?: string           // Motivo si se rechazó
+  notes: string                   // Notas / justificación
+  file: string                    // Cotización adjunta — nombre visible
+  filePath?: string               // Ruta del adjunto en Supabase Storage
+  createdAt: string               // ISO
+}
+
 /** Referencia a un documento adjunto. `path` = ruta en Supabase Storage. */
 export interface DocRef {
   name: string
@@ -200,10 +272,16 @@ export interface Project {
   client: string
   seller: string
   city: string
+  origen?: string           // Origen del lead/venta (WebAd, CTC Ad…)
   sistemaVendido?: string   // Sistema vendido (tipo de rack/solución)
   ventaSubtotal?: number    // Subtotal de la venta (YA incluye flete e instalación). IVA y total se calculan de aquí.
-  freight: number
-  install: number
+  freight: number           // Presupuesto de flete (informativo; incluido en ventaSubtotal)
+  install: number           // Presupuesto de instalación (informativo; incluido en ventaSubtotal)
+  /* ---- Asignación de servicios (logística): proveedor + costo REAL ---- */
+  freightSupplierId?: string  // proveedor de flete asignado
+  freightCost?: number        // costo real del flete (lo que cobra el proveedor) — resta utilidad
+  installSupplierId?: string  // proveedor de instalación (cuadrilla) asignado
+  installCost?: number        // costo real de instalación — resta utilidad
   weeks: number
   obs: string
   docs: ProjectDocs
@@ -238,8 +316,14 @@ export interface Activity {
 }
 
 /** Tipos de notificación.
- *  - project_created: un vendedor registró una venta → se avisa a los administradores. */
-export type NotificationKind = 'project_assigned' | 'project_created'
+ *  - project_created: un vendedor registró una venta → se avisa a los administradores.
+ *  - internal_payment_requested: logística solicitó un pago interno → se avisa a los administradores.
+ *  - internal_payment_decided: el admin aprobó/rechazó un pago interno → se avisa al solicitante. */
+export type NotificationKind =
+  | 'project_assigned'
+  | 'project_created'
+  | 'internal_payment_requested'
+  | 'internal_payment_decided'
 
 /** Notificación dirigida a un usuario concreto (a diferencia del feed de
  *  actividad, que es global). Se entrega por id de usuario destinatario. */
@@ -252,6 +336,7 @@ export interface Notification {
   read: boolean
   createdAt: string       // ISO
   projectId?: string      // entidad relacionada (para abrir el detalle)
+  internalPaymentId?: string  // pago interno relacionado (para abrir el detalle)
   actorName?: string      // quién la originó
 }
 
@@ -265,6 +350,8 @@ export interface AppState {
   clients: Client[]
   sellers: Seller[]
   commissions: Commission[]
+  remisiones: Remision[]
+  internalPayments: InternalPayment[]
   activity: Activity[]
   notifications: Notification[]
   users: User[]
@@ -287,6 +374,16 @@ export type ClientInput = Omit<Client, 'id' | 'since'> & {
 }
 export type UserInput = Omit<User, 'id'> & { id?: string }
 export type SellerInput = Omit<Seller, 'id'> & { id?: string }
+export type RemisionInput = Omit<Remision, 'id' | 'createdBy' | 'createdAt'> & {
+  id?: string
+  createdBy?: string
+  createdAt?: string
+}
+export type InternalPaymentInput = Omit<InternalPayment, 'id' | 'requestedBy' | 'createdAt'> & {
+  id?: string
+  requestedBy?: string
+  createdAt?: string
+}
 
 /** Acciones del store. */
 export type Action =
@@ -309,6 +406,12 @@ export type Action =
   | { type: 'RECALC_COMMISSIONS'; id: string }   // recalcula las comisiones de un proyecto finalizado
   | { type: 'SAVE_SELLER'; seller: SellerInput }
   | { type: 'DELETE_SELLER'; id: string }
+  | { type: 'SAVE_REMISION'; remision: RemisionInput }
+  | { type: 'DELETE_REMISION'; id: string }
+  | { type: 'SAVE_INTERNAL_PAYMENT'; payment: InternalPaymentInput }
+  | { type: 'DELETE_INTERNAL_PAYMENT'; id: string }
+  /** Decisión del admin sobre un pago interno (aprobar/rechazar). */
+  | { type: 'DECIDE_INTERNAL_PAYMENT'; id: string; approve: boolean; reason?: string }
   | { type: 'MARK_NOTIFICATION_READ'; id: string }
   | { type: 'MARK_ALL_NOTIFICATIONS_READ' }
   | { type: 'LOGIN'; user: User }
@@ -336,6 +439,10 @@ export type StateAction =
   | { type: 'REMOVE_SUPPLIER'; id: string }
   | { type: 'UPSERT_SELLER'; seller: Seller }
   | { type: 'REMOVE_SELLER'; id: string }
+  | { type: 'UPSERT_REMISION'; remision: Remision }
+  | { type: 'REMOVE_REMISION'; id: string }
+  | { type: 'UPSERT_INTERNAL_PAYMENT'; payment: InternalPayment }
+  | { type: 'REMOVE_INTERNAL_PAYMENT'; id: string }
   | { type: 'PUSH_ACTIVITY'; activity: Activity }
   | { type: 'UPSERT_NOTIFICATION'; notification: Notification }
   | { type: 'MARK_ALL_NOTIFICATIONS_READ' }

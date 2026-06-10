@@ -15,6 +15,9 @@ import { PaymentsPage } from './views/payments/payments'
 import { CobranzaPage } from './views/cobranza/cobranza'
 import { ClientsPage } from './views/clients/clients'
 import { CommissionsPage } from './views/commissions/commissions'
+import { AsignacionPage } from './views/asignacion/asignacion'
+import { RemisionesPage } from './views/remisiones/remisiones'
+import { InternalPaymentsPage } from './views/internal_payments/internal_payments'
 import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
@@ -23,7 +26,7 @@ import type { Project, Role } from './core/types'
 import strakkLogo from '../assets/logos/strakk_logo.png'
 import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 
-type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
+type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean }[] = [
@@ -31,6 +34,9 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban' },
   { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers'},
   { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders'},
+  { id: 'asignacion',  label: 'Asignación',   icon: 'handshake' },
+  { id: 'remisiones',  label: 'Remisiones',   icon: 'truck' },
+  { id: 'internal_payments', label: 'Pagos internos', icon: 'shield' },
   { id: 'payments',    label: 'Pagos',        icon: 'money' },
   { id: 'cobranza',    label: 'Cobranza',     icon: 'download' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients' },
@@ -42,13 +48,16 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
 // que se creen para él). `settings` (Configuración) conviene incluirla siempre.
 const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   ventas: ['dashboard', 'projects', 'orders', 'settings'],
-  // logistica: ['dashboard', /* …vistas propias de logística (pendiente) */, 'settings'],
+  // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
+  // (Sin pagos, cobranza, clientes ni comisiones.)
+  logistica: ['dashboard', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
 }
 /** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
 const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', projects: 'Proyectos', suppliers: 'Proveedores',
-  orders: 'Órdenes de Compra', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
+  orders: 'Órdenes de Compra', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
+  internal_payments: 'Pagos internos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   admin: 'Administración', settings: 'Configuración',
 }
 
@@ -143,6 +152,9 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'projects':    return <ProjectsPage />
       case 'suppliers':   return <SuppliersPage />
       case 'orders':      return <OrdersPage />
+      case 'asignacion':  return <AsignacionPage />
+      case 'remisiones':  return <RemisionesPage />
+      case 'internal_payments': return <InternalPaymentsPage />
       case 'payments':    return <PaymentsPage />
       case 'cobranza':    return <CobranzaPage />
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />

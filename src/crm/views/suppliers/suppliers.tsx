@@ -131,13 +131,19 @@ export function SuppliersPage() {
   const [del, setDel] = React.useState<Supplier | null>(null)
   const [form, setForm] = React.useState<Partial<Supplier> | null>(null)
   const [showInactive, setShowInactive] = React.useState(true)
-  const list = state.suppliers.filter(s => showInactive || s.active)
+  const [city, setCity] = React.useState('')
+  const cities = React.useMemo(() => Array.from(new Set(state.suppliers.map(s => s.city).filter(Boolean))).sort((a, b) => a.localeCompare(b)), [state.suppliers])
+  const list = state.suppliers.filter(s => (showInactive || s.active) && (!city || s.city === city))
 
   return (
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Proveedores</h2><span className="sub">{state.suppliers.filter(s=>s.active).length} activos</span></div>
-        <div className="flex gap-2.5">
+        <div className="flex gap-2.5 items-center">
+          <Select value={city} onChange={e => setCity(e.target.value)} style={{ width: 180 }}>
+            <option value="">Todas las ciudades</option>
+            {cities.map(c => <option key={c} value={c}>{c}</option>)}
+          </Select>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowInactive(v => !v)}>{showInactive ? 'Ocultar inactivos' : 'Mostrar inactivos'}</button>
           <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo proveedor</button>
         </div>
