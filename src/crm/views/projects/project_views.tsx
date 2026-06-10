@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS, TODAY_ISO, canEditProject } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, docNo, docCount, DOC_LABELS, TODAY_ISO, canEditProject, isAdminRole } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
@@ -162,10 +162,10 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
   const ventaIva = ventaSub * 0.16
   const ventaTotal = ventaSub * 1.16
   // Utilidad = venta − compras/gastos (OCs del proyecto, sin contar las canceladas).
-  // Order.amount es el total con IVA; el subtotal se deriva dividiendo entre 1.16.
-  const comprasTotal = ocs.filter(o => !o.cancelled).reduce((a, o) => a + (o.amount || 0), 0)
+  // Misma fuente que la base de comisiones (sel.projectUtilidadSub).
+  const comprasTotal = sel.projectComprasConIva(state, p.id)
   const comprasSub = comprasTotal / 1.16
-  const utilSub = ventaSub - comprasSub
+  const utilSub = sel.projectUtilidadSub(state, p)
   const utilTotal = ventaTotal - comprasTotal
   const margen = ventaSub > 0 ? (utilSub / ventaSub) * 100 : null
   const cobros = sel.clientPaymentsForProject(state, p.id)
@@ -179,6 +179,11 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
       sub={`${client ? client.name : ''} · ${p.city}`}
       footer={<>
         {canEditProject(state.currentUser, p) && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar datos</button>}
+        {/* Recalcular comisiones de un proyecto finalizado (admin): útil si cambió el vendedor u overrides. */}
+        {isAdminRole(state.currentUser?.role) && p.stage === 'finalizado' && (
+          <button className="btn btn-ghost" title="Vuelve a calcular las comisiones según el vendedor y overrides actuales"
+            onClick={() => dispatch({ type: 'RECALC_COMMISSIONS', id: p.id })}><Icon name="commissions" size={15} /> Recalcular comisiones</button>
+        )}
         <div className="flex-1"></div>
         {/* Avanzar de etapa (confirmar/mover) solo para roles con gestión, no para Ventas. */}
         {state.currentUser?.role !== 'ventas' && <MoveStage project={p} />}

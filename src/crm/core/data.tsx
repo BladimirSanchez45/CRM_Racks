@@ -29,9 +29,10 @@ import {
   saveOrder, deleteOrder as apiDeleteOrder,
   savePayment, deletePayment as apiDeletePayment,
   saveClientPayment, deleteClientPayment as apiDeleteClientPayment,
-  saveCommission, saveClientRow, deleteClient as apiDeleteClient, saveSupplierRow, deleteSupplier as apiDeleteSupplier, saveSeller, deleteSeller as apiDeleteSeller,
+  saveCommission, deleteCommission, saveClientRow, deleteClient as apiDeleteClient, saveSupplierRow, deleteSupplier as apiDeleteSupplier, saveSeller, deleteSeller as apiDeleteSeller,
   saveActivity,
-  saveNotification, markNotificationRead, markAllNotificationsRead,
+  saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
+  subscribeToData,
 } from './api'
 import { supabase } from './supabase'
 
@@ -190,6 +191,32 @@ const nowISO = () => new Date().toISOString()
 const curMonth = () => new Date().toISOString().slice(0, 7)
 const whoName = (s: AppState) => s.currentUser?.name ?? 'Sistema'
 
+/** Construye las comisiones de un proyecto finalizado según el estado ACTUAL:
+ *  - principal: el % del vendedor del proyecto sobre la base (flete + instalación).
+ *  - override: el % de cada persona con override > 0 que NO sea el vendedor.
+ *  `paid` (ids de beneficiarios ya pagados) preserva ese estado al recalcular. */
+function buildCommissions(s: AppState, proj: Project, paid?: Set<string>): Commission[] {
+  // Base = utilidad sin IVA (subtotal de venta − subtotal de compras/gastos).
+  const base = sel.projectComisionBase(s, proj)
+  const month = curMonth()
+  const seller = s.sellers.find(x => x.id === proj.seller)
+  const list: Commission[] = [{
+    id: uid('cm'), projectId: proj.id, seller: proj.seller,
+    amount: Math.round(base * (seller ? seller.rate : 0.04)),
+    status: paid?.has(proj.seller) ? 'paid' : 'pending', month,
+  }]
+  for (const v of s.sellers) {
+    if (v.overrideRate && v.overrideRate > 0 && v.id !== proj.seller) {
+      list.push({
+        id: uid('cm'), projectId: proj.id, seller: v.id,
+        amount: Math.round(base * v.overrideRate),
+        status: paid?.has(v.id) ? 'paid' : 'pending', month,
+      })
+    }
+  }
+  return list
+}
+
 /* Reducer PURO: solo aplica cambios al estado local. La persistencia en
    Supabase la maneja el wrapper `dispatch` de StoreProvider. */
 function upsertBy<T extends { id: string }>(list: T[], item: T): T[] {
@@ -212,6 +239,7 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'UPSERT_CLIENT_PAYMENT': return { ...state, clientPayments: upsertBy(state.clientPayments, a.payment) }
     case 'REMOVE_CLIENT_PAYMENT': return { ...state, clientPayments: state.clientPayments.filter(c => c.id !== a.id) }
     case 'UPSERT_COMMISSION': return { ...state, commissions: upsertBy(state.commissions, a.commission) }
+    case 'REMOVE_COMMISSION': return { ...state, commissions: state.commissions.filter(c => c.id !== a.id) }
     case 'UPSERT_CLIENT': return { ...state, clients: upsertBy(state.clients, a.client) }
     case 'REMOVE_CLIENT': return { ...state, clients: state.clients.filter(c => c.id !== a.id) }
     case 'UPSERT_SUPPLIER': return { ...state, suppliers: upsertBy(state.suppliers, a.supplier) }
@@ -285,6 +313,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // dispatch PÚBLICO: aplica el cambio localmente (optimista) y lo persiste.
   const dispatch = React.useCallback((action: Action) => {
     const s = stateRef.current
+    // Recalcula las comisiones de un proyecto: borra las viejas y crea nuevas según el
+    // estado actual (vendedor, utilidad, overrides), preservando "pagada" por beneficiario.
+    // `calcState` permite calcular con datos recién modificados (p. ej. la OC nueva).
+    const regenCommissions = (proj: Project, thunks: (() => Promise<void>)[], calcState: AppState = s) => {
+      const existing = s.commissions.filter(c => c.projectId === proj.id)
+      const paid = new Set(existing.filter(c => c.status === 'paid').map(c => c.seller))
+      for (const old of existing) {
+        rawDispatch({ type: 'REMOVE_COMMISSION', id: old.id })
+        thunks.push(() => deleteCommission(old.id))
+      }
+      for (const cm of buildCommissions(calcState, proj, paid)) {
+        rawDispatch({ type: 'UPSERT_COMMISSION', commission: cm })
+        thunks.push(() => saveCommission(cm))
+      }
+    }
     switch (action.type) {
       case 'HYDRATE': rawDispatch(action); return
       case 'LOGIN': rawDispatch(action); return
@@ -296,20 +339,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'UPSERT_PROJECT', project: updated })
         const thunks: (() => Promise<void>)[] = [() => saveProject(updated)]
         if (action.stage === 'finalizado' && !s.commissions.some(c => c.projectId === action.id)) {
-          const base = proj.freight + proj.install
-          const seller = s.sellers.find(x => x.id === proj.seller)
-          const amount = Math.round(base * (seller ? seller.rate : 0.04))
-          const commission: Commission = { id: uid('cm'), projectId: action.id, seller: proj.seller, amount, status: 'pending', month: curMonth() }
-          rawDispatch({ type: 'UPSERT_COMMISSION', commission })
-          thunks.push(() => saveCommission(commission))
-          // Override: vendedores con overrideRate ganan ese % sobre las ventas de los DEMÁS.
-          s.sellers
-            .filter(v => v.overrideRate && v.overrideRate > 0 && v.id !== proj.seller)
-            .forEach(v => {
-              const ov: Commission = { id: uid('cm'), projectId: action.id, seller: v.id, amount: Math.round(base * v.overrideRate!), status: 'pending', month: curMonth() }
-              rawDispatch({ type: 'UPSERT_COMMISSION', commission: ov })
-              thunks.push(() => saveCommission(ov))
-            })
+          // Principal (vendedor) + override de cada persona con override, según el estado actual.
+          for (const cm of buildCommissions(s, updated)) {
+            rawDispatch({ type: 'UPSERT_COMMISSION', commission: cm })
+            thunks.push(() => saveCommission(cm))
+          }
         }
         const stg = STAGE_MAP[action.stage]
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: stg.icon, who: whoName(s), txt: `movió a ${stg.short}`, tgt: proj.code, kind: 'info' }
@@ -329,22 +363,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'flag', who: whoName(s), txt: 'registró nueva venta', tgt: full.code, kind: 'new' }
           rawDispatch({ type: 'PUSH_ACTIVITY', activity })
           thunks.push(() => saveActivity(activity))
-          // Notifica al vendedor asignado (si es un usuario del sistema y no es quien la creó).
-          const recipient = s.users.find(u => u.id === full.seller)
-          if (recipient && recipient.id !== s.currentUser?.id) {
+          // Cuando un VENDEDOR registra una venta, avisa a los administradores para que
+          // den seguimiento al proceso. Best-effort: NO va en el lote del proyecto, así
+          // que si falla no rompe ni alerta el guardado (solo se loguea). No se agrega al
+          // estado local porque son notificaciones para OTROS usuarios (RLS las acota).
+          if (s.currentUser?.role === 'ventas') {
             const clientName = sel.clientName(s, full.client)
-            const notification: Notification = {
-              id: uid('nt'), userId: recipient.id, kind: 'project_assigned',
-              title: `Nuevo proyecto: ${full.code}`,
-              body: `${whoName(s)} te asignó como vendedor${clientName ? ` del cliente ${clientName}` : ''}.`,
-              read: false, createdAt: nowISO(), projectId: full.id, actorName: whoName(s),
+            const admins = s.users.filter(u => isAdminRole(u.role) && u.active && u.id !== s.currentUser!.id)
+            for (const adminUser of admins) {
+              const notification: Notification = {
+                id: uid('nt'), userId: adminUser.id, kind: 'project_created',
+                title: `Nueva venta: ${full.code}`,
+                body: `${whoName(s)} registró una venta${clientName ? ` de ${clientName}` : ''}. Da seguimiento al proceso.`,
+                read: false, createdAt: nowISO(), projectId: full.id, actorName: whoName(s),
+              }
+              saveNotification(notification).catch(err =>
+                console.error('[notif] no se pudo crear la notificación para', adminUser.email, err))
             }
-            // Best-effort: la notificación NO va en el lote del proyecto. Si falla
-            // (p. ej. la tabla/RLS aún no está lista) NO debe romper ni alertar el
-            // guardado de la venta; solo se registra en consola. No se agrega al
-            // estado local porque es para OTRO usuario (RLS la acota al destinatario).
-            saveNotification(notification).catch(err =>
-              console.error('[notif] no se pudo crear la notificación para', recipient.email, err))
+          }
+        } else {
+          // Edición: si el proyecto está finalizado y cambió el vendedor o el subtotal de
+          // venta (base de la utilidad), recalcula sus comisiones.
+          const prev = s.projects.find(p => p.id === full.id)
+          if (full.stage === 'finalizado' && prev &&
+              (prev.seller !== full.seller || (prev.ventaSubtotal || 0) !== (full.ventaSubtotal || 0))) {
+            regenCommissions(full, thunks)
           }
         }
         persist(thunks); return
@@ -371,11 +414,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case 'SAVE_ORDER': {
         const full: Order = { ...(action.order as Order), id: action.order.id ?? uid('oc') }
         rawDispatch({ type: 'UPSERT_ORDER', order: full })
-        persist([() => saveOrder(full)]); return
+        const thunks: (() => Promise<void>)[] = [() => saveOrder(full)]
+        // Si la OC pertenece a un proyecto FINALIZADO, recalcula sus comisiones (cambia la utilidad).
+        const proj = full.projectId ? s.projects.find(p => p.id === full.projectId) : undefined
+        if (proj && proj.stage === 'finalizado') {
+          regenCommissions(proj, thunks, { ...s, orders: upsertBy(s.orders, full) })
+        }
+        persist(thunks); return
       }
-      case 'DELETE_ORDER':
+      case 'DELETE_ORDER': {
+        const ord = s.orders.find(o => o.id === action.id)
         rawDispatch({ type: 'REMOVE_ORDER', id: action.id })
-        persist([() => apiDeleteOrder(action.id)]); return
+        const thunks: (() => Promise<void>)[] = [() => apiDeleteOrder(action.id)]
+        const proj = ord?.projectId ? s.projects.find(p => p.id === ord.projectId) : undefined
+        if (proj && proj.stage === 'finalizado') {
+          regenCommissions(proj, thunks, { ...s, orders: s.orders.filter(o => o.id !== action.id) })
+        }
+        persist(thunks); return
+      }
 
       case 'SAVE_PAYMENT': {
         const full: Payment = { ...(action.payment as Payment), id: action.payment.id ?? uid('pg') }
@@ -414,6 +470,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const updated: Commission = { ...com, status: com.status === 'paid' ? 'pending' : 'paid' }
         rawDispatch({ type: 'UPSERT_COMMISSION', commission: updated })
         persist([() => saveCommission(updated)]); return
+      }
+      case 'RECALC_COMMISSIONS': {
+        const proj = s.projects.find(p => p.id === action.id)
+        if (!proj || proj.stage !== 'finalizado') return
+        const thunks: (() => Promise<void>)[] = []
+        regenCommissions(proj, thunks)
+        persist(thunks); return
       }
 
       case 'SAVE_SELLER': {
@@ -471,6 +534,47 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     return () => { active = false; sub.subscription.unsubscribe() }
   }, [])
+
+  // Realtime: notificaciones EN VIVO del usuario en sesión (WebSocket por Supabase).
+  // Cuando llega un INSERT para él (p. ej. un vendedor registró una venta), aparece
+  // al instante en la campana sin recargar. Se re-suscribe si cambia el usuario.
+  const myId = state.currentUser?.id
+  React.useEffect(() => {
+    if (!myId) return
+    return subscribeToNotifications(myId, (n) => rawDispatch({ type: 'UPSERT_NOTIFICATION', notification: n }))
+  }, [myId])
+
+  // Realtime de DATOS: cuando alguien crea/edita/borra un proyecto, OC, pago, cliente,
+  // etc., el cambio aparece EN VIVO en las pantallas de los demás (sin recargar). El
+  // upsert/remove por id es idempotente, así que el eco del propio cambio no molesta.
+  React.useEffect(() => {
+    if (!myId) return
+    return subscribeToData((c) => {
+      if (c.type === 'delete') {
+        switch (c.table) {
+          case 'projects':        rawDispatch({ type: 'REMOVE_PROJECT', id: c.id }); break
+          case 'orders':          rawDispatch({ type: 'REMOVE_ORDER', id: c.id }); break
+          case 'payments':        rawDispatch({ type: 'REMOVE_PAYMENT', id: c.id }); break
+          case 'client_payments': rawDispatch({ type: 'REMOVE_CLIENT_PAYMENT', id: c.id }); break
+          case 'commissions':     rawDispatch({ type: 'REMOVE_COMMISSION', id: c.id }); break
+          case 'clients':         rawDispatch({ type: 'REMOVE_CLIENT', id: c.id }); break
+          case 'suppliers':       rawDispatch({ type: 'REMOVE_SUPPLIER', id: c.id }); break
+          case 'sellers':         rawDispatch({ type: 'REMOVE_SELLER', id: c.id }); break
+        }
+      } else {
+        switch (c.table) {
+          case 'projects':        rawDispatch({ type: 'UPSERT_PROJECT', project: c.row }); break
+          case 'orders':          rawDispatch({ type: 'UPSERT_ORDER', order: c.row }); break
+          case 'payments':        rawDispatch({ type: 'UPSERT_PAYMENT', payment: c.row }); break
+          case 'client_payments': rawDispatch({ type: 'UPSERT_CLIENT_PAYMENT', payment: c.row }); break
+          case 'commissions':     rawDispatch({ type: 'UPSERT_COMMISSION', commission: c.row }); break
+          case 'clients':         rawDispatch({ type: 'UPSERT_CLIENT', client: c.row }); break
+          case 'suppliers':       rawDispatch({ type: 'UPSERT_SUPPLIER', supplier: c.row }); break
+          case 'sellers':         rawDispatch({ type: 'UPSERT_SELLER', seller: c.row }); break
+        }
+      }
+    })
+  }, [myId])
 
   const value = React.useMemo<StoreValue>(() => ({ state, dispatch }), [state, dispatch])
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>
@@ -538,6 +642,14 @@ export const sel = {
     state.clientPayments.filter(c => c.projectId === pid).sort((a, b) => a.n - b.n),
   /** Total de la venta con IVA (subtotal × 1.16), redondeado a centavos. */
   projectTotalConIva: (p: { ventaSubtotal?: number }) => Math.round((p.ventaSubtotal || 0) * 1.16 * 100) / 100,
+  /** Compras/gastos del proyecto CON IVA = suma de OC no canceladas (Order.amount ya trae IVA). */
+  projectComprasConIva: (state: AppState, pid: string) =>
+    state.orders.filter(o => o.projectId === pid && !o.cancelled).reduce((a, o) => a + (o.amount || 0), 0),
+  /** Utilidad SIN IVA = subtotal de la venta − subtotal de las compras (compras con IVA / 1.16). */
+  projectUtilidadSub: (state: AppState, p: Project) =>
+    (p.ventaSubtotal || 0) - sel.projectComprasConIva(state, p.id) / 1.16,
+  /** Base para calcular comisiones = utilidad sin IVA (nunca negativa). */
+  projectComisionBase: (state: AppState, p: Project) => Math.max(0, sel.projectUtilidadSub(state, p)),
   /** Cobrado = suma de cobros con estado "Cobrado". */
   projectCobrado: (state: AppState, pid: string) =>
     state.clientPayments.filter(c => c.projectId === pid && c.status === 'Cobrado').reduce((a, c) => a + c.amount, 0),

@@ -237,8 +237,9 @@ export interface Activity {
   kind: 'done' | 'money' | 'new' | 'work' | 'info'
 }
 
-/** Tipos de notificación. Por ahora solo "proyecto asignado a un vendedor". */
-export type NotificationKind = 'project_assigned'
+/** Tipos de notificación.
+ *  - project_created: un vendedor registró una venta → se avisa a los administradores. */
+export type NotificationKind = 'project_assigned' | 'project_created'
 
 /** Notificación dirigida a un usuario concreto (a diferencia del feed de
  *  actividad, que es global). Se entrega por id de usuario destinatario. */
@@ -305,6 +306,7 @@ export type Action =
   | { type: 'SAVE_CLIENT'; client: ClientInput }
   | { type: 'DELETE_CLIENT'; id: string }
   | { type: 'TOGGLE_COMMISSION'; id: string }
+  | { type: 'RECALC_COMMISSIONS'; id: string }   // recalcula las comisiones de un proyecto finalizado
   | { type: 'SAVE_SELLER'; seller: SellerInput }
   | { type: 'DELETE_SELLER'; id: string }
   | { type: 'MARK_NOTIFICATION_READ'; id: string }
@@ -327,6 +329,7 @@ export type StateAction =
   | { type: 'UPSERT_CLIENT_PAYMENT'; payment: ClientPayment }
   | { type: 'REMOVE_CLIENT_PAYMENT'; id: string }
   | { type: 'UPSERT_COMMISSION'; commission: Commission }
+  | { type: 'REMOVE_COMMISSION'; id: string }
   | { type: 'UPSERT_CLIENT'; client: Client }
   | { type: 'REMOVE_CLIENT'; id: string }
   | { type: 'UPSERT_SUPPLIER'; supplier: Supplier }

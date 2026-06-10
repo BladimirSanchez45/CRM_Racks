@@ -13,6 +13,7 @@ import type { Notification, NotificationKind, Project } from '../../core/types'
 /** Ícono por tipo de notificación. */
 const KIND_ICON: Record<NotificationKind, IconName> = {
   project_assigned: 'flag',
+  project_created: 'flag',
 }
 
 /** Fecha relativa amigable ("hace 5 min"). */

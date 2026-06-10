@@ -312,6 +312,7 @@ export async function fetchCommissions(): Promise<Commission[]> {
 }
 export const saveCommission = (c: Commission) =>
   upsert('commissions', { id: c.id, project_id: c.projectId, seller: c.seller, amount: c.amount, status: c.status, month: c.month })
+export const deleteCommission = (id: string) => removeRow('commissions', id)
 
 /* ---- Actividad ---- */
 function mapActivity(r: any): Activity {
@@ -361,12 +362,77 @@ export async function markNotificationRead(id: string): Promise<void> {
   const { error } = await supabase.from('notifications').update({ read: true }).eq('id', id)
   if (error) throw error
 }
+/** Suscripción EN VIVO (Realtime/WebSocket) a las notificaciones de un usuario.
+ *  Recibe INSERT/UPDATE de la tabla acotados al destinatario (el RLS también aplica)
+ *  y llama onChange con la notificación mapeada. Devuelve una función para desuscribir.
+ *  Requiere que la tabla `notifications` esté habilitada en la publicación
+ *  `supabase_realtime` (Database → Replication en el panel). */
+export function subscribeToNotifications(userId: string, onChange: (n: Notification) => void): () => void {
+  const channel = supabase
+    .channel(`notifications:${userId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'notifications', filter: `user_id=eq.${userId}` },
+      (payload) => {
+        const row = payload.new as Record<string, unknown> | null
+        if (row && Object.keys(row).length) onChange(mapNotification(row))
+      },
+    )
+    .subscribe()
+  return () => { void supabase.removeChannel(channel) }
+}
+
 /** Marca como leídas todas las notificaciones del usuario en sesión. */
 export async function markAllNotificationsRead(): Promise<void> {
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return
   const { error } = await supabase.from('notifications').update({ read: true }).eq('user_id', auth.user.id).eq('read', false)
   if (error) throw error
+}
+
+/* ============================================================
+   REALTIME — sincronización en vivo de las tablas operativas
+   ============================================================ */
+
+/** Un cambio en vivo de datos: fila ya mapeada (upsert) o id (delete). */
+export type DataChange =
+  | { table: string; type: 'upsert'; row: any }
+  | { table: string; type: 'delete'; id: string }
+
+// Tabla (Postgres) → función que mapea su fila al tipo del front.
+const REALTIME_MAP: Record<string, (r: any) => any> = {
+  projects: mapProject,
+  orders: mapOrder,
+  payments: mapPayment,
+  client_payments: mapClientPayment,
+  commissions: mapCommission,
+  clients: mapClient,
+  suppliers: mapSupplier,
+  sellers: mapSeller,
+}
+
+/** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
+ *  llama onChange con la fila ya mapeada (upsert) o el id (delete). Requiere que las
+ *  tablas estén en la publicación `supabase_realtime` (Database → Replication). */
+export function subscribeToData(onChange: (c: DataChange) => void): () => void {
+  const channel = supabase.channel('data-sync')
+  for (const table of Object.keys(REALTIME_MAP)) {
+    channel.on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table },
+      (payload) => {
+        if (payload.eventType === 'DELETE') {
+          const id = (payload.old as any)?.id
+          if (id != null) onChange({ table, type: 'delete', id: String(id) })
+        } else {
+          const r = payload.new as Record<string, unknown>
+          if (r && Object.keys(r).length) onChange({ table, type: 'upsert', row: REALTIME_MAP[table](r) })
+        }
+      },
+    )
+  }
+  channel.subscribe()
+  return () => { void supabase.removeChannel(channel) }
 }
 
 /* ---- Clientes / Proveedores (escritura; lectura ya existe arriba) ---- */
