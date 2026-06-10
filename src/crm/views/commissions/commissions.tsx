@@ -2,8 +2,8 @@
 //  COMMISSIONS — finalized projects this month, seller, paid/pending
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, MESES_L } from '../../core/data'
-import { Badge, Avatar, Empty, Seg } from '../../core/ui'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, MESES_L, TODAY_ISO } from '../../core/data'
+import { Badge, Avatar, Empty, Seg, Select } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Commission, Project } from '../../core/types'
 
@@ -16,6 +16,7 @@ export function CommissionsPage() {
   const { state, dispatch } = useStore()
   const [view, setView] = React.useState('all') // all | pending | paid
   const [open, setOpen] = React.useState<Set<string>>(new Set())
+  const [month, setMonth] = React.useState(TODAY_ISO.slice(0, 7)) // 'YYYY-MM' o 'all'
   const toggleOpen = (k: string) => setOpen(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
 
   const rows: CommissionRow[] = state.commissions.map(c => {
@@ -27,9 +28,17 @@ export function CommissionsPage() {
     return { ...c, project, earner, isOverride }
   }).filter(r => r.project)
 
-  const filtered = rows.filter(r => view === 'all' || r.status === view)
-  const totalPending = rows.filter(r => r.status === 'pending').reduce((a, r) => a + r.amount, 0)
-  const totalPaid = rows.filter(r => r.status === 'paid').reduce((a, r) => a + r.amount, 0)
+  // Mes = mes en que CERRÓ el proyecto (closedOn); si falta, el mes de la comisión.
+  const monthOf = (r: CommissionRow) => (r.project?.closedOn || '').slice(0, 7) || r.month || ''
+  const monthLabel = (ym: string) => `${MESES_L[Number(ym.slice(5, 7)) - 1] ?? ''} ${ym.slice(0, 4)}`
+  // Meses con comisiones + el mes actual (aunque esté vacío), más recientes primero.
+  const monthOptions = Array.from(new Set([TODAY_ISO.slice(0, 7), ...rows.map(monthOf).filter(Boolean)])).sort().reverse()
+
+  // Filtra por MES seleccionado y luego por estado.
+  const monthRows = month === 'all' ? rows : rows.filter(r => monthOf(r) === month)
+  const filtered = monthRows.filter(r => view === 'all' || r.status === view)
+  const totalPending = monthRows.filter(r => r.status === 'pending').reduce((a, r) => a + r.amount, 0)
+  const totalPaid = monthRows.filter(r => r.status === 'paid').reduce((a, r) => a + r.amount, 0)
   const total = totalPending + totalPaid
 
   // Agrupa las comisiones por PERSONA (su comisión propia + sus overrides juntos).
@@ -46,13 +55,17 @@ export function CommissionsPage() {
   return (
     <div>
       <div className="spread mb-[18px]">
-        <div className="sec-title m-0"><h2>Comisiones</h2><span className="sub">{MESES_L[5]} 2026</span></div>
+        <div className="sec-title m-0"><h2>Comisiones</h2><span className="sub">{month === 'all' ? 'Todos los meses' : monthLabel(month)}</span></div>
+        <Select value={month} onChange={e => setMonth(e.target.value)} className="w-auto min-w-[170px]">
+          {monthOptions.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+          <option value="all">Todos los meses</option>
+        </Select>
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-5">
-        <div className="kpi kpi-accent"><div className="k-label">Total del mes</div><div className="k-val text-[26px]">{fmtMoney(total)}</div><div className="k-foot">{new Set(rows.map(r => r.projectId)).size} proyectos · {rows.length} comisiones</div></div>
-        <div className="kpi"><div className="k-label">Pendiente de pago</div><div className="k-val text-[26px] text-warn">{fmtMoney(totalPending)}</div><div className="k-foot">{rows.filter(r=>r.status==='pending').length} comisiones</div></div>
-        <div className="kpi"><div className="k-label">Pagado</div><div className="k-val text-[26px] text-ok">{fmtMoney(totalPaid)}</div><div className="k-foot">{rows.filter(r=>r.status==='paid').length} comisiones</div></div>
+        <div className="kpi kpi-accent"><div className="k-label">{month === 'all' ? 'Total' : 'Total del mes'}</div><div className="k-val text-[26px]">{fmtMoney(total)}</div><div className="k-foot">{new Set(monthRows.map(r => r.projectId)).size} proyectos · {monthRows.length} comisiones</div></div>
+        <div className="kpi"><div className="k-label">Pendiente de pago</div><div className="k-val text-[26px] text-warn">{fmtMoney(totalPending)}</div><div className="k-foot">{monthRows.filter(r=>r.status==='pending').length} comisiones</div></div>
+        <div className="kpi"><div className="k-label">Pagado</div><div className="k-val text-[26px] text-ok">{fmtMoney(totalPaid)}</div><div className="k-foot">{monthRows.filter(r=>r.status==='paid').length} comisiones</div></div>
       </div>
 
       <div className="card overflow-hidden">
