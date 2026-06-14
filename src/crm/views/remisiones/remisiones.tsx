@@ -82,14 +82,17 @@ export async function buildRemisionPdf(state: AppState, r: Remision): Promise<Bl
   }
 
   bar('ORIGEN')
-  row('Razon social:', ORIGEN.razonSocial, 'Telefono:', ORIGEN.telefono)
+  // El teléfono solo se muestra una vez, en DESTINO (es el del cliente).
+  row('Razon social:', ORIGEN.razonSocial)
   row('Calle:', ORIGEN.calle)
   row('Colonia:', ORIGEN.colonia)
   row('C.P:', ORIGEN.cp)
   y += 2
 
   bar('DESTINO')
-  row('Cliente:', r.receivedBy || (client ? client.name : ''), 'Telefono:', r.phone || (client ? client.phone : ''))
+  // Teléfono = exactamente el que está en el campo "Teléfono" del modal (precargado del
+  // cliente al elegir proyecto si lo tiene; vacío si no, para capturarlo a mano).
+  row('Cliente:', r.receivedBy || (client ? client.name : ''), 'Telefono:', r.phone || '')
   row('Domicilio:', r.destination)
   row('C.P:', client ? (client.cp || '') : '')
   if (carrier) row('Transporte:', carrier.name)
@@ -232,27 +235,47 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
     receivedBy: r.receivedBy || undefined,
     items: r.items.map(it => ({ ...it, qty: +it.qty || 0 })),
   })
-  const save = () => { dispatch({ type: 'SAVE_REMISION', remision: payload() }); onClose() }
-  // Generar PDF: crea el PDF real, lo SUBE como "Remisión firmada" (queda guardado en el
-  // proyecto), actualiza el registro y lo abre para ver/imprimir.
   const [generating, setGenerating] = React.useState(false)
+  // Genera el PDF real de la remisión, lo SUBE como "Remisión firmada", guarda la remisión
+  // con ese archivo y lo coloca en el documento "Remisión de salida" del proyecto asociado.
+  // Devuelve el blob y los datos del archivo para previsualizar/registrar.
+  const buildStoreRemision = async () => {
+    const rem = { ...payload(), createdBy: remision?.createdBy ?? '', createdAt: remision?.createdAt ?? '' } as Remision
+    const blob = await buildRemisionPdf(state, rem)
+    const fileName = `Remision_${r.number}.pdf`
+    const path = await uploadDoc(new File([blob], fileName, { type: 'application/pdf' }), `remisiones/${r.number || 'nuevas'}`)
+    dispatch({ type: 'SAVE_REMISION', remision: { ...payload(), file: fileName, filePath: path } })
+    const proj = state.projects.find(p => p.id === r.projectId)
+    if (proj) {
+      dispatch({
+        type: 'SAVE_PROJECT',
+        project: { ...proj, remision: r.number, docs: { ...proj.docs, remision: { name: fileName, ok: true, path } } },
+      })
+    }
+    return { blob, fileName, path }
+  }
+  // Guardar: SIEMPRE (re)genera el PDF y lo guarda en la remisión y en el proyecto, de modo
+  // que al crear o editar quede siempre actualizado.
+  const save = async () => {
+    setGenerating(true)
+    try {
+      await buildStoreRemision()
+      onClose()
+    } catch (e) {
+      // Si el PDF falla, guarda al menos los datos para no perder el trabajo.
+      dispatch({ type: 'SAVE_REMISION', remision: payload() })
+      alert('Se guardó la remisión, pero no se pudo generar el PDF: ' + (e instanceof Error ? e.message : 'error desconocido'))
+      onClose()
+    } finally {
+      setGenerating(false)
+    }
+  }
+  // Generar PDF: igual que guardar, pero deja el modal abierto y abre el PDF en una pestaña.
   const genPdf = async () => {
     setGenerating(true)
     try {
-      const rem = { ...payload(), createdBy: remision?.createdBy ?? '', createdAt: remision?.createdAt ?? '' } as Remision
-      const blob = await buildRemisionPdf(state, rem)
-      const fileName = `Remision_${r.number}.pdf`
-      const path = await uploadDoc(new File([blob], fileName, { type: 'application/pdf' }), `remisiones/${r.number || 'nuevas'}`)
+      const { blob, fileName, path } = await buildStoreRemision()
       setR(s => ({ ...s, file: fileName, filePath: path }))
-      dispatch({ type: 'SAVE_REMISION', remision: { ...payload(), file: fileName, filePath: path } })
-      // También lo coloca en el documento "Remisión de salida" del proyecto asociado.
-      const proj = state.projects.find(p => p.id === r.projectId)
-      if (proj) {
-        dispatch({
-          type: 'SAVE_PROJECT',
-          project: { ...proj, remision: r.number, docs: { ...proj.docs, remision: { name: fileName, ok: true, path } } },
-        })
-      }
       window.open(URL.createObjectURL(blob), '_blank')
     } catch (e) {
       alert('No se pudo generar/guardar el PDF: ' + (e instanceof Error ? e.message : 'error desconocido'))
@@ -270,7 +293,7 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
           <Icon name="download" size={14} /> {generating ? 'Generando…' : 'Generar PDF'}
         </button>
         <div className="flex-1"></div>
-        <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
+        <button className={'btn btn-primary' + (!valid || generating ? ' opacity-50' : '')} disabled={!valid || generating} onClick={save}><Icon name="check" size={15} /> {generating ? 'Guardando…' : 'Guardar'}</button>
       </>}>
       <div className="grid grid-cols-3 gap-3.5">
         <Field label="Folio"><Input className="input mono" value={r.number} onChange={e => set('number', e.target.value)} /></Field>

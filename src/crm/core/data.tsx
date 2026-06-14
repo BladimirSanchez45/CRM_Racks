@@ -77,7 +77,7 @@ export const STAGES: Stage[] = [
   { id: 'asignacion',   n: 3, label: 'Asignación de Proveedor / OC', short: 'Asign. / OC',  color: 'var(--st-3)', icon: 'handshake',   hint: 'Proveedor elegido, OC creada, anticipo pagado' },
   { id: 'compra',       n: 4, label: 'Creacion de orden de Compra', short: 'Orden de Compra',  color: 'var(--st-10)', icon: 'doc',   hint: 'Creacion de orden de Compra' },
   { id: 'fabricacion',  n: 5, label: 'En Fabricación',               short: 'Fabricación',  color: 'var(--st-4)', icon: 'factory',     hint: 'Fabricación en proceso, logística da seguimiento' },
-  { id: 'entrega_est',  n: 6, label: 'Fecha Entrega Estimada',       short: 'Entrega Est.', color: 'var(--st-5)', icon: 'calendar',    hint: 'Proveedor da ETA, cliente notificado, espera finiquito' },
+  { id: 'entrega_est',  n: 6, label: 'Entrega por vencer',           short: 'Por Vencer',   color: 'var(--st-5)', icon: 'calendar',    hint: 'Faltan ≤5 días para la entrega y el cliente aún no paga el total' },
   { id: 'pago',         n: 7, label: 'Pago Recibido',                short: 'Pago Recibido',color: 'var(--st-6)', icon: 'money',       hint: 'Cliente pagó completo, logística coordina envío' },
   { id: 'coordinacion', n: 8, label: 'Coordinación Envío/Instalación',short: 'Coordinación',color: 'var(--st-7)', icon: 'truck',      hint: 'Define proveedores de servicio, crea remisión' },
   { id: 'instalacion',  n: 9, label: 'Instalación en Curso',         short: 'Instalación',  color: 'var(--st-8)', icon: 'layers',      hint: 'Material en destino con instaladores' },
@@ -827,13 +827,18 @@ export function nextFolio(items: { number: string }[], prefix: string, year = ne
    del cliente) y las de logística (coordinación, instalación, finalizado)— NO
    las decide esta función. La reconciliación del store solo avanza, nunca
    regresa, y respeta el candado manual registro→creación. */
+/** Días antes de la fecha ETA en que el proyecto entra a "Por Vencer". */
+export const ENTREGA_EST_DIAS_PREVIOS = 5
 export function autoStageFor(state: AppState, p: Project): StageId | null {
   // 7 · Pago Recibido — el cliente cubrió el total con IVA (incluye finiquito).
   const total = sel.projectTotalConIva(p)
   if (total > 0 && sel.projectCobrado(state, p.id) >= total - 0.5) return 'pago'
   const anticipoProveedor = sel.projectAnticipoProveedor(state, p.id)
-  // 6 · Entrega Estimada — material en fabricación y ya llegó la fecha ETA del proyecto.
-  if (anticipoProveedor && p.eta && p.eta <= TODAY_ISO) return 'entrega_est'
+  // 6 · Por Vencer — material en fabricación y faltan ≤ 5 días para la fecha ETA
+  //     (o ya venció). Se adelanta el salto a esta etapa para detectar a tiempo los
+  //     proyectos próximos a vencer que aún no han recibido el pago del cliente.
+  const etaDays = daysBetween(p.eta)
+  if (anticipoProveedor && p.eta && etaDays != null && etaDays <= ENTREGA_EST_DIAS_PREVIOS) return 'entrega_est'
   // 5 · Fabricación — se pagó anticipo al proveedor.
   if (anticipoProveedor) return 'fabricacion'
   // 4 · Orden de Compra — ya existe la OC del proyecto.

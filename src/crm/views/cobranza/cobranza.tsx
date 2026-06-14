@@ -73,6 +73,29 @@ export function CobranzaPage() {
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [q, setQ] = React.useState('')
 
+  // ---- Marcador "Nuevo" (no abierto), por usuario y persistido en el navegador ----
+  // Cada usuario lleva su propio set de proyectos ya abiertos. Las filas que NO estén
+  // en ese set se marcan como "Nuevo" y se ordenan arriba; al abrir el detalle se quitan.
+  const seenKey = `cobranza_seen_v1_${state.currentUser?.id ?? 'anon'}`
+  const [seen, setSeen] = React.useState<Set<string>>(() => {
+    try { const raw = localStorage.getItem(seenKey); if (raw) return new Set<string>(JSON.parse(raw)) } catch { /* ignore */ }
+    return new Set<string>()
+  })
+  // ¿Ya hay línea base guardada? Si no, se sembrará con los proyectos actuales una vez
+  // que carguen, para que solo resalten los que entren DESPUÉS (evita marcar todo de golpe).
+  const seededRef = React.useRef<boolean>(((): boolean => { try { return localStorage.getItem(seenKey) != null } catch { return false } })())
+  const writeSeen = (next: Set<string>) => { try { localStorage.setItem(seenKey, JSON.stringify([...next])) } catch { /* ignore */ } }
+  React.useEffect(() => {
+    if (seededRef.current || state.projects.length === 0) return
+    const init = new Set(state.projects.map(p => p.id))
+    seededRef.current = true
+    writeSeen(init)
+    setSeen(init)
+  }, [state.projects, seenKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  const isNew = (id: string) => seededRef.current && !seen.has(id)
+  const markSeen = (id: string) => setSeen(prev => { if (prev.has(id)) return prev; const next = new Set(prev); next.add(id); writeSeen(next); return next })
+  const markAllSeen = () => { const all = new Set(state.projects.map(p => p.id)); writeSeen(all); setSeen(all) }
+
   const rows = state.projects.map(p => {
     const total = sel.projectTotalConIva(p)
     const cobrado = sel.projectCobrado(state, p.id)
@@ -87,7 +110,12 @@ export function CobranzaPage() {
     ? rows.filter(r => `${r.p.code} ${r.client} ${r.total} ${r.cobrado} ${fmtMoney(r.total)} ${fmtMoney(r.cobrado)}`.toLowerCase().includes(needle))
     : rows
   const ord: Record<Estado, number> = { 'Sin cobro': 0, Parcial: 1, Cobrado: 2 }
-  const sorted = [...filtered].sort((a, b) => ord[a.estado] - ord[b.estado] || (a.p.code < b.p.code ? 1 : -1))
+  // No abiertos (Nuevo) arriba; dentro de cada grupo, por estado y luego por código.
+  const sorted = [...filtered].sort((a, b) =>
+    (isNew(a.p.id) ? 0 : 1) - (isNew(b.p.id) ? 0 : 1)
+    || ord[a.estado] - ord[b.estado]
+    || (a.p.code < b.p.code ? 1 : -1))
+  const newCount = rows.filter(r => isNew(r.p.id)).length
 
   const totalCobrado = rows.reduce((a, r) => a + r.cobrado, 0)
   const totalPorCobrar = rows.reduce((a, r) => a + Math.max(0, r.saldo), 0)
@@ -105,9 +133,17 @@ export function CobranzaPage() {
         <KPI label="Proyectos sin cobro" value={sinCobro} icon="alert" />
       </div>
 
-      <div className="relative mb-4 max-w-[440px]">
-        <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
-        <input className="input pl-[34px]" placeholder="Buscar por proyecto, cliente, monto total o cobrado…" value={q} onChange={e => setQ(e.target.value)} />
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <div className="relative flex-1 max-w-[440px]">
+          <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+          <input className="input pl-[34px]" placeholder="Buscar por proyecto, cliente, monto total o cobrado…" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+        {newCount > 0 && (
+          <span className="flex items-center gap-2">
+            <Badge color="var(--acc)">{newCount} nuevo{newCount === 1 ? '' : 's'}</Badge>
+            <button className="btn btn-ghost btn-sm" onClick={markAllSeen}><Icon name="check" size={13} /> Marcar todos como vistos</button>
+          </span>
+        )}
       </div>
 
       <div className="card overflow-hidden">
@@ -116,8 +152,14 @@ export function CobranzaPage() {
             <thead><tr><th>Proyecto</th><th>Cliente</th><th className="num">Monto total</th><th className="num">Cobrado</th><th className="num">Saldo</th><th>Estado</th><th>Forma de pago</th><th>Comentarios</th></tr></thead>
             <tbody>
               {sorted.map(r => (
-                <tr key={r.p.id} onClick={() => setDetail(r.p)}>
-                  <td><span className="mono text-acc font-semibold">{r.p.code}</span></td>
+                <tr key={r.p.id} onClick={() => { setDetail(r.p); markSeen(r.p.id) }}>
+                  <td>
+                    <span className="flex items-center gap-2">
+                      {isNew(r.p.id) && <span className="w-1.5 h-1.5 rounded-full flex-none" style={{ background: 'var(--acc)' }} title="No abierto" />}
+                      <span className="mono text-acc font-semibold">{r.p.code}</span>
+                      {isNew(r.p.id) && <Badge color="var(--acc)">Nuevo</Badge>}
+                    </span>
+                  </td>
                   <td className="text-[12.5px]">{r.client}</td>
                   <td className="num font-semibold">{fmtMoney2(r.total)}</td>
                   <td className="num text-ok">{fmtMoney2(r.cobrado)}</td>

@@ -31,6 +31,22 @@ const ocDesc = (state: AppState, o: Order) => {
   return o.description
 }
 
+/* ---- Folio de OC por proveedor: cada proveedor lleva su propia secuencia.
+   Formato: OC-<PREFIJO>-<n> (p.ej. OC-IR-003). El prefijo sale del campo
+   "prefijo" del proveedor; si no tiene, se deriva de su nombre. La secuencia es
+   el mayor consecutivo ya usado por ese proveedor + 1 (robusto ante borrados). */
+const supplierPrefix = (s?: { prefijo?: string; name?: string }) =>
+  ((s?.prefijo || s?.name || 'OC').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)) || 'OC'
+const nextOcNumber = (state: AppState, supplierId: string) => {
+  const sup = sel.supplier(state, supplierId)
+  const prefix = supplierPrefix(sup)
+  const seqs = state.orders
+    .filter(o => o.supplierId === supplierId)
+    .map(o => { const m = /(\d+)\s*$/.exec(o.number || ''); return m ? +m[1] : 0 })
+  const next = (seqs.length ? Math.max(...seqs) : 0) + 1
+  return `OC-${prefix}-${String(next).padStart(3, '0')}`
+}
+
 /* ---- Carga una imagen (logo) para incrustarla en el PDF; null si no existe ---- */
 function loadImage(url: string): Promise<HTMLImageElement | null> {
   return new Promise(resolve => {
@@ -215,7 +231,8 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
    ============================================================ */
 function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
-  const isVentas = state.currentUser?.role === 'ventas'   // solo lectura
+  const role = state.currentUser?.role
+  const readOnly = role === 'ventas' || role === 'logistica'   // solo lectura
   const o = state.orders.find(x => x.id === order.id) || order
   const supplier = sel.supplier(state, o.supplierId)
   const project = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
@@ -234,11 +251,11 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
       title={<span className="flex items-center gap-3">{o.number} <OCStatus status={sel.ocStatus(state, o)} /></span>}
       sub={`${supplier ? supplier.name : '—'} · ${ocDesc(state, o)}`}
       footer={<>
-        {!isVentas && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar OC</button>}
+        {!readOnly && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar OC</button>}
         <button className="btn btn-ghost" onClick={() => printOC(state, o, items)}><Icon name="download" size={14} /> PDF</button>
-        {!isVentas && <button className="btn btn-danger" onClick={() => { dispatch({ type: 'DELETE_ORDER', id: o.id }); onClose() }}><Icon name="trash" size={14} /></button>}
+        {!readOnly && <button className="btn btn-danger" onClick={() => { dispatch({ type: 'DELETE_ORDER', id: o.id }); onClose() }}><Icon name="trash" size={14} /></button>}
         <div className="flex-1"></div>
-        {!isVentas && <button className="btn btn-primary" onClick={() => setAbono({})}><Icon name="plus" size={15} /> Agregar abono</button>}
+        {!readOnly && <button className="btn btn-primary" onClick={() => setAbono({})}><Icon name="plus" size={15} /> Agregar abono</button>}
       </>}>
 
       <div className="grid grid-cols-3 gap-3.5 mb-5">
@@ -308,7 +325,7 @@ function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => 
                   <td className="num text-[12px]">{fmtMoney(acum)}<div className="meta">de {fmtMoney(o.amount)}</div></td>
                   <td className="text-tx-1 text-[12px]">{p.method || '—'}{p.comments ? <div className="meta mt-px">{p.comments}</div> : null}</td>
                   <td><PaymentBadge status={p.status} /></td>
-                  <td>{!isVentas && <div className="flex gap-1 justify-end">
+                  <td>{!readOnly && <div className="flex gap-1 justify-end">
                     <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setAbono(p)}><Icon name="edit" size={13} /></button>
                     <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => dispatch({ type: 'DELETE_PAYMENT', id: p.id })}><Icon name="trash" size={13} /></button>
                   </div>}</td>
@@ -340,7 +357,9 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
   const [o, setO] = React.useState<OcFormState>(() => ({
     // id estable: "Generar PDF" y "Guardar OC" upsertan el mismo registro (sin duplicar).
     id: order?.id || uid('oc'),
-    number: order?.number || ('OC-' + String(Math.floor(Math.random() * 9000) + 1000)),
+    // Folio por proveedor: si ya viene proveedor (flujo desde proyecto) se calcula su
+    // siguiente consecutivo; si no, queda vacío y se autollenará al elegir proveedor.
+    number: order?.number || (order?.supplierId ? nextOcNumber(state, order.supplierId) : ''),
     date: order?.date || TODAY_ISO,
     supplierId: order?.supplierId || '',
     projectId: order?.projectId,
@@ -357,13 +376,26 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
   const set = (k: keyof OcFormState, v: unknown) => setO(s => ({ ...s, [k]: v }))
   const onPickProject = (pid: string) => {
     const p = state.projects.find(x => x.id === pid)
-    setO(s => ({
-      ...s, projectId: pid || undefined,
-      description: p ? `${p.code} · ${sel.clientName(state, p.client)}` : s.description,
-      responsible: p ? sel.sellerName(state, p.seller) : s.responsible,
-      supplierId: s.supplierId || (p && p.suppliers[0]) || '',
-    }))
+    setO(s => {
+      const supplierId = s.supplierId || (p && p.suppliers[0]) || ''
+      return {
+        ...s, projectId: pid || undefined,
+        description: p ? `${p.code} · ${sel.clientName(state, p.client)}` : s.description,
+        responsible: p ? sel.sellerName(state, p.seller) : s.responsible,
+        supplierId,
+        // OC nueva sin folio aún → asigna el consecutivo del proveedor recién fijado.
+        number: !editing && !s.number && supplierId ? nextOcNumber(state, supplierId) : s.number,
+        // Hereda la entrega estimada del proyecto (su eta) como fecha de entrega de la OC.
+        deliveryDate: p?.eta || s.deliveryDate,
+      }
+    })
   }
+  // Al elegir/cambiar proveedor en una OC NUEVA, el folio se regenera con la
+  // secuencia propia de ese proveedor. Al editar, el folio existente no se toca.
+  const onPickSupplier = (sid: string) => setO(s => ({
+    ...s, supplierId: sid,
+    number: editing ? s.number : (sid ? nextOcNumber(state, sid) : s.number),
+  }))
   const addItem = () => setO(s => ({ ...s, items: [...s.items, { id: uid('it'), description: '', qty: 1, unitPrice: 0 }] }))
   const updItem = (i: number, k: keyof OcItem, v: unknown) => setO(s => ({ ...s, items: s.items.map((it, idx) => idx === i ? { ...it, [k]: v } : it) }))
   const delItem = (i: number) => setO(s => ({ ...s, items: s.items.filter((_, idx) => idx !== i) }))
@@ -391,30 +423,48 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
   const [showCobro, setShowCobro] = React.useState(false)
   const { requestClose, guard } = useUnsavedGuard(o, onClose)
   const valid = o.number && o.supplierId && (hasItems ? total > 0 : !!o.amount) && !needsAnticipo
-  const save = () => {
-    if (needsAnticipo) return
-    const ord: OrderInput = { ...o, amount: hasItems ? total : (+o.amount || 0), items: o.items.length ? o.items : undefined }
-    dispatch({ type: 'SAVE_ORDER', order: ord })
-    onClose()
-  }
-  // Generar PDF: crea el PDF real, lo SUBE como "OC firmada", lo coloca en el documento
-  // "Orden de compra" del proyecto, guarda la OC y lo abre para ver/imprimir.
   const [generating, setGenerating] = React.useState(false)
+  // Genera el PDF real de la OC, lo SUBE como "OC firmada", guarda la OC con ese
+  // archivo y lo coloca en el documento "Orden de compra" del proyecto asociado.
+  // Devuelve el blob y los datos del archivo para previsualizar/registrar.
+  const buildStoreOc = async () => {
+    const ord = { ...o, amount: hasItems ? total : (+o.amount || 0), items: o.items.length ? o.items : undefined } as Order
+    const blob = await buildOcPdf(state, ord, o.items)
+    const fileName = `OC_${o.number}.pdf`
+    const path = await uploadDoc(new File([blob], fileName, { type: 'application/pdf' }), `orders/${o.number || order?.id || 'nuevas'}`)
+    dispatch({ type: 'SAVE_ORDER', order: { ...ord, file: fileName, filePath: path } })
+    const proj = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
+    if (proj) {
+      dispatch({ type: 'SAVE_PROJECT', project: { ...proj, docs: { ...proj.docs, ordenCompra: { name: fileName, ok: true, path } } } })
+    }
+    return { blob, fileName, path }
+  }
+  // Guardar OC: SIEMPRE (re)genera el PDF y lo guarda en la OC y en el proyecto, de
+  // modo que al crear o editar la orden el documento quede siempre actualizado.
+  const save = async () => {
+    if (needsAnticipo) return
+    setGenerating(true)
+    try {
+      await buildStoreOc()
+      onClose()
+    } catch (e) {
+      // Si el PDF falla, guarda al menos los datos para no perder el trabajo.
+      const ord: OrderInput = { ...o, amount: hasItems ? total : (+o.amount || 0), items: o.items.length ? o.items : undefined }
+      dispatch({ type: 'SAVE_ORDER', order: ord })
+      alert('Se guardó la OC, pero no se pudo generar el PDF: ' + (e instanceof Error ? e.message : 'error desconocido'))
+      onClose()
+    } finally {
+      setGenerating(false)
+    }
+  }
+  // Generar PDF: igual que guardar, pero deja el modal abierto y abre el PDF en una
+  // pestaña para revisarlo/imprimirlo.
   const genPdf = async () => {
     if (!o.supplierId || needsAnticipo) return
     setGenerating(true)
     try {
-      const ord = { ...o, amount: hasItems ? total : (+o.amount || 0), items: o.items.length ? o.items : undefined } as Order
-      const blob = await buildOcPdf(state, ord, o.items)
-      const fileName = `OC_${o.number}.pdf`
-      const path = await uploadDoc(new File([blob], fileName, { type: 'application/pdf' }), `orders/${o.number || order?.id || 'nuevas'}`)
+      const { blob, fileName, path } = await buildStoreOc()
       setO(s => ({ ...s, file: fileName, filePath: path }))
-      dispatch({ type: 'SAVE_ORDER', order: { ...ord, file: fileName, filePath: path } })
-      // También lo coloca en el documento "Orden de compra" del proyecto asociado.
-      const proj = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
-      if (proj) {
-        dispatch({ type: 'SAVE_PROJECT', project: { ...proj, docs: { ...proj.docs, ordenCompra: { name: fileName, ok: true, path } } } })
-      }
       window.open(URL.createObjectURL(blob), '_blank')
     } catch (e) {
       alert('No se pudo generar/guardar el PDF: ' + (e instanceof Error ? e.message : 'error desconocido'))
@@ -429,7 +479,7 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
         <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <button className="btn btn-ghost" disabled={!o.supplierId || needsAnticipo || generating} onClick={genPdf} title="Genera el PDF, lo guarda en la OC y en el documento del proyecto"><Icon name="download" size={14} /> {generating ? 'Generando…' : 'Generar PDF'}</button>
         <div className="flex-1"></div>
-        <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar OC</button>
+        <button className={'btn btn-primary' + (!valid || generating ? ' opacity-50' : '')} disabled={!valid || generating} onClick={save}><Icon name="check" size={15} /> {generating ? 'Guardando…' : 'Guardar OC'}</button>
       </>}>
       {needsAnticipo && (
         <div className="flex items-start gap-3 mb-4 p-3 rounded-[8px] border" style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 10%, transparent)' }}>
@@ -445,7 +495,8 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
         </div>
       )}
       <div className="grid grid-cols-2 gap-3.5">
-        <Field label="No. de OC"><Input className="input mono" value={o.number} onChange={e => set('number', e.target.value)} /></Field>
+        {/* Folio automático y NO editable: se asigna por proveedor (OC-<PREFIJO>-<n>). */}
+        <Field label="No. de OC"><Input className="input mono" value={o.number} readOnly tabIndex={-1} placeholder="Se genera al elegir proveedor" style={{ opacity: 0.7, cursor: 'not-allowed' }} /></Field>
         <Field label="Fecha OC"><Input type="date" value={o.date} onChange={e => set('date', e.target.value)} /></Field>
         <Field label="Proyecto asociado" span={2}>
           <Select value={o.projectId || ''} onChange={e => onPickProject(e.target.value)}>
@@ -454,7 +505,7 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
           </Select>
         </Field>
         <Field label="Proveedor" span={2}>
-          <Select value={o.supplierId} onChange={e => set('supplierId', e.target.value)}>
+          <Select value={o.supplierId} onChange={e => onPickSupplier(e.target.value)}>
             <option value="">Selecciona…</option>
             {state.suppliers.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </Select>
@@ -497,12 +548,12 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
                   <tr key={it.id} style={{ cursor: 'default' }}>
                     <td><input className={CELL + ' w-[44px]'} value={it.parte || ''} onChange={e => updItem(i, 'parte', e.target.value)} /></td>
                     <td><input className={CELL + ' w-[72px]'} value={it.color || ''} onChange={e => updItem(i, 'color', e.target.value)} /></td>
-                    <td className="num"><input type="number" className={CELL + ' w-[56px] text-right'} value={it.qty} onChange={e => updItem(i, 'qty', +e.target.value || 0)} /></td>
+                    <td className="num"><input type="number" className={CELL + ' w-[56px] text-right'} value={it.qty || ''} placeholder="0" onChange={e => updItem(i, 'qty', +e.target.value || 0)} /></td>
                     <td><input className={CELL + ' w-[110px]'} value={it.material || ''} onChange={e => updItem(i, 'material', e.target.value)} placeholder="Material" /></td>
                     <td><input className={CELL + ' w-[150px]'} value={it.description} onChange={e => updItem(i, 'description', e.target.value)} placeholder="Descripción" /></td>
                     <td><input className={CELL + ' w-[110px]'} value={it.dimensiones || ''} onChange={e => updItem(i, 'dimensiones', e.target.value)} placeholder="Dimensiones" /></td>
-                    <td className="num"><input type="number" className={CELL + ' w-[86px] text-right'} value={it.unitPrice} onChange={e => updItem(i, 'unitPrice', +e.target.value || 0)} /></td>
-                    <td className="num"><input type="number" className={CELL + ' w-[92px] text-right'} value={Math.round((it.qty || 0) * (it.unitPrice || 0) * 100) / 100} onChange={e => { const imp = +e.target.value || 0; const q = it.qty || 0; updItem(i, 'unitPrice', q > 0 ? imp / q : 0) }} /></td>
+                    <td className="num"><input type="number" className={CELL + ' w-[86px] text-right'} value={it.unitPrice || ''} placeholder="0" onChange={e => updItem(i, 'unitPrice', +e.target.value || 0)} /></td>
+                    <td className="num"><input type="number" className={CELL + ' w-[92px] text-right'} value={(it.qty || 0) * (it.unitPrice || 0) ? Math.round((it.qty || 0) * (it.unitPrice || 0) * 100) / 100 : ''} placeholder="0" onChange={e => { const imp = +e.target.value || 0; const q = it.qty || 0; updItem(i, 'unitPrice', q > 0 ? imp / q : 0) }} /></td>
                     <td><select className="bg-bg-2 border border-line-2 rounded-[6px] px-1 py-1 text-[11px] outline-none focus:border-acc max-w-[110px]" value={it.supplierId || ''} onChange={e => updItem(i, 'supplierId', e.target.value || undefined)}>
                       <option value="">(de la OC)</option>
                       {state.suppliers.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -606,6 +657,8 @@ export function OrdersPage() {
   const { state } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
+  // Solo lectura: ventas y logística no pueden crear/editar OC (logística ve TODAS).
+  const readOnly = isVentas || me?.role === 'logistica'
   const [view, setView] = React.useState('oc')
   const [detail, setDetail] = React.useState<Order | null>(null)
   const [form, setForm] = React.useState<Partial<Order> | null>(null)
@@ -620,7 +673,7 @@ export function OrdersPage() {
     : state.orders
   const list = orders.filter(o => (!fStatus || ocStatusOf(o) === fStatus) && (!fSupplier || o.supplierId === fSupplier))
   const supplierOpts = state.suppliers.filter(s => orders.some(o => o.supplierId === s.id))
-  const sinAsignar = isVentas ? [] : state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado')
+  const sinAsignar = readOnly ? [] : state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado')
 
   // KPIs
   const totalOC = orders.reduce((a, o) => a + o.amount, 0)
@@ -636,7 +689,7 @@ export function OrdersPage() {
 
   const openOcForProject = (project: Project, sid: string) => {
     setAssignProj(null)
-    setForm({ projectId: project.id, supplierId: sid, description: `${project.code} · ${sel.clientName(state, project.client)}`, responsible: sel.sellerName(state, project.seller) })
+    setForm({ projectId: project.id, supplierId: sid, description: `${project.code} · ${sel.clientName(state, project.client)}`, responsible: sel.sellerName(state, project.seller), deliveryDate: project.eta })
   }
 
   return (
@@ -644,8 +697,8 @@ export function OrdersPage() {
       <div className="spread mb-[18px] flex-wrap gap-3">
         <div className="sec-title m-0"><h2>Órdenes de compra</h2><span className="sub">Control de OC y pagos a proveedores</span></div>
         <div className="flex gap-2.5 items-center">
-          {!isVentas && <Seg value={view} onChange={setView} options={[{ value: 'oc', label: 'Órdenes de compra' }, { value: 'sinasignar', label: `Sin asignar (${sinAsignar.length})` }]} />}
-          {!isVentas && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nueva OC</button>}
+          {!readOnly && <Seg value={view} onChange={setView} options={[{ value: 'oc', label: 'Órdenes de compra' }, { value: 'sinasignar', label: `Sin asignar (${sinAsignar.length})` }]} />}
+          {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nueva OC</button>}
         </div>
       </div>
 
