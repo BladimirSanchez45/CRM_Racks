@@ -83,13 +83,33 @@ export async function fetchSuppliers(): Promise<Supplier[]> {
    ============================================================ */
 
 /** Inicia sesión con correo y contraseña (Supabase Auth). */
+/* ---- Cierre de sesión por inactividad ----
+   Supabase mantiene la sesión indefinidamente (auto-refresca el token). Para exigir
+   re-login tras INACTIVITY_LIMIT_MS sin usar la app, guardamos la marca de "última
+   actividad" en localStorage. Vive aquí (junto a signIn/signOut) para marcarla ANTES
+   de autenticar y evitar carreras con el evento SIGNED_IN. */
+export const INACTIVITY_LIMIT_MS = 8 * 60 * 60 * 1000   // 8 horas
+const ACTIVITY_KEY = 'ccracks_last_activity'
+export const touchActivity = () => { try { localStorage.setItem(ACTIVITY_KEY, String(Date.now())) } catch { /* ignore */ } }
+export const clearActivity = () => { try { localStorage.removeItem(ACTIVITY_KEY) } catch { /* ignore */ } }
+/** ¿Expiró por inactividad? Sin marca → true (no podemos garantizar; pide login). */
+export const inactivityExpired = (): boolean => {
+  try {
+    const raw = localStorage.getItem(ACTIVITY_KEY)
+    if (!raw) return true
+    return Date.now() - (Number(raw) || 0) > INACTIVITY_LIMIT_MS
+  } catch { return false }
+}
+
 export async function signIn(email: string, password: string): Promise<void> {
+  touchActivity()   // marca actividad ANTES de autenticar (el callback SIGNED_IN ya la verá fresca)
   const { error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error) throw error
+  if (error) { clearActivity(); throw error }
 }
 
 /** Cierra la sesión actual. */
 export async function signOut(): Promise<void> {
+  clearActivity()
   await supabase.auth.signOut()
 }
 
@@ -191,12 +211,13 @@ export const deleteSeller = (id: string) => removeRow('sellers', id)
 const emptyDoc = () => ({ name: '', ok: false })
 const emptyDocs = (): Project['docs'] => ({
   cotizacion: emptyDoc(), layout: emptyDoc(), anticipo: emptyDoc(), ordenCompra: emptyDoc(),
-  finiquito: emptyDoc(), remision: emptyDoc(), cartaFin: emptyDoc(),
+  finiquito: emptyDoc(), remision: emptyDoc(), cartaFin: emptyDoc(), evidencia: [],
 })
 function mapProject(r: any): Project {
   return {
     id: r.id, code: r.code, stage: r.stage,
     client: r.client ?? '', seller: r.seller ?? '', city: r.city ?? '',
+    ...(r.origen ? { origen: r.origen } : {}),
     ...(r.sistema_vendido ? { sistemaVendido: r.sistema_vendido } : {}),
     ...(r.venta_subtotal != null ? { ventaSubtotal: Number(r.venta_subtotal) } : {}),
     freight: Number(r.freight ?? 0), install: Number(r.install ?? 0), weeks: r.weeks ?? 0,
@@ -216,6 +237,7 @@ function mapProject(r: any): Project {
 function projectRow(p: Project): Record<string, unknown> {
   return {
     id: p.id, code: p.code, stage: p.stage, client: p.client, seller: p.seller, city: p.city,
+    origen: p.origen ?? null,
     sistema_vendido: p.sistemaVendido ?? null, venta_subtotal: p.ventaSubtotal ?? null,
     freight: p.freight, install: p.install,
     freight_supplier_id: p.freightSupplierId ?? null, freight_cost: p.freightCost ?? null,
@@ -359,20 +381,27 @@ function mapInternalPayment(r: any): InternalPayment {
     createdAt: r.created_at,
     ...(r.project_id ? { projectId: r.project_id } : {}),
     ...(r.supplier_id ? { supplierId: r.supplier_id } : {}),
+    ...(r.origen ? { origen: r.origen } : {}),
+    ...(r.destino ? { destino: r.destino } : {}),
     ...(r.scheduled_date ? { scheduledDate: r.scheduled_date } : {}),
     ...(r.approved_by ? { approvedBy: r.approved_by } : {}),
     ...(r.decided_at ? { decidedAt: r.decided_at } : {}),
     ...(r.reject_reason ? { rejectReason: r.reject_reason } : {}),
     ...(r.file_path ? { filePath: r.file_path } : {}),
+    ...(r.comprobante ? { comprobante: r.comprobante } : {}),
+    ...(r.comprobante_path ? { comprobantePath: r.comprobante_path } : {}),
   }
 }
 function internalPaymentRow(p: InternalPayment): Record<string, unknown> {
   return {
     id: p.id, concept: p.concept, category: p.category, project_id: p.projectId ?? null,
     supplier_id: p.supplierId ?? null, amount: p.amount, scheduled_date: orNull(p.scheduledDate),
+    origen: p.origen ?? null, destino: p.destino ?? null,
     status: p.status, requested_by: p.requestedBy, approved_by: p.approvedBy ?? null,
     decided_at: p.decidedAt ?? null, reject_reason: orNull(p.rejectReason), notes: p.notes,
-    file: p.file, file_path: p.filePath ?? null, created_at: p.createdAt,
+    file: p.file, file_path: p.filePath ?? null,
+    comprobante: p.comprobante ?? null, comprobante_path: p.comprobantePath ?? null,
+    created_at: p.createdAt,
   }
 }
 export async function fetchInternalPayments(): Promise<InternalPayment[]> {
@@ -536,9 +565,11 @@ export async function uploadDoc(file: File, folder: string): Promise<string> {
   return path
 }
 
-/** URL temporal firmada para ver/descargar un documento (por defecto 1 h). */
-export async function signedDocUrl(path: string, expiresSec = 3600): Promise<string> {
-  const { data, error } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, expiresSec)
+/** URL temporal firmada para ver/descargar un documento (por defecto 1 h).
+ *  `download` = true o un nombre de archivo fuerza la descarga (Content-Disposition). */
+export async function signedDocUrl(path: string, expiresSec = 3600, download?: boolean | string): Promise<string> {
+  const opts = download ? { download } : undefined
+  const { data, error } = await supabase.storage.from(DOC_BUCKET).createSignedUrl(path, expiresSec, opts)
   if (error) throw error
   return data.signedUrl
 }

@@ -6,7 +6,8 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, fmtDate, TODAY_ISO, isAdminRole } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, MoneyInput, Badge, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
+import { signedDocUrl } from '../../core/api'
+import { Modal, Field, Input, TextArea, Select, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { InternalPayment, InternalPaymentInput, InternalPaymentCategory, InternalPaymentStatus } from '../../core/types'
 
@@ -25,6 +26,8 @@ type FormState = {
   projectId: string
   supplierId: string
   amount: number | string
+  origen: string
+  destino: string
   scheduledDate: string
   notes: string
   file: string
@@ -34,10 +37,21 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
   const { state, dispatch } = useStore()
   const [p, setP] = React.useState<FormState>(() => payment ? {
     ...payment, projectId: payment.projectId ?? '', supplierId: payment.supplierId ?? '', scheduledDate: payment.scheduledDate ?? '',
+    origen: payment.origen ?? '', destino: payment.destino ?? '',
   } : {
-    concept: '', category: 'Flete', projectId: '', supplierId: '', amount: '', scheduledDate: '', notes: '', file: '',
+    concept: '', category: 'Flete', projectId: '', supplierId: '', amount: '', origen: '', destino: '', scheduledDate: '', notes: '', file: '',
   })
   const set = (k: keyof FormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
+  // Las ubicaciones de origen/destino solo aplican a servicios de Flete e Instalación.
+  const usaUbicacion = p.category === 'Flete' || p.category === 'Instalación'
+  // Resumen del servicio (Flete/Instalación) del proyecto: monto ASIGNADO en la vista de
+  // Asignación, lo ya PAGADO (pagos internos liquidados de ese servicio) y el SALDO.
+  const proj = p.projectId ? state.projects.find(x => x.id === p.projectId) : undefined
+  const asignado = !proj ? 0 : (p.category === 'Flete' ? (proj.freightCost || 0) : (proj.installCost || 0))
+  const pagadoServicio = state.internalPayments
+    .filter(ip => ip.id !== p.id && ip.projectId === p.projectId && ip.category === p.category && ip.status === 'Pagado')
+    .reduce((a, ip) => a + ip.amount, 0)
+  const saldoServicio = asignado - pagadoServicio
   const valid = p.concept && p.amount
   const { requestClose, guard } = useUnsavedGuard(p, onClose)
 
@@ -49,6 +63,9 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
       projectId: p.projectId || undefined,
       supplierId: p.supplierId || undefined,
       amount: +p.amount || 0,
+      // Origen/destino solo se guardan para Flete e Instalación.
+      origen: usaUbicacion ? (p.origen || undefined) : undefined,
+      destino: usaUbicacion ? (p.destino || undefined) : undefined,
       scheduledDate: p.scheduledDate || undefined,
       notes: p.notes,
       file: p.file,
@@ -69,12 +86,31 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
           <Icon name="check" size={15} /> {payment ? 'Guardar' : 'Enviar a aprobación'}
         </button>
       </>}>
+      {usaUbicacion && proj && (
+        <div className="bg-bg-1 border border-line rounded-[8px] p-3 mb-3.5 grid grid-cols-3 gap-2 text-center">
+          <div><div className="label-k">Monto asignado</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(asignado)}</div></div>
+          <div><div className="label-k">Pagado</div><div className="font-display font-bold text-[15px] mt-0.5 text-ok">{fmtMoney(pagadoServicio)}</div></div>
+          <div><div className="label-k">Saldo</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: saldoServicio > 0 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(saldoServicio)}</div></div>
+        </div>
+      )}
+      {usaUbicacion && proj && asignado === 0 && (
+        <div className="text-[11.5px] mb-3 -mt-1" style={{ color: 'var(--warn)' }}>Este proyecto aún no tiene costo de {p.category.toLowerCase()} asignado en "Asignación de servicios".</div>
+      )}
+      {usaUbicacion && proj && asignado > 0 && +p.amount > 0 && (
+        <div className="text-[11.5px] text-tx-2 mb-3 -mt-1">
+          Este pago aún no cuenta como "Pagado" (entra como Pendiente). Al liquidarlo, el saldo quedaría en <b>{fmtMoney(saldoServicio - (+p.amount || 0))}</b>.
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="Concepto" span={2}><Input value={p.concept} onChange={e => set('concept', e.target.value)} placeholder="Ej. Flete Monterrey, viáticos cuadrilla…" /></Field>
         <Field label="Categoría">
           <Select value={p.category} onChange={e => set('category', e.target.value)}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</Select>
         </Field>
         <Field label="Monto (MXN)"><MoneyInput value={p.amount} onChange={v => set('amount', v)} placeholder="0" /></Field>
+        {usaUbicacion && <>
+          <Field label="Ubicación de origen"><Input value={p.origen} onChange={e => set('origen', e.target.value)} placeholder="Desde dónde sale" /></Field>
+          <Field label="Ubicación de destino"><Input value={p.destino} onChange={e => set('destino', e.target.value)} placeholder="Hacia dónde va" /></Field>
+        </>}
         <Field label="Proyecto (opcional)">
           <Select value={p.projectId} onChange={e => set('projectId', e.target.value)}>
             <option value="">Sin proyecto…</option>
@@ -113,7 +149,22 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
     dispatch({ type: 'SAVE_INTERNAL_PAYMENT', payment: { ...payment, status, ...extra } })
   }
 
+  // Comprobante de pago: requisito para liberar (marcar "Pagado"); se puede descargar
+  // para enviarlo manualmente al proveedor por WhatsApp.
+  const hasComprobante = !!payment.comprobantePath
+  const setComprobante = (v: { name: string; path: string }) =>
+    dispatch({ type: 'SAVE_INTERNAL_PAYMENT', payment: { ...payment, comprobante: v.name || undefined, comprobantePath: v.path || undefined } })
+  const downloadComprobante = async () => {
+    if (!payment.comprobantePath) return
+    try { window.open(await signedDocUrl(payment.comprobantePath, 3600, payment.comprobante || true), '_blank') }
+    catch { alert('No se pudo generar el enlace de descarga.') }
+  }
+  // WhatsApp del proveedor (abre el chat; el comprobante se adjunta manualmente).
+  const waDigits = (supplier?.phone || '').replace(/\D/g, '')
+  const waUrl = waDigits ? `https://wa.me/${waDigits.length === 10 ? '52' + waDigits : waDigits}` : null
+
   const editable = payment.status === 'Pendiente'
+  const showComprobante = payment.status === 'Aprobado' || payment.status === 'Programado' || payment.status === 'Pagado'
 
   return (
     <Modal width={540} icon="money" title={payment.concept} sub={`${payment.category} · solicitó ${requester}`} onClose={onClose}
@@ -131,7 +182,9 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
           <button className="btn btn-primary" onClick={() => setStatus('Programado', { scheduledDate: payment.scheduledDate || TODAY_ISO })}><Icon name="calendar" size={15} /> Programar pago</button>
         )}
         {(payment.status === 'Aprobado' || payment.status === 'Programado') && (
-          <button className="btn btn-primary" onClick={() => setStatus('Pagado')}><Icon name="check" size={15} /> Marcar pagado</button>
+          <button className={'btn btn-primary' + (!hasComprobante ? ' opacity-50' : '')} disabled={!hasComprobante}
+            title={!hasComprobante ? 'Sube el comprobante de pago para liberar' : undefined}
+            onClick={() => setStatus('Pagado')}><Icon name="check" size={15} /> Marcar pagado</button>
         )}
         {(payment.status === 'Aprobado' || payment.status === 'Programado') && (
           <button className="btn btn-ghost" onClick={() => setStatus('Cancelado')}>Cancelar pago</button>
@@ -150,6 +203,8 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
         <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Solicitó</span><span>{requester}</span></div>
         <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Proyecto</span><span className="mono">{proj ? proj.code : '—'}</span></div>
         <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Proveedor</span><span className="truncate">{supplier ? supplier.name : '—'}</span></div>
+        {payment.origen && <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Origen</span><span className="truncate text-right">{payment.origen}</span></div>}
+        {payment.destino && <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Destino</span><span className="truncate text-right">{payment.destino}</span></div>}
         <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Fecha sugerida</span><span>{payment.scheduledDate ? fmtDate(payment.scheduledDate) : '—'}</span></div>
         <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Aprobó</span><span>{approver || '—'}</span></div>
       </div>
@@ -163,6 +218,25 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
         <div className="mt-3.5">
           <div className="label-k mb-1.5">Notas</div>
           <div className="bg-bg-1 py-2.5 px-3.5 text-[12.5px] text-tx-1 leading-normal" style={{ borderLeft: '3px solid var(--acc)' }}>{payment.notes}</div>
+        </div>
+      )}
+
+      {showComprobante && (
+        <div className="mt-3.5">
+          <div className="label-k mb-1.5">
+            Comprobante de pago
+            {!hasComprobante && payment.status !== 'Pagado' && <span className="text-tx-3 font-normal"> · requerido para marcar pagado</span>}
+          </div>
+          <FileField label="" value={payment.comprobante || ''} path={payment.comprobantePath}
+            folder={`internal_payments/${payment.id}`} onChange={setComprobante} accept=".pdf,.jpg,.jpeg,.png" />
+          {hasComprobante && (
+            <div className="flex gap-2 mt-2">
+              <button className="btn btn-sm btn-ghost" onClick={downloadComprobante}><Icon name="download" size={13} /> Descargar</button>
+              {waUrl
+                ? <a className="btn btn-sm btn-ghost" href={waUrl} target="_blank" rel="noreferrer" title="Abre el chat del proveedor para enviarle el comprobante"><Icon name="phone" size={13} /> WhatsApp proveedor</a>
+                : <span className="meta self-center">Asigna un proveedor con teléfono para abrir WhatsApp</span>}
+            </div>
+          )}
         </div>
       )}
 

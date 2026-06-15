@@ -219,7 +219,10 @@ body.light .brand-logo-dark { @apply hidden; }
 .icon-btn.active { color: var(--acc-bright); background: var(--acc-ghost); border-color: var(--acc); }
 .icon-btn svg { @apply w-[18px] h-[18px]; }
 
-.content { @apply flex-1 overflow-y-auto p-7 min-h-0; }
+/* Fondo opaco + capa propia (isolate): cada vista pinta sobre fondo sólido y se aísla
+   en su propio contexto de composición, evitando "fantasmas" de repintado de la vista
+   anterior en ciertas GPUs/drivers (el backdrop-filter del topbar los provocaba). */
+.content { @apply flex-1 overflow-y-auto p-7 min-h-0; background: var(--bg-0); isolation: isolate; }
 .content-inner { @apply max-w-[1440px] mx-auto; }
 
 /* ============================================================

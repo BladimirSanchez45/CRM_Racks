@@ -8,7 +8,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween, MESES, uid, TODAY_ISO } from '../../core/data'
 import { uploadDoc } from '../../core/api'
-import { Modal, Field, Input, Select, FileField, MoneyInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, Select, FileField, MoneyInput, MoneyCellInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { CobroForm } from '../projects/project_views'
 import { importMaterialsFromExcel } from '../../core/excel'
@@ -552,8 +552,9 @@ function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => 
                     <td><input className={CELL + ' w-[110px]'} value={it.material || ''} onChange={e => updItem(i, 'material', e.target.value)} placeholder="Material" /></td>
                     <td><input className={CELL + ' w-[150px]'} value={it.description} onChange={e => updItem(i, 'description', e.target.value)} placeholder="Descripción" /></td>
                     <td><input className={CELL + ' w-[110px]'} value={it.dimensiones || ''} onChange={e => updItem(i, 'dimensiones', e.target.value)} placeholder="Dimensiones" /></td>
-                    <td className="num"><input type="number" className={CELL + ' w-[86px] text-right'} value={it.unitPrice || ''} placeholder="0" onChange={e => updItem(i, 'unitPrice', +e.target.value || 0)} /></td>
-                    <td className="num"><input type="number" className={CELL + ' w-[92px] text-right'} value={(it.qty || 0) * (it.unitPrice || 0) ? Math.round((it.qty || 0) * (it.unitPrice || 0) * 100) / 100 : ''} placeholder="0" onChange={e => { const imp = +e.target.value || 0; const q = it.qty || 0; updItem(i, 'unitPrice', q > 0 ? imp / q : 0) }} /></td>
+                    <td className="num"><MoneyCellInput className={CELL + ' w-[92px] text-right'} value={it.unitPrice || ''} placeholder="$0" onChange={v => updItem(i, 'unitPrice', v)} /></td>
+                    {/* Importe = cantidad × costo unitario (SOLO LECTURA): siempre exacto, sin división ni decimales raros. */}
+                    <td className="num"><div className={CELL + ' w-[92px] text-right opacity-70 cursor-default'} title="Cantidad × costo unitario">{(it.qty || 0) * (it.unitPrice || 0) ? fmtMoney2((it.qty || 0) * (it.unitPrice || 0)) : '—'}</div></td>
                     <td><select className="bg-bg-2 border border-line-2 rounded-[6px] px-1 py-1 text-[11px] outline-none focus:border-acc max-w-[110px]" value={it.supplierId || ''} onChange={e => updItem(i, 'supplierId', e.target.value || undefined)}>
                       <option value="">(de la OC)</option>
                       {state.suppliers.filter(s => s.active).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}

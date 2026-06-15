@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, TODAY_ISO, canEditProject, isAdminRole } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, canEditProject, isAdminRole } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -99,11 +99,13 @@ type ProjectFormState = {
 
 /* ---------- Move-stage control ---------- */
 export function MoveStage({ project }: { project: Project }) {
-  const { dispatch } = useStore()
+  const { state, dispatch } = useStore()
   const [open, setOpen] = React.useState(false)
   const cur = stageIndex(project.stage)
   const next = STAGES[cur + 1]
   const prev = STAGES[cur - 1]
+  // Requisito faltante para avanzar a la siguiente etapa (null = se puede avanzar).
+  const nextBlocked = next ? stageBlockedReason(state, project, next.id) : null
   return (
     <div className="flex gap-2 items-center relative">
       {prev && (
@@ -113,7 +115,9 @@ export function MoveStage({ project }: { project: Project }) {
         </button>
       )}
       {next ? (
-        <button className="btn btn-primary btn-sm" onClick={() => dispatch({ type: 'MOVE_STAGE', id: project.id, stage: next.id })}>
+        <button className={'btn btn-primary btn-sm' + (nextBlocked ? ' opacity-50' : '')} disabled={!!nextBlocked}
+          title={nextBlocked || undefined}
+          onClick={() => dispatch({ type: 'MOVE_STAGE', id: project.id, stage: next.id })}>
           {project.stage === 'registro' ? 'Confirmar venta' : `Avanzar a ${next.short}`} <Icon name="arrowRight" size={14} />
         </button>
       ) : (
@@ -469,7 +473,10 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
     const w = +v
     return { ...s, weeks: v, eta: w > 0 ? addDays(Math.round(w * 7), etaBase) : s.eta }
   })
-  const setDoc = (k: keyof ProjectDocs, v: { name: string; path: string }) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name: v.name, ok: !!v.name, ...(v.path ? { path: v.path } : {}) } } }))
+  const setDoc = (k: DocKey, v: { name: string; path: string }) => setP(s => ({ ...s, docs: { ...s.docs, [k]: { name: v.name, ok: !!v.name, ...(v.path ? { path: v.path } : {}) } } }))
+  // Evidencia de obra terminada: lista de imágenes (varias). Requisito para finalizar.
+  const addEvidencia = (v: { name: string; path: string }) => { if (!v.name) return; setP(s => ({ ...s, docs: { ...s.docs, evidencia: [...(s.docs.evidencia || []), { name: v.name, ok: true, path: v.path }] } })) }
+  const removeEvidencia = (i: number) => setP(s => ({ ...s, docs: { ...s.docs, evidencia: (s.docs.evidencia || []).filter((_, idx) => idx !== i) } }))
   const docFolder = `projects/${p.code || project?.id || 'nuevos'}`
 
   const valid = p.client && p.city && p.seller
@@ -565,6 +572,20 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
             <FileField key={d.key} label={d.label} value={p.docs[d.key].name} path={p.docs[d.key].path} folder={docFolder} onChange={v => setDoc(d.key, v)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
           ))}
         </div>
+      </div>
+
+      <div className="mt-4">
+        <div className="label-k mb-2">Evidencia de obra terminada ({(p.docs.evidencia || []).length})</div>
+        <div className="grid grid-cols-2 gap-3.5">
+          {(p.docs.evidencia || []).map((ev, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <div className="flex-1 min-w-0"><DocChip doc={ev} label={ev.name || `Evidencia ${i + 1}`} /></div>
+              <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar" onClick={() => removeEvidencia(i)}><Icon name="trash" size={13} /></button>
+            </div>
+          ))}
+          <FileField label="" value="" folder={`${docFolder}/evidencia`} onChange={addEvidencia} accept=".jpg,.jpeg,.png,.webp" />
+        </div>
+        <div className="meta mt-1">Requisito para finalizar el proyecto: Carta fin de obra + al menos una imagen de evidencia.</div>
       </div>
 
       {guard}

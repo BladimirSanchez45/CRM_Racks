@@ -234,6 +234,8 @@ export interface InternalPayment {
   projectId?: string              // Proyecto relacionado (opcional)
   supplierId?: string             // Proveedor a pagar (opcional)
   amount: number                  // Monto cotizado
+  origen?: string                 // Ubicación de origen (para Flete / Instalación)
+  destino?: string                // Ubicación de destino (para Flete / Instalación)
   scheduledDate?: string          // Fecha en que se quiere agendar el pago
   status: InternalPaymentStatus
   requestedBy: string             // userId del solicitante (logística)
@@ -243,6 +245,8 @@ export interface InternalPayment {
   notes: string                   // Notas / justificación
   file: string                    // Cotización adjunta — nombre visible
   filePath?: string               // Ruta del adjunto en Supabase Storage
+  comprobante?: string            // Comprobante de pago — nombre visible (requisito para liberar/pagar)
+  comprobantePath?: string        // Ruta del comprobante en Supabase Storage
   createdAt: string               // ISO
 }
 
@@ -261,6 +265,7 @@ export interface ProjectDocs {
   finiquito: DocRef         // Comprobante de finiquito
   remision: DocRef          // Remisión de salida
   cartaFin: DocRef          // Carta fin de obra
+  evidencia?: DocRef[]      // Imágenes de evidencia de obra terminada (varias). Requisito para finalizar.
 }
 
 /** Estado de pago / finiquito. */

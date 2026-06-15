@@ -27,6 +27,7 @@ import type {
 } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
+  touchActivity, clearActivity, inactivityExpired,
   saveProject, deleteProject as apiDeleteProject,
   saveOrder, deleteOrder as apiDeleteOrder,
   savePayment, deletePayment as apiDeletePayment,
@@ -142,8 +143,10 @@ export const cityAbbr = (city?: string) => {
 export const docOK = (name: string) => ({ name, ok: true })
 export const docNo = () => ({ name: '', ok: false })
 
+/** Llave de un documento simple del proyecto (excluye la lista de evidencia). */
+export type DocKey = Exclude<keyof Project['docs'], 'evidencia'>
 /** Etiquetas de los 7 documentos de un proyecto, en orden. */
-export const DOC_LABELS: { key: keyof Project['docs']; label: string }[] = [
+export const DOC_LABELS: { key: DocKey; label: string }[] = [
   { key: 'cotizacion', label: 'Cotización' },
   { key: 'layout', label: 'Lay out' },
   { key: 'anticipo', label: 'Anticipo' },
@@ -383,6 +386,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       case 'MOVE_STAGE': {
         const proj = s.projects.find(p => p.id === action.id); if (!proj) return
+        // Reglas de avance: al AVANZAR a una etapa con requisitos, bloquea si faltan.
+        if (stageIndex(action.stage) > stageIndex(proj.stage)) {
+          const reason = stageBlockedReason(s, proj, action.stage)
+          if (reason) { alert(reason); return }
+        }
         const updated: Project = { ...proj, stage: action.stage, updated: today(), ...(action.stage === 'finalizado' ? { closedOn: today() } : {}) }
         rawDispatch({ type: 'UPSERT_PROJECT', project: updated })
         const thunks: (() => Promise<void>)[] = [() => saveProject(updated)]
@@ -683,6 +691,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return
       if (session?.user) {
+        // Cierre por inactividad: si pasó el límite desde la última actividad (o no hay
+        // marca), NO restaura la sesión y la cierra. Un login nuevo marca actividad ANTES
+        // de autenticar (en signIn), así que aquí siempre se ve fresca y nunca se bloquea.
+        // No se renueva la marca aquí a propósito: así un refresh de token automático no
+        // mantiene viva una sesión inactiva.
+        if (inactivityExpired()) { void signOut(); return }
         fetchMyProfile()
           .then(profile => {
             if (!active || !profile) return
@@ -694,6 +708,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           })
           .catch(err => console.error('[supabase] Error cargando el perfil:', err))
       } else {
+        clearActivity()
         rawDispatch({ type: 'LOGOUT' })
       }
     })
@@ -705,6 +720,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // Cuando llega un INSERT para él (p. ej. un vendedor registró una venta), aparece
   // al instante en la campana sin recargar. Se re-suscribe si cambia el usuario.
   const myId = state.currentUser?.id
+
+  // Cierre de sesión por inactividad: mientras hay sesión, registra la actividad del
+  // usuario (clic, teclado, scroll…) y, si pasa INACTIVITY_LIMIT_MS sin usar la app,
+  // cierra la sesión. El chequeo periódico cubre el caso de tener la app abierta sin tocarla.
+  React.useEffect(() => {
+    if (!myId) return
+    touchActivity()
+    let last = 0
+    const onActivity = () => { const t = Date.now(); if (t - last > 30_000) { last = t; touchActivity() } }
+    const events: (keyof WindowEventMap)[] = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click']
+    events.forEach(e => window.addEventListener(e, onActivity, { passive: true }))
+    const iv = window.setInterval(() => { if (inactivityExpired()) { clearActivity(); void signOut() } }, 60_000)
+    return () => { events.forEach(e => window.removeEventListener(e, onActivity)); clearInterval(iv) }
+  }, [myId])
+
   React.useEffect(() => {
     if (!myId) return
     return subscribeToNotifications(myId, (n) => rawDispatch({ type: 'UPSERT_NOTIFICATION', notification: n }))
@@ -891,5 +921,31 @@ export function autoStageFor(state: AppState, p: Project): StageId | null {
   if (sel.ordersForProject(state, p.id).length > 0) return 'compra'
   // 3 · Asignación — hay proveedor asignado (aún sin OC).
   if (p.suppliers.length > 0) return 'asignacion'
+  return null
+}
+
+/* ============================================================
+   REQUISITOS PARA AVANZAR DE ETAPA (etapas manuales de logística)
+   ============================================================
+   Devuelve el motivo (texto) si NO se puede avanzar a `target`, o null si se puede.
+   Solo se evalúa al AVANZAR (no al regresar). Reglas:
+   · Coordinación  → requiere costo de flete E instalación asignados.
+   · Instalación   → requiere al menos una remisión de salida creada.
+   · Finalizado    → requiere la Carta fin de obra + ≥1 imagen de evidencia. */
+export function stageBlockedReason(state: AppState, p: Project, target: StageId): string | null {
+  if (target === 'coordinacion') {
+    if (!((p.freightCost || 0) > 0 && (p.installCost || 0) > 0))
+      return 'Para pasar a Coordinación primero asigna el costo de flete e instalación en "Asignación de servicios".'
+  }
+  if (target === 'instalacion') {
+    if (sel.remisionesForProject(state, p.id).length === 0)
+      return 'Para pasar a Instalación primero crea la remisión de salida del proyecto.'
+  }
+  if (target === 'finalizado') {
+    if (!p.docs?.cartaFin?.ok)
+      return 'Para Finalizar primero sube la Carta fin de obra (carta de terminación).'
+    if (!(p.docs?.evidencia || []).some(d => d.ok))
+      return 'Para Finalizar primero sube al menos una imagen de evidencia de la obra terminada.'
+  }
   return null
 }

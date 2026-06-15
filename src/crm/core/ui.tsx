@@ -177,7 +177,7 @@ export function FileField({ label, value, path, folder, onChange, accept }: {
       {label && <label>{label}</label>}
       <div className="flex gap-2">
         <div
-          className={'doc-chip flex-1' + (value ? '' : ' doc-missing')}
+          className={'doc-chip flex-1 min-w-0' + (value ? '' : ' doc-missing')}
           onClick={() => { if (!busy) ref.current?.click() }}
           onDragOver={(e) => { e.preventDefault(); if (!busy) setDragOver(true) }}
           onDragLeave={() => setDragOver(false)}
@@ -187,9 +187,9 @@ export function FileField({ label, value, path, folder, onChange, accept }: {
           <Icon name={value && !busy ? 'doc' : 'clip'} size={14} />
           <span className="nm">{busy ? 'Subiendo…' : (value || (dragOver ? 'Suelta el archivo aquí' : 'Arrastra un archivo o examina'))}</span>
         </div>
-        {value && path && <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPreview(true)} title="Ver"><Icon name="eye" size={14} /></button>}
-        <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => ref.current?.click()}>{value ? 'Cambiar' : 'Examinar'}</button>
-        {value && <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={clear}><Icon name="close" size={13} /></button>}
+        {value && path && <button type="button" className="btn btn-sm btn-ghost shrink-0" onClick={() => setPreview(true)} title="Ver"><Icon name="eye" size={14} /></button>}
+        <button type="button" className="btn btn-sm btn-ghost shrink-0" disabled={busy} onClick={() => ref.current?.click()}>{value ? 'Cambiar' : 'Examinar'}</button>
+        {value && <button type="button" className="btn btn-sm btn-ghost shrink-0" disabled={busy} onClick={clear}><Icon name="close" size={13} /></button>}
       </div>
       {err && <div className="text-[11.5px] mt-1" style={{ color: 'var(--danger)' }}>{err}</div>}
       <input ref={ref} type="file" accept={accept} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f) }} />
@@ -296,6 +296,26 @@ export function MoneyInput({ value, onChange, placeholder, className }: { value:
         value={disp}
         onChange={e => { const c = moneyClean(e.target.value); setDisp(moneyFormat(c)); onChange(c === '' || c === '.' ? 0 : parseFloat(c) || 0) }} />
     </div>
+  )
+}
+
+/* ---- Variante compacta de campo de dinero para celdas de tabla ----
+   Muestra el valor como dinero ("$1,234.56") con la clase que se le pase (sin la
+   clase "input" grande), y devuelve el número. El "$" va dentro del texto para no
+   ocupar espacio extra en celdas angostas. */
+export function MoneyCellInput({ value, onChange, className, placeholder }: { value: number | string; onChange: (n: number) => void; className?: string; placeholder?: string }) {
+  const [disp, setDisp] = React.useState(() => moneyDisp(value))
+  React.useEffect(() => {
+    if (value === '' || value == null) { if (disp !== '') setDisp(''); return }
+    const ext = typeof value === 'number' ? value : parseFloat(String(value))
+    const cur = parseFloat(moneyClean(disp) || 'x')
+    if (!isNaN(ext) && ext !== cur) setDisp(moneyDisp(value))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+  return (
+    <input className={className} inputMode="decimal" placeholder={placeholder}
+      value={disp === '' ? '' : '$' + disp}
+      onChange={e => { const c = moneyClean(e.target.value); setDisp(moneyFormat(c)); onChange(c === '' || c === '.' ? 0 : parseFloat(c) || 0) }} />
   )
 }
 
