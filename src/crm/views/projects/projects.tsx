@@ -39,7 +39,7 @@ function KanbanCard({ p, onOpen, onDragStart, onDragEnd, dragging, draggable = t
       <div className="meta mt-[3px] flex items-center gap-1"><Icon name="pin" size={11} className="opacity-50" />{p.city}</div>
 
       <div className="flex justify-between items-center mt-[11px]">
-        <span className="font-display font-bold text-[15px]">{fmtK(sel.budget(p))}</span>
+        <span className="font-display font-bold text-[15px]">{fmtK(sel.projectTotalConIva(p))}</span>
         <span className="meta">{p.weeks} sem</span>
       </div>
 
@@ -75,7 +75,7 @@ export function Kanban({ projects, onOpen, canMove = true }: { projects: Project
   return (
     <div className="flex gap-3 overflow-x-auto pb-3 min-h-[400px]">
       {cols.map(({ stage, items }) => {
-        const total = items.reduce((a, p) => a + sel.budget(p), 0)
+        const total = items.reduce((a, p) => a + sel.projectTotalConIva(p), 0)
         const isOver = over === stage.id
         return (
           <div key={stage.id}

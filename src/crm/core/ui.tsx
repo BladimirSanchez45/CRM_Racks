@@ -153,6 +153,7 @@ export function FileField({ label, value, path, folder, onChange, accept }: {
   const [busy, setBusy] = React.useState(false)
   const [err, setErr] = React.useState('')
   const [preview, setPreview] = React.useState(false)
+  const [dragOver, setDragOver] = React.useState(false)
 
   const pick = async (file: File) => {
     setBusy(true); setErr('')
@@ -175,9 +176,16 @@ export function FileField({ label, value, path, folder, onChange, accept }: {
     <div className="field">
       {label && <label>{label}</label>}
       <div className="flex gap-2">
-        <div className={'doc-chip flex-1' + (value ? '' : ' doc-missing')}>
+        <div
+          className={'doc-chip flex-1' + (value ? '' : ' doc-missing')}
+          onClick={() => { if (!busy) ref.current?.click() }}
+          onDragOver={(e) => { e.preventDefault(); if (!busy) setDragOver(true) }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files?.[0]; if (f && !busy) pick(f) }}
+          style={{ cursor: busy ? 'default' : 'pointer', ...(dragOver ? { borderColor: 'var(--acc)', background: 'color-mix(in srgb, var(--acc) 10%, transparent)' } : {}) }}
+          title="Arrastra un archivo aquí o haz clic para examinar">
           <Icon name={value && !busy ? 'doc' : 'clip'} size={14} />
-          <span className="nm">{busy ? 'Subiendo…' : (value || 'Ningún archivo seleccionado')}</span>
+          <span className="nm">{busy ? 'Subiendo…' : (value || (dragOver ? 'Suelta el archivo aquí' : 'Arrastra un archivo o examina'))}</span>
         </div>
         {value && path && <button type="button" className="btn btn-sm btn-ghost" onClick={() => setPreview(true)} title="Ver"><Icon name="eye" size={14} /></button>}
         <button type="button" className="btn btn-sm btn-ghost" disabled={busy} onClick={() => ref.current?.click()}>{value ? 'Cambiar' : 'Examinar'}</button>
