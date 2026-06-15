@@ -229,7 +229,7 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
 /* ============================================================
    Detalle de OC
    ============================================================ */
-function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => void; onEdit: () => void }) {
+export function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
   const role = state.currentUser?.role
   const readOnly = role === 'ventas' || role === 'logistica'   // solo lectura
@@ -351,7 +351,7 @@ type OcFormState = {
   description: string; conditions: string; amount: number | string; responsible: string
   file: string; filePath?: string; deliveryDate?: string; items: OcItem[]; cancelled?: boolean
 }
-function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => void }) {
+export function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const editing = !!order?.id
   const [o, setO] = React.useState<OcFormState>(() => ({

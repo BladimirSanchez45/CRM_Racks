@@ -5,7 +5,8 @@ import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtDate, fmtK } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, Rating, Badge, OCStatus, Empty, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
-import type { Supplier, SupplierInput } from '../../core/types'
+import { OrderDetail, OrderForm } from '../orders/orders'
+import type { Supplier, SupplierInput, Order } from '../../core/types'
 
 const CATS = ['Fabricante de racks', 'Fletes y transporte', 'Cuadrilla de instalación', 'Materiales', 'Otro']
 const catColor = (c: string) => (({ 'Fabricante de racks': 'var(--st-4)', 'Fletes y transporte': 'var(--st-5)', 'Cuadrilla de instalación': 'var(--st-8)' } as Record<string, string>)[c] || 'var(--tx-2)')
@@ -59,6 +60,9 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
 function SupplierDetail({ supplier, onClose, onEdit, onDelete }: { supplier: Supplier; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
   const { state } = useStore()
   const ocs = sel.ordersForSupplier(state, supplier.id)
+  // Al hacer clic en una OC del historial, abre su detalle (y permite editarla).
+  const [ocDetail, setOcDetail] = React.useState<Order | null>(null)
+  const [ocForm, setOcForm] = React.useState<Partial<Order> | null>(null)
   const total = ocs.reduce((a, o) => a + o.amount, 0)
   const pagado = ocs.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
   const adeudado = ocs.reduce((a, o) => a + sel.ocBalance(state, o), 0)
@@ -109,7 +113,7 @@ function SupplierDetail({ supplier, onClose, onEdit, onDelete }: { supplier: Sup
             <thead><tr><th>OC</th><th>Descripción</th><th>Fecha</th><th className="num">Monto</th><th>Estatus</th></tr></thead>
             <tbody>
               {ocs.map(o => (
-                <tr key={o.id}>
+                <tr key={o.id} className="cursor-pointer" onClick={() => setOcDetail(o)}>
                   <td><span className="mono text-acc">{o.number}</span></td>
                   <td className="text-tx-1 text-[12px]">{o.description || '—'}</td>
                   <td className="num text-tx-2 text-[12px]">{fmtDate(o.date)}</td>
@@ -121,6 +125,10 @@ function SupplierDetail({ supplier, onClose, onEdit, onDelete }: { supplier: Sup
           </table>
         </div>
       )}
+
+      {ocDetail && <OrderDetail order={ocDetail} onClose={() => setOcDetail(null)}
+        onEdit={() => { setOcForm(state.orders.find(x => x.id === ocDetail.id) || ocDetail); setOcDetail(null) }} />}
+      {ocForm && <OrderForm order={ocForm} onClose={() => setOcForm(null)} />}
     </Modal>
   )
 }
