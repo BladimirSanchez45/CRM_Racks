@@ -318,11 +318,17 @@ export interface Activity {
 
 /** Tipos de notificación.
  *  - project_created: un vendedor registró una venta → se avisa a los administradores.
+ *  - client_anticipo_paid: entró el primer cobro del cliente → se avisa a admins (ya pueden emitir la OC).
+ *  - project_due_soon: el proyecto entró a "Por Vencer" (≤5 días de entrega y sin pagar) → se avisa a admins.
+ *  - project_paid: el cliente liquidó el total → se avisa a logística (coordinar envío/instalación).
  *  - internal_payment_requested: logística solicitó un pago interno → se avisa a los administradores.
  *  - internal_payment_decided: el admin aprobó/rechazó un pago interno → se avisa al solicitante. */
 export type NotificationKind =
   | 'project_assigned'
   | 'project_created'
+  | 'client_anticipo_paid'
+  | 'project_due_soon'
+  | 'project_paid'
   | 'internal_payment_requested'
   | 'internal_payment_decided'
 

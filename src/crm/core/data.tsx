@@ -298,6 +298,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     })
   }, [reloadAll])
 
+  // Crea y persiste una notificación dirigida (best-effort) para cada destinatario.
+  // NO se agrega al estado local: son para OTROS usuarios (RLS las acota a su dueño).
+  const notify = React.useCallback((recipients: { id: string }[], fields: Omit<Notification, 'id' | 'userId' | 'read' | 'createdAt'>) => {
+    for (const u of recipients) {
+      const notification: Notification = { id: uid('nt'), userId: u.id, read: false, createdAt: nowISO(), ...fields }
+      saveNotification(notification).catch(err => console.error('[notif] no se pudo crear la notificación', err))
+    }
+  }, [])
+
   // Reconciliación de un proyecto a partir de sus datos:
   //  1) Finiquito: "paid" si el cliente cubrió el total con IVA (bidireccional).
   //  2) Etapa: auto-avance SOLO hacia adelante y a partir de "creación"
@@ -323,9 +332,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const activity: Activity = { id: uid('a'), t: nowISO(), icon: stg.icon, who: 'Sistema', txt: `avanzó automáticamente a ${stg.short}`, tgt: proj.code, kind: 'info' }
       rawDispatch({ type: 'PUSH_ACTIVITY', activity })
       thunks.push(() => saveActivity(activity))
+      // Notificaciones de hand-off según la etapa alcanzada (se disparan UNA vez, en la
+      // transición; al siguiente reconcile la etapa ya coincide y no se repiten).
+      const others = (pred: (r: Role) => boolean) => ns.users.filter(u => u.active && u.id !== ns.currentUser?.id && pred(u.role))
+      if (stage === 'entrega_est') {
+        // Por Vencer: ≤5 días para la entrega y el cliente aún no liquida → avisa a admins.
+        const saldo = sel.projectSaldoCliente(ns, updated)
+        notify(others(r => isAdminRole(r)), {
+          kind: 'project_due_soon',
+          title: `Por vencer: ${proj.code}`,
+          body: `Entrega en ≤${ENTREGA_EST_DIAS_PREVIOS} días y el cliente aún debe ${fmtMoney(saldo)}.`,
+          projectId: proj.id,
+        })
+      } else if (stage === 'pago') {
+        // Pago Recibido: el cliente liquidó → avisa a logística para coordinar el envío.
+        const logi = others(r => r === 'logistica')
+        notify(logi.length ? logi : others(r => isAdminRole(r)), {
+          kind: 'project_paid',
+          title: `Liquidado: ${proj.code}`,
+          body: `${sel.clientName(ns, proj.client)} pagó el total. Coordina el envío/instalación.`,
+          projectId: proj.id,
+        })
+      }
     }
     persist(thunks)
-  }, [persist])
+  }, [persist, notify])
 
   // dispatch PÚBLICO: aplica el cambio localmente (optimista) y lo persiste.
   const dispatch = React.useCallback((action: Action) => {
@@ -462,6 +493,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case 'SAVE_CLIENT_PAYMENT': {
         const full: ClientPayment = { ...(action.payment as ClientPayment), id: action.payment.id ?? uid('cp') }
         rawDispatch({ type: 'UPSERT_CLIENT_PAYMENT', payment: full })
+        // Aviso: PRIMER cobro "Cobrado" del proyecto (transición 0→1) → ya se puede emitir
+        // la OC al proveedor. Avisa a los administradores (no se repite en cobros siguientes).
+        if (full.status === 'Cobrado' && full.projectId) {
+          const hadCobradoBefore = s.clientPayments.some(c => c.id !== full.id && c.projectId === full.projectId && c.status === 'Cobrado')
+          if (!hadCobradoBefore) {
+            const proj = s.projects.find(p => p.id === full.projectId)
+            const admins = s.users.filter(u => isAdminRole(u.role) && u.active && u.id !== s.currentUser?.id)
+            notify(admins, {
+              kind: 'client_anticipo_paid',
+              title: `Anticipo recibido: ${proj?.code ?? ''}`,
+              body: `Ya entró el anticipo${proj ? ` de ${sel.clientName(s, proj.client)}` : ''}. Puedes emitir la orden de compra.`,
+              projectId: full.projectId,
+            })
+          }
+        }
         persist([() => saveClientPayment(full)]); return
       }
       case 'DELETE_CLIENT_PAYMENT':
@@ -619,7 +665,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => markAllNotificationsRead()]); return
       }
     }
-  }, [persist])
+  }, [persist, notify])
 
   // Reconciliación: tras cualquier cambio en proyectos / OC / pagos / cobros
   // (incluida la carga inicial), recalcula etapa y finiquito de cada proyecto.
