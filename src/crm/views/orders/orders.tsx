@@ -435,7 +435,15 @@ export function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose:
     dispatch({ type: 'SAVE_ORDER', order: { ...ord, file: fileName, filePath: path } })
     const proj = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
     if (proj) {
-      dispatch({ type: 'SAVE_PROJECT', project: { ...proj, docs: { ...proj.docs, ordenCompra: { name: fileName, ok: true, path } } } })
+      // El proyecto guarda VARIAS órdenes de compra (una por OC). Se hace upsert por
+      // nombre de archivo (OC_<folio>.pdf): si esta OC ya estaba, se actualiza su espacio;
+      // si no, se agrega al siguiente. Así no se sobrescriben entre proveedores.
+      const lista = proj.docs.ordenCompra || []
+      const idx = lista.findIndex(d => d.name === fileName)
+      const nuevaLista = idx >= 0
+        ? lista.map((d, i) => i === idx ? { name: fileName, ok: true, path } : d)
+        : [...lista, { name: fileName, ok: true, path }]
+      dispatch({ type: 'SAVE_PROJECT', project: { ...proj, docs: { ...proj.docs, ordenCompra: nuevaLista } } })
     }
     return { blob, fileName, path }
   }

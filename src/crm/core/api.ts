@@ -210,9 +210,17 @@ export const deleteSeller = (id: string) => removeRow('sellers', id)
 /* ---- Proyectos ---- */
 const emptyDoc = () => ({ name: '', ok: false })
 const emptyDocs = (): Project['docs'] => ({
-  cotizacion: emptyDoc(), layout: emptyDoc(), anticipo: emptyDoc(), ordenCompra: emptyDoc(),
+  cotizacion: emptyDoc(), layout: emptyDoc(), anticipo: emptyDoc(), ordenCompra: [],
   finiquito: emptyDoc(), remision: emptyDoc(), cartaFin: emptyDoc(), evidencia: [],
 })
+/** Normaliza los docs de un proyecto: `ordenCompra` y `evidencia` deben ser LISTAS.
+ *  Proyectos viejos guardaban `ordenCompra` como un solo objeto → se convierte a [obj]. */
+function normalizeDocs(raw: any): Project['docs'] {
+  const docs = { ...emptyDocs(), ...(raw ?? {}) } as any
+  if (!Array.isArray(docs.ordenCompra)) docs.ordenCompra = docs.ordenCompra && (docs.ordenCompra.ok || docs.ordenCompra.name) ? [docs.ordenCompra] : []
+  if (!Array.isArray(docs.evidencia)) docs.evidencia = []
+  return docs as Project['docs']
+}
 function mapProject(r: any): Project {
   return {
     id: r.id, code: r.code, stage: r.stage,
@@ -226,7 +234,7 @@ function mapProject(r: any): Project {
     ...(r.install_supplier_id ? { installSupplierId: r.install_supplier_id } : {}),
     ...(r.install_cost != null ? { installCost: Number(r.install_cost) } : {}),
     obs: r.obs ?? '',
-    docs: { ...emptyDocs(), ...(r.docs ?? {}) },
+    docs: normalizeDocs(r.docs),
     suppliers: Array.isArray(r.suppliers) ? r.suppliers : [],
     eta: r.eta ?? '', finiquito: r.finiquito ?? 'pending',
     created: r.created, updated: r.updated,

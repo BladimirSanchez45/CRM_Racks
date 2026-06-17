@@ -314,6 +314,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
         <div className="label-k mb-2">Documentos ({docCount(p).done}/7)</div>
         <div className="flex flex-wrap gap-2">
           {DOC_LABELS.map(d => <DocChip key={d.key} doc={p.docs[d.key]} label={d.label} />)}
+          {(p.docs.ordenCompra || []).map((oc, i) => <DocChip key={'oc' + i} doc={oc} label={`Orden de compra ${i + 1}`} />)}
         </div>
       </div>
 
@@ -447,7 +448,7 @@ const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
   client: '', seller: '', city: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending',
-  docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: docNo(), finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
+  docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
 })
 
 /* ---- Vista rápida de la info del cliente desde el formulario de proyecto ---- */
@@ -607,6 +608,14 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
             <FileField key={d.key} label={d.label} value={p.docs[d.key].name} path={p.docs[d.key].path} folder={docFolder} onChange={v => setDoc(d.key, v)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
           ))}
         </div>
+        {(p.docs.ordenCompra || []).length > 0 && (
+          <div className="mt-3">
+            <div className="label-k mb-1.5">Órdenes de compra ({p.docs.ordenCompra.length})</div>
+            <div className="flex flex-wrap gap-2">
+              {p.docs.ordenCompra.map((oc, i) => <DocChip key={i} doc={oc} label={`Orden de compra ${i + 1}`} />)}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-4">

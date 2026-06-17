@@ -263,7 +263,7 @@ export interface ProjectDocs {
   cotizacion: DocRef        // Cotización
   layout: DocRef            // Lay out
   anticipo: DocRef          // Comprobante de anticipo
-  ordenCompra: DocRef       // Orden de compra
+  ordenCompra: DocRef[]     // Órdenes de compra (una por OC generada; varios espacios)
   finiquito: DocRef         // Comprobante de finiquito
   remision: DocRef          // Remisión de salida
   cartaFin: DocRef          // Carta fin de obra

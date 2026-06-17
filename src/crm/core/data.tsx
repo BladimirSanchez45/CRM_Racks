@@ -143,24 +143,26 @@ export const cityAbbr = (city?: string) => {
 export const docOK = (name: string) => ({ name, ok: true })
 export const docNo = () => ({ name: '', ok: false })
 
-/** Llave de un documento simple del proyecto (excluye la lista de evidencia). */
-export type DocKey = Exclude<keyof Project['docs'], 'evidencia'>
-/** Etiquetas de los 7 documentos de un proyecto, en orden. */
+/** Llave de un documento SIMPLE del proyecto (excluye las listas: evidencia y órdenes de compra). */
+export type DocKey = Exclude<keyof Project['docs'], 'evidencia' | 'ordenCompra'>
+/** Etiquetas de los documentos simples de un proyecto, en orden.
+ *  (Órdenes de compra y Evidencia se manejan aparte como listas.) */
 export const DOC_LABELS: { key: DocKey; label: string }[] = [
   { key: 'cotizacion', label: 'Cotización' },
   { key: 'layout', label: 'Lay out' },
   { key: 'anticipo', label: 'Anticipo' },
-  { key: 'ordenCompra', label: 'Orden de compra' },
   { key: 'finiquito', label: 'Finiquito' },
   { key: 'remision', label: 'Remisión de salida' },
   { key: 'cartaFin', label: 'Carta fin de obra' },
 ]
 
-/** Conteo de documentos completos de un proyecto (de 7). */
+/** Conteo de documentos completos de un proyecto (de 7).
+ *  Las órdenes de compra son una lista: cuentan como "1 hecho" si hay al menos una. */
 export function docCount(p: Project) {
   const d = p.docs
-  const all = [d.cotizacion, d.layout, d.anticipo, d.ordenCompra, d.finiquito, d.remision, d.cartaFin]
-  return { done: all.filter(x => x.ok).length, total: 7 }
+  const simples = [d.cotizacion, d.layout, d.anticipo, d.finiquito, d.remision, d.cartaFin]
+  const done = simples.filter(x => x.ok).length + ((d.ordenCompra?.length ?? 0) > 0 ? 1 : 0)
+  return { done, total: 7 }
 }
 
 /* ---- Catálogo de Régimen Fiscal (SAT) ---- */
