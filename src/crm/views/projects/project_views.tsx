@@ -12,7 +12,7 @@ import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, 
 const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)', Programado: 'var(--warn)', Cancelado: 'var(--tx-3)' }
 const cobroBadge = (s: ClientPaymentStatus) => <Badge color={COBRO_COLOR[s]}>{s}</Badge>
 
-type CobroFormState = { id?: string; projectId: string; n: number | string; date: string; amount: number | string; concept: string; method: string; status: ClientPaymentStatus; comments: string }
+type CobroFormState = { id?: string; projectId: string; n: number | string; date: string; amount: number | string; concept: string; method: string; status: ClientPaymentStatus; comments: string; file?: string; filePath?: string }
 export function CobroForm({ project, cobro, onClose }: { project?: Project; cobro?: ClientPayment; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const nextN = (pid: string) => Math.max(0, ...sel.clientPaymentsForProject(state, pid).map(c => c.n)) + 1
@@ -66,6 +66,9 @@ export function CobroForm({ project, cobro, onClose }: { project?: Project; cobr
         </Field>
         <Field label="Forma de pago / Ref." span={2}><Input value={c.method} onChange={e => set('method', e.target.value)} placeholder="Transferencia, cheque…" /></Field>
         <Field label="Comentarios" span={2}><Input value={c.comments} onChange={e => set('comments', e.target.value)} /></Field>
+        <Field label="Comprobante de pago (imagen/PDF)" span={2}>
+          <FileField label="" value={c.file || ''} path={c.filePath} folder={`client_payments/${c.projectId || 'nuevos'}`} onChange={v => setC(s => ({ ...s, file: v.name, filePath: v.path }))} accept=".pdf,.jpg,.jpeg,.png" />
+        </Field>
       </div>
       {guard}
     </Modal>
@@ -204,6 +207,15 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
   const saldoCli = sel.projectSaldoCliente(state, p)
   const [cobro, setCobro] = React.useState<ClientPayment | {} | null>(null)
 
+  // Logística (y admins) pueden subir docs de obra desde aquí, sin editar todo el proyecto:
+  // Carta fin de obra, Remisión de salida y Evidencia de obra terminada.
+  const canUploadObra = isAdminRole(state.currentUser?.role) || state.currentUser?.role === 'logistica'
+  const obraFolder = `projects/${p.code || p.id}`
+  const setObraDoc = (k: 'cartaFin' | 'remision', v: { name: string; path: string }) =>
+    dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, [k]: { name: v.name, ok: !!v.name, ...(v.path ? { path: v.path } : {}) } } } })
+  const addEvidencia = (v: { name: string; path: string }) => { if (!v.name) return; dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, evidencia: [...(p.docs.evidencia || []), { name: v.name, ok: true, path: v.path }] } } }) }
+  const removeEvidencia = (i: number) => dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, evidencia: (p.docs.evidencia || []).filter((_, idx) => idx !== i) } } })
+
   return (
     <Modal width={760} onClose={onClose}
       title={<span className="flex items-center gap-3">{p.code} <StageBadge stage={p.stage} withNum /></span>}
@@ -304,6 +316,29 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
           {DOC_LABELS.map(d => <DocChip key={d.key} doc={p.docs[d.key]} label={d.label} />)}
         </div>
       </div>
+
+      {/* Subida de documentos de obra (logística / admin) sin abrir el formulario completo */}
+      {canUploadObra && (
+        <div className="mt-5">
+          <div className="label-k mb-2">Subir documentos de obra</div>
+          <div className="grid grid-cols-2 gap-3.5">
+            <FileField label="Carta fin de obra" value={p.docs.cartaFin.name} path={p.docs.cartaFin.path} folder={obraFolder} onChange={v => setObraDoc('cartaFin', v)} accept=".pdf,.jpg,.jpeg,.png" />
+            <FileField label="Remisión de salida" value={p.docs.remision.name} path={p.docs.remision.path} folder={obraFolder} onChange={v => setObraDoc('remision', v)} accept=".pdf,.jpg,.jpeg,.png" />
+          </div>
+          <div className="mt-3">
+            <div className="label-k mb-1.5">Evidencia de obra terminada ({(p.docs.evidencia || []).length})</div>
+            <div className="grid grid-cols-2 gap-3.5">
+              {(p.docs.evidencia || []).map((ev, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0"><DocChip doc={ev} label={ev.name || `Evidencia ${i + 1}`} /></div>
+                  <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar" onClick={() => removeEvidencia(i)}><Icon name="trash" size={13} /></button>
+                </div>
+              ))}
+              <FileField label="" value="" folder={`${obraFolder}/evidencia`} onChange={addEvidencia} accept=".jpg,.jpeg,.png,.webp" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* OCs */}
       {ocs.length > 0 && (

@@ -312,12 +312,15 @@ function mapClientPayment(r: any): ClientPayment {
   return {
     id: r.id, projectId: r.project_id, n: r.n ?? 1, date: r.date ?? '', amount: Number(r.amount ?? 0),
     concept: r.concept ?? '', method: r.method ?? '', status: r.status, comments: r.comments ?? '',
+    ...(r.file ? { file: r.file } : {}),
+    ...(r.file_path ? { filePath: r.file_path } : {}),
   }
 }
 function clientPaymentRow(c: ClientPayment): Record<string, unknown> {
   return {
     id: c.id, project_id: c.projectId, n: c.n, date: orNull(c.date), amount: c.amount,
     concept: c.concept, method: c.method, status: c.status, comments: c.comments,
+    file: c.file ?? null, file_path: c.filePath ?? null,
   }
 }
 export async function fetchClientPayments(): Promise<ClientPayment[]> {

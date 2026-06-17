@@ -159,6 +159,8 @@ export interface ClientPayment {
   method: string            // Forma de pago / Ref.
   status: ClientPaymentStatus
   comments: string
+  file?: string             // Comprobante de pago — nombre visible
+  filePath?: string         // Ruta del comprobante en Supabase Storage
 }
 
 /** Abono / pago de una OC (hoja "Pagos"). */
