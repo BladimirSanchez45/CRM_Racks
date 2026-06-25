@@ -252,6 +252,58 @@ export interface InternalPayment {
   createdAt: string               // ISO
 }
 
+/** Estatus de una LISTA de movimientos "por fuera" (cada jueves = una lista).
+ *  Borrador → (admin envía) Pendiente → (dirección) Autorizada | Rechazada. */
+export type MovementListStatus = 'Borrador' | 'Pendiente' | 'Autorizada' | 'Rechazada'
+
+/** Lista semanal de gastos "por fuera" que autoriza Dirección. Agrupa sus
+ *  movimientos y guarda su propio saldo de cuenta (snapshot). */
+export interface MovementList {
+  id: string
+  name: string              // nombre de la lista (ej. "Lista jue 26 jun")
+  date: string              // fecha de la lista (default hoy)
+  bankBalance: number       // saldo de cuenta capturado para ESTA lista
+  status: MovementListStatus
+  createdBy: string         // userId de quien la armó
+  sentAt?: string           // ISO en que se envió a autorización
+  authorizedBy?: string     // userId de dirección que decidió
+  decidedAt?: string        // ISO de la autorización/rechazo
+  rejectReason?: string     // motivo si se rechazó
+  comprobante?: string      // comprobante de pago de la lista — nombre visible
+  comprobantePath?: string  // ruta del comprobante en Supabase Storage. Al subirlo, la lista
+                            // se considera PAGADA y recién entonces descuenta utilidad.
+  createdAt: string         // ISO
+}
+
+/** Estatus de un movimiento individual dentro de una lista. */
+export type MovementStatus = 'Pendiente' | 'Autorizado' | 'Rechazado'
+
+/** Movimiento "por fuera" perteneciente a una lista. Puede ligarse opcionalmente
+ *  a un proyecto (descuenta de su utilidad cuando queda Autorizado). */
+export interface Movement {
+  id: string
+  listId: string            // lista a la que pertenece
+  date: string              // fecha del movimiento (default hoy)
+  description: string        // concepto libre (ej. "Flete Cristian Morales", "Nóminas")
+  amount: number
+  projectId?: string        // proyecto ligado (opcional)
+  status: MovementStatus
+  createdBy: string         // userId de quien lo creó
+  authorizedBy?: string     // userId de dirección que decidió
+  decidedAt?: string        // ISO de la autorización/rechazo
+  rejectReason?: string     // motivo si se rechazó
+  /** Marca de intervención de Dirección sobre la lista ya enviada (Pendiente):
+   *  'added' = lo agregó Dirección, 'edited' = lo modificó, 'removed' = lo eliminó (borrado suave,
+   *  sigue visible tachado y no suma al total). Dirección es la autoridad final. */
+  changedByDireccion?: 'added' | 'edited' | 'removed'
+  createdAt: string         // ISO
+}
+
+/** Configuración global de la app (valores escalares persistidos). */
+export interface AppSettings {
+  bankBalance: number       // saldo de la cuenta bancaria (manual) — en desuso (cada lista guarda el suyo)
+}
+
 /** Referencia a un documento adjunto. `path` = ruta en Supabase Storage. */
 export interface DocRef {
   name: string
@@ -338,6 +390,9 @@ export type NotificationKind =
   | 'project_paid'
   | 'internal_payment_requested'
   | 'internal_payment_decided'
+  | 'movements_submitted'        // admin envió la lista de movimientos → se avisa a dirección
+  | 'movement_decided'           // dirección autorizó/rechazó la lista → se avisa al creador
+  | 'movement_changed'           // dirección modificó (agregó/editó/eliminó) la lista → se avisa al creador
 
 /** Notificación dirigida a un usuario concreto (a diferencia del feed de
  *  actividad, que es global). Se entrega por id de usuario destinatario. */
@@ -351,6 +406,8 @@ export interface Notification {
   createdAt: string       // ISO
   projectId?: string      // entidad relacionada (para abrir el detalle)
   internalPaymentId?: string  // pago interno relacionado (para abrir el detalle)
+  movementId?: string     // movimiento relacionado (para abrir el detalle)
+  movementListId?: string // lista de movimientos relacionada (para abrir el detalle)
   actorName?: string      // quién la originó
 }
 
@@ -366,6 +423,9 @@ export interface AppState {
   commissions: Commission[]
   remisiones: Remision[]
   internalPayments: InternalPayment[]
+  movementLists: MovementList[]
+  movements: Movement[]
+  settings: AppSettings
   activity: Activity[]
   notifications: Notification[]
   users: User[]
@@ -398,6 +458,16 @@ export type InternalPaymentInput = Omit<InternalPayment, 'id' | 'requestedBy' | 
   requestedBy?: string
   createdAt?: string
 }
+export type MovementInput = Omit<Movement, 'id' | 'createdBy' | 'createdAt'> & {
+  id?: string
+  createdBy?: string
+  createdAt?: string
+}
+export type MovementListInput = Omit<MovementList, 'id' | 'createdBy' | 'createdAt'> & {
+  id?: string
+  createdBy?: string
+  createdAt?: string
+}
 
 /** Acciones del store. */
 export type Action =
@@ -426,6 +496,18 @@ export type Action =
   | { type: 'DELETE_INTERNAL_PAYMENT'; id: string }
   /** Decisión del admin sobre un pago interno (aprobar/rechazar). */
   | { type: 'DECIDE_INTERNAL_PAYMENT'; id: string; approve: boolean; reason?: string }
+  | { type: 'SAVE_MOVEMENT_LIST'; list: MovementListInput }
+  | { type: 'DELETE_MOVEMENT_LIST'; id: string }
+  /** Admin envía la lista a autorización: Borrador → Pendiente, avisa a dirección. */
+  | { type: 'SUBMIT_MOVEMENT_LIST'; id: string }
+  /** Decisión de dirección sobre la LISTA completa (autorizar/rechazar todo). */
+  | { type: 'DECIDE_MOVEMENT_LIST'; id: string; approve: boolean; reason?: string }
+  /** Sube/quita el comprobante de pago de la lista (al subirlo, descuenta utilidad). */
+  | { type: 'SET_LIST_COMPROBANTE'; id: string; comprobante?: string; comprobantePath?: string }
+  | { type: 'SAVE_MOVEMENT'; movement: MovementInput }
+  | { type: 'DELETE_MOVEMENT'; id: string }
+  /** Decisión de dirección sobre un movimiento individual (autorizar/rechazar). */
+  | { type: 'DECIDE_MOVEMENT'; id: string; approve: boolean; reason?: string }
   | { type: 'MARK_NOTIFICATION_READ'; id: string }
   | { type: 'MARK_ALL_NOTIFICATIONS_READ' }
   | { type: 'LOGIN'; user: User }
@@ -457,6 +539,11 @@ export type StateAction =
   | { type: 'REMOVE_REMISION'; id: string }
   | { type: 'UPSERT_INTERNAL_PAYMENT'; payment: InternalPayment }
   | { type: 'REMOVE_INTERNAL_PAYMENT'; id: string }
+  | { type: 'UPSERT_MOVEMENT_LIST'; list: MovementList }
+  | { type: 'REMOVE_MOVEMENT_LIST'; id: string }
+  | { type: 'UPSERT_MOVEMENT'; movement: Movement }
+  | { type: 'REMOVE_MOVEMENT'; id: string }
+  | { type: 'SET_SETTINGS'; settings: AppSettings }
   | { type: 'PUSH_ACTIVITY'; activity: Activity }
   | { type: 'UPSERT_NOTIFICATION'; notification: Notification }
   | { type: 'MARK_ALL_NOTIFICATIONS_READ' }

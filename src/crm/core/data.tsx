@@ -24,6 +24,8 @@ import type {
   Supplier,
   Remision,
   InternalPayment,
+  Movement,
+  MovementList,
 } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
@@ -35,6 +37,8 @@ import {
   saveCommission, deleteCommission, saveClientRow, deleteClient as apiDeleteClient, saveSupplierRow, deleteSupplier as apiDeleteSupplier, saveSeller, deleteSeller as apiDeleteSeller,
   saveRemision, deleteRemision as apiDeleteRemision,
   saveInternalPayment, deleteInternalPayment as apiDeleteInternalPayment,
+  saveMovementList, deleteMovementList as apiDeleteMovementList,
+  saveMovement, deleteMovement as apiDeleteMovement,
   saveActivity,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
   subscribeToData,
@@ -59,6 +63,11 @@ export const isSuperadmin = (role?: Role | null) => role === 'superadmin'
 export const isVentasRole = (role?: Role | null) => role === 'ventas'
 /** Rol Logística: ve todos los proyectos/OC + asignación, remisiones y pagos internos. */
 export const isLogisticaRole = (role?: Role | null) => role === 'logistica'
+/** Rol Dirección: acceso de solo lectura a proyectos, OC, pagos, cobranza y pagos internos. */
+export const isDireccion = (role?: Role | null) => role === 'direccion'
+
+/** Comisión bancaria fija sobre la lista de movimientos "por fuera" (total = subtotal × (1 + esto)). */
+export const COMISION_BANCARIA = 0.053
 
 /** ¿El usuario puede EDITAR este proyecto?
  *  - Admin / Super Admin: siempre.
@@ -199,6 +208,7 @@ export const regimenLabel = (code?: string) =>
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
+  movementLists: [], movements: [], settings: { bankBalance: 0 },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
@@ -268,6 +278,11 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_REMISION': return { ...state, remisiones: state.remisiones.filter(r => r.id !== a.id) }
     case 'UPSERT_INTERNAL_PAYMENT': return { ...state, internalPayments: upsertBy(state.internalPayments, a.payment) }
     case 'REMOVE_INTERNAL_PAYMENT': return { ...state, internalPayments: state.internalPayments.filter(p => p.id !== a.id) }
+    case 'UPSERT_MOVEMENT_LIST': return { ...state, movementLists: upsertBy(state.movementLists, a.list) }
+    case 'REMOVE_MOVEMENT_LIST': return { ...state, movementLists: state.movementLists.filter(l => l.id !== a.id), movements: state.movements.filter(m => m.listId !== a.id) }
+    case 'UPSERT_MOVEMENT': return { ...state, movements: upsertBy(state.movements, a.movement) }
+    case 'REMOVE_MOVEMENT': return { ...state, movements: state.movements.filter(m => m.id !== a.id) }
+    case 'SET_SETTINGS': return { ...state, settings: a.settings }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
     case 'MARK_ALL_NOTIFICATIONS_READ': return { ...state, notifications: state.notifications.map(n => n.read ? n : { ...n, read: true }) }
@@ -664,6 +679,248 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist(thunks); return
       }
 
+      case 'SAVE_MOVEMENT_LIST': {
+        const isNew = !action.list.id || !s.movementLists.some(l => l.id === action.list.id)
+        const full: MovementList = {
+          ...(action.list as MovementList),
+          id: action.list.id ?? uid('ml'),
+          createdBy: action.list.createdBy ?? s.currentUser?.id ?? '',
+          createdAt: action.list.createdAt ?? nowISO(),
+          status: action.list.status ?? 'Borrador',
+        }
+        rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: full })
+        const thunks: (() => Promise<void>)[] = [() => saveMovementList(full)]
+        if (isNew) {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: 'creó una lista de movimientos', tgt: full.name, kind: 'money' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        persist(thunks); return
+      }
+      case 'DELETE_MOVEMENT_LIST': {
+        const list = s.movementLists.find(l => l.id === action.id)
+        const movs = s.movements.filter(m => m.listId === action.id)
+        rawDispatch({ type: 'REMOVE_MOVEMENT_LIST', id: action.id })   // quita lista + sus movimientos del estado
+        const thunks: (() => Promise<void>)[] = [
+          ...movs.map(m => () => apiDeleteMovement(m.id)),
+          () => apiDeleteMovementList(action.id),
+        ]
+        // Recalcula comisiones de proyectos finalizados que perdían un movimiento autorizado.
+        const nextMovs = s.movements.filter(m => m.listId !== action.id)
+        const finalProjects = new Map<string, Project>()
+        for (const m of movs) {
+          if (m.status !== 'Autorizado' || !m.projectId) continue
+          const proj = s.projects.find(p => p.id === m.projectId)
+          if (proj && proj.stage === 'finalizado') finalProjects.set(proj.id, proj)
+        }
+        for (const proj of finalProjects.values()) regenCommissions(proj, thunks, { ...s, movements: nextMovs })
+        if (list) {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'trash', who: whoName(s), txt: 'eliminó una lista de movimientos', tgt: list.name, kind: 'info' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        persist(thunks); return
+      }
+      case 'SUBMIT_MOVEMENT_LIST': {
+        const list = s.movementLists.find(l => l.id === action.id); if (!list || list.status !== 'Borrador') return
+        const updated: MovementList = { ...list, status: 'Pendiente', sentAt: nowISO() }
+        rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: updated })
+        const thunks: (() => Promise<void>)[] = [() => saveMovementList(updated)]
+        const movs = s.movements.filter(m => m.listId === list.id)
+        const subtotal = movs.reduce((a, m) => a + (m.amount || 0), 0)
+        const total = subtotal * (1 + COMISION_BANCARIA)
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `envió la lista "${list.name}" a autorización`, tgt: fmtMoney(total), kind: 'money' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        // Avisa a Dirección que hay una lista por autorizar.
+        const dir = s.users.filter(u => u.role === 'direccion' && u.active && u.id !== s.currentUser?.id)
+        notify(dir, {
+          kind: 'movements_submitted',
+          title: `Lista por autorizar: ${list.name}`,
+          body: `${whoName(s)} envió "${list.name}" con ${movs.length} movimientos por ${fmtMoney(total)} (incluye 5.3%). Requiere tu autorización.`,
+          movementListId: list.id, actorName: whoName(s),
+        })
+        persist(thunks); return
+      }
+      case 'DECIDE_MOVEMENT_LIST': {
+        const list = s.movementLists.find(l => l.id === action.id); if (!list) return
+        const updatedList: MovementList = {
+          ...list,
+          status: action.approve ? 'Autorizada' : 'Rechazada',
+          authorizedBy: s.currentUser?.id ?? '', decidedAt: nowISO(),
+          ...(action.approve ? {} : { rejectReason: action.reason ?? '' }),
+        }
+        rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: updatedList })
+        const thunks: (() => Promise<void>)[] = [() => saveMovementList(updatedList)]
+        // Todos sus movimientos PENDIENTES pasan a Autorizado/Rechazado (los ya decididos y los eliminados se respetan).
+        let next = s.movements
+        for (const m of s.movements.filter(x => x.listId === list.id && x.status === 'Pendiente' && x.changedByDireccion !== 'removed')) {
+          const um: Movement = { ...m, status: action.approve ? 'Autorizado' : 'Rechazado', authorizedBy: s.currentUser?.id ?? '', decidedAt: nowISO(), ...(action.approve ? {} : { rejectReason: action.reason ?? '' }) }
+          rawDispatch({ type: 'UPSERT_MOVEMENT', movement: um })
+          thunks.push(() => saveMovement(um))
+          next = upsertBy(next, um)
+        }
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: action.approve ? 'check' : 'close', who: whoName(s), txt: `${action.approve ? 'autorizó' : 'rechazó'} la lista "${list.name}"`, tgt: list.name, kind: action.approve ? 'done' : 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        if (list.createdBy && list.createdBy !== s.currentUser?.id) {
+          notify([{ id: list.createdBy }], {
+            kind: 'movement_decided',
+            title: `Lista ${action.approve ? 'autorizada' : 'rechazada'}: ${list.name}`,
+            body: action.approve
+              ? `${whoName(s)} autorizó tu lista "${list.name}".`
+              : `${whoName(s)} rechazó tu lista "${list.name}".${action.reason ? ` Motivo: ${action.reason}` : ''}`,
+            movementListId: list.id, actorName: whoName(s),
+          })
+        }
+        // Recalcula comisiones de proyectos finalizados ligados a los movimientos de la lista.
+        const finalProjects = new Map<string, Project>()
+        for (const m of next.filter(x => x.listId === list.id && x.projectId)) {
+          const proj = s.projects.find(p => p.id === m.projectId)
+          if (proj && proj.stage === 'finalizado') finalProjects.set(proj.id, proj)
+        }
+        for (const proj of finalProjects.values()) regenCommissions(proj, thunks, { ...s, movements: next })
+        persist(thunks); return
+      }
+      case 'SET_LIST_COMPROBANTE': {
+        const list = s.movementLists.find(l => l.id === action.id); if (!list) return
+        const updated: MovementList = { ...list, comprobante: action.comprobante || undefined, comprobantePath: action.comprobantePath || undefined }
+        rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: updated })
+        const thunks: (() => Promise<void>)[] = [() => saveMovementList(updated)]
+        const subio = !!action.comprobantePath
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: subio ? 'check' : 'doc', who: whoName(s), txt: subio ? `marcó como pagada la lista "${list.name}"` : `quitó el comprobante de "${list.name}"`, tgt: list.name, kind: subio ? 'done' : 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        // Subir/quitar comprobante cambia si los movimientos descuentan utilidad: recalcula comisiones
+        // de los proyectos FINALIZADOS ligados a los movimientos autorizados de esta lista.
+        const nextLists = upsertBy(s.movementLists, updated)
+        const finalProjects = new Map<string, Project>()
+        for (const m of s.movements.filter(m => m.listId === list.id && m.status === 'Autorizado' && m.changedByDireccion !== 'removed' && m.projectId)) {
+          const proj = s.projects.find(p => p.id === m.projectId)
+          if (proj && proj.stage === 'finalizado') finalProjects.set(proj.id, proj)
+        }
+        for (const proj of finalProjects.values()) regenCommissions(proj, thunks, { ...s, movementLists: nextLists })
+        persist(thunks); return
+      }
+
+      case 'SAVE_MOVEMENT': {
+        const isNew = !action.movement.id || !s.movements.some(m => m.id === action.movement.id)
+        const prev = action.movement.id ? s.movements.find(m => m.id === action.movement.id) : undefined
+        const parent = s.movementLists.find(l => l.id === action.movement.listId)
+        // Dirección interviniendo una lista ya enviada (Pendiente): marca su cambio.
+        const dirReview = isDireccion(s.currentUser?.role) && parent?.status === 'Pendiente'
+        const dirMark: Movement['changedByDireccion'] | undefined = dirReview
+          ? (isNew ? 'added' : (prev?.changedByDireccion === 'added' ? 'added' : 'edited'))
+          : (action.movement as Movement).changedByDireccion
+        const full: Movement = {
+          ...(action.movement as Movement),
+          id: action.movement.id ?? uid('mv'),
+          createdBy: action.movement.createdBy ?? s.currentUser?.id ?? '',
+          createdAt: action.movement.createdAt ?? nowISO(),
+          status: action.movement.status ?? 'Pendiente',
+          ...(dirMark ? { changedByDireccion: dirMark } : {}),
+        }
+        rawDispatch({ type: 'UPSERT_MOVEMENT', movement: full })
+        const thunks: (() => Promise<void>)[] = [() => saveMovement(full)]
+        if (isNew) {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: 'registró un movimiento', tgt: full.description, kind: 'money' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        // Avisa al admin (creador de la lista) que Dirección modificó/agregó algo.
+        if (dirReview && parent && parent.createdBy && parent.createdBy !== s.currentUser?.id) {
+          notify([{ id: parent.createdBy }], {
+            kind: 'movement_changed',
+            title: `Dirección modificó tu lista: ${parent.name}`,
+            body: `${whoName(s)} ${isNew ? 'agregó' : 'editó'} el movimiento "${full.description}" (${fmtMoney(full.amount)}).`,
+            movementListId: parent.id, actorName: whoName(s),
+          })
+        }
+        // Si liga a un proyecto FINALIZADO y ya está autorizado, recalcula comisiones (cambia la utilidad).
+        const mvProj = full.projectId ? s.projects.find(p => p.id === full.projectId) : undefined
+        if (mvProj && mvProj.stage === 'finalizado') {
+          regenCommissions(mvProj, thunks, { ...s, movements: upsertBy(s.movements, full) })
+        }
+        persist(thunks); return
+      }
+      case 'DELETE_MOVEMENT': {
+        const mv = s.movements.find(m => m.id === action.id); if (!mv) return
+        const parent = s.movementLists.find(l => l.id === mv.listId)
+        const dirReview = isDireccion(s.currentUser?.role) && parent?.status === 'Pendiente'
+        const thunks: (() => Promise<void>)[] = []
+        if (dirReview) {
+          // BORRADO SUAVE: sigue visible (tachado), no suma; queda marcado como eliminado por Dirección.
+          const soft: Movement = { ...mv, changedByDireccion: 'removed' }
+          rawDispatch({ type: 'UPSERT_MOVEMENT', movement: soft })
+          thunks.push(() => saveMovement(soft))
+          if (parent && parent.createdBy && parent.createdBy !== s.currentUser?.id) {
+            notify([{ id: parent.createdBy }], {
+              kind: 'movement_changed',
+              title: `Dirección modificó tu lista: ${parent.name}`,
+              body: `${whoName(s)} eliminó el movimiento "${mv.description}" (${fmtMoney(mv.amount)}).`,
+              movementListId: parent.id, actorName: whoName(s),
+            })
+          }
+          const proj = mv.projectId ? s.projects.find(p => p.id === mv.projectId) : undefined
+          if (proj && proj.stage === 'finalizado') {
+            regenCommissions(proj, thunks, { ...s, movements: upsertBy(s.movements, soft) })
+          }
+          persist(thunks); return
+        }
+        // Borrado normal (admin en Borrador).
+        rawDispatch({ type: 'REMOVE_MOVEMENT', id: action.id })
+        thunks.push(() => apiDeleteMovement(action.id))
+        const proj = mv.projectId ? s.projects.find(p => p.id === mv.projectId) : undefined
+        if (proj && proj.stage === 'finalizado') {
+          regenCommissions(proj, thunks, { ...s, movements: s.movements.filter(m => m.id !== action.id) })
+        }
+        persist(thunks); return
+      }
+      case 'DECIDE_MOVEMENT': {
+        const mv = s.movements.find(m => m.id === action.id); if (!mv) return
+        const updated: Movement = {
+          ...mv,
+          status: action.approve ? 'Autorizado' : 'Rechazado',
+          authorizedBy: s.currentUser?.id ?? '',
+          decidedAt: nowISO(),
+          ...(action.approve ? {} : { rejectReason: action.reason ?? '' }),
+        }
+        rawDispatch({ type: 'UPSERT_MOVEMENT', movement: updated })
+        const thunks: (() => Promise<void>)[] = [() => saveMovement(updated)]
+        const next = upsertBy(s.movements, updated)
+        // Recalcula el estatus de la lista padre: se resuelve cuando ya no quedan movimientos pendientes.
+        const list = s.movementLists.find(l => l.id === mv.listId)
+        if (list && list.status === 'Pendiente') {
+          const mine = next.filter(m => m.listId === list.id && m.changedByDireccion !== 'removed')
+          if (!mine.some(m => m.status === 'Pendiente')) {
+            const resolved: MovementList = {
+              ...list,
+              status: mine.some(m => m.status === 'Autorizado') ? 'Autorizada' : 'Rechazada',
+              authorizedBy: s.currentUser?.id ?? '', decidedAt: nowISO(),
+            }
+            rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: resolved })
+            thunks.push(() => saveMovementList(resolved))
+            if (list.createdBy && list.createdBy !== s.currentUser?.id) {
+              notify([{ id: list.createdBy }], {
+                kind: 'movement_decided',
+                title: `Lista ${resolved.status === 'Autorizada' ? 'autorizada' : 'rechazada'}: ${list.name}`,
+                body: `${whoName(s)} terminó de revisar tu lista "${list.name}".`,
+                movementListId: list.id, actorName: whoName(s),
+              })
+            }
+          }
+        }
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: action.approve ? 'check' : 'close', who: whoName(s), txt: `${action.approve ? 'autorizó' : 'rechazó'} un movimiento`, tgt: mv.description, kind: action.approve ? 'done' : 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        // Al autorizar/rechazar un movimiento ligado a proyecto FINALIZADO, recalcula comisiones.
+        const decProj = mv.projectId ? s.projects.find(p => p.id === mv.projectId) : undefined
+        if (decProj && decProj.stage === 'finalizado') {
+          regenCommissions(decProj, thunks, { ...s, movements: next })
+        }
+        persist(thunks); return
+      }
+
       case 'MARK_NOTIFICATION_READ': {
         const n = s.notifications.find(x => x.id === action.id); if (!n || n.read) return
         rawDispatch({ type: 'UPSERT_NOTIFICATION', notification: { ...n, read: true } })
@@ -760,6 +1017,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'sellers':         rawDispatch({ type: 'REMOVE_SELLER', id: c.id }); break
           case 'remisiones':      rawDispatch({ type: 'REMOVE_REMISION', id: c.id }); break
           case 'internal_payments': rawDispatch({ type: 'REMOVE_INTERNAL_PAYMENT', id: c.id }); break
+          case 'movement_lists':  rawDispatch({ type: 'REMOVE_MOVEMENT_LIST', id: c.id }); break
+          case 'movements':       rawDispatch({ type: 'REMOVE_MOVEMENT', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -773,6 +1032,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'sellers':         rawDispatch({ type: 'UPSERT_SELLER', seller: c.row }); break
           case 'remisiones':      rawDispatch({ type: 'UPSERT_REMISION', remision: c.row }); break
           case 'internal_payments': rawDispatch({ type: 'UPSERT_INTERNAL_PAYMENT', payment: c.row }); break
+          case 'movement_lists':  rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: c.row }); break
+          case 'movements':       rawDispatch({ type: 'UPSERT_MOVEMENT', movement: c.row }); break
         }
       }
     })
@@ -858,10 +1119,20 @@ export const sel = {
     state.internalPayments
       .filter(p => p.projectId === pid && p.status === 'Pagado')
       .reduce((a, p) => a + (p.amount || 0), 0),
-  /** Utilidad SIN IVA = subtotal de la venta − subtotal de compras (OC) − pagos internos pagados. */
+  /** Gastos por movimientos "por fuera" ligados al proyecto. Solo cuentan los AUTORIZADOS,
+   *  no eliminados, y cuya LISTA ya tiene comprobante de pago (lista pagada): hasta que se
+   *  sube el comprobante no se descuenta la utilidad. */
+  projectMovementsCost: (state: AppState, pid: string) => {
+    const paidLists = new Set(state.movementLists.filter(l => !!l.comprobantePath).map(l => l.id))
+    return state.movements
+      .filter(m => m.projectId === pid && m.status === 'Autorizado' && m.changedByDireccion !== 'removed' && paidLists.has(m.listId))
+      .reduce((a, m) => a + (m.amount || 0), 0)
+  },
+  /** Utilidad SIN IVA = subtotal de la venta − subtotal de compras (OC) − pagos internos pagados − movimientos autorizados. */
   projectUtilidadSub: (state: AppState, p: Project) =>
     (p.ventaSubtotal || 0) - sel.projectComprasConIva(state, p.id) / 1.16
-      - sel.projectInternalPaymentsCost(state, p.id),
+      - sel.projectInternalPaymentsCost(state, p.id)
+      - sel.projectMovementsCost(state, p.id),
   /** Base para calcular comisiones = utilidad sin IVA (nunca negativa). */
   projectComisionBase: (state: AppState, p: Project) => Math.max(0, sel.projectUtilidadSub(state, p)),
   /** Cobrado = suma de cobros con estado "Cobrado". */

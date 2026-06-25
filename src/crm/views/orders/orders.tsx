@@ -232,7 +232,7 @@ function AbonoForm({ order, payment, onClose }: { order: Order; payment?: Paymen
 export function OrderDetail({ order, onClose, onEdit }: { order: Order; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
   const role = state.currentUser?.role
-  const readOnly = role === 'ventas' || role === 'logistica'   // solo lectura
+  const readOnly = role === 'ventas' || role === 'logistica' || role === 'direccion'   // solo lectura
   const o = state.orders.find(x => x.id === order.id) || order
   const supplier = sel.supplier(state, o.supplierId)
   const project = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
@@ -666,8 +666,8 @@ export function OrdersPage() {
   const { state } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
-  // Solo lectura: ventas y logística no pueden crear/editar OC (logística ve TODAS).
-  const readOnly = isVentas || me?.role === 'logistica'
+  // Solo lectura: ventas, logística y dirección no pueden crear/editar OC (ven TODAS).
+  const readOnly = isVentas || me?.role === 'logistica' || me?.role === 'direccion'
   const [view, setView] = React.useState('oc')
   const [detail, setDetail] = React.useState<Order | null>(null)
   const [form, setForm] = React.useState<Partial<Order> | null>(null)

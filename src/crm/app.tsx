@@ -2,7 +2,7 @@
 //  APP SHELL — sidebar, topbar, routing, tweaks
 // ============================================================
 import * as React from 'react'
-import { StoreProvider, useStore, isAdminRole, isSuperadmin, roleLabel } from './core/data'
+import { StoreProvider, useStore, isAdminRole, isSuperadmin, isDireccion, roleLabel } from './core/data'
 import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { Icon, type IconName } from './core/icons'
@@ -18,6 +18,7 @@ import { CommissionsPage } from './views/commissions/commissions'
 import { AsignacionPage } from './views/asignacion/asignacion'
 import { RemisionesPage } from './views/remisiones/remisiones'
 import { InternalPaymentsPage } from './views/internal_payments/internal_payments'
+import { MovementsPage } from './views/movements/movements'
 import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
@@ -26,14 +27,14 @@ import type { Project, Role } from './core/types'
 import strakkLogo from '../assets/logos/strakk_logo.png'
 import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 
-type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
+type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
 // queden sin ítems visibles (por el rol) se ocultan solas. `SECTIONS` define el orden.
 const SECTIONS = ['General', 'Comercial', 'Compras', 'Logística', 'Finanzas'] as const
 type Section = typeof SECTIONS[number]
-const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; section: Section }[] = [
+const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; section: Section }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
@@ -45,6 +46,8 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'payments',    label: 'Pagos',        icon: 'money',       section: 'Finanzas' },
   { id: 'cobranza',    label: 'Cobranza',     icon: 'download',    section: 'Finanzas' },
   { id: 'internal_payments', label: 'Pagos internos', icon: 'shield', section: 'Finanzas' },
+  // Movimientos: solo admin/superadmin y dirección (gasto "por fuera" semanal).
+  { id: 'movements',   label: 'Movimientos',  icon: 'box',         roles: ['admin', 'superadmin', 'direccion'], section: 'Finanzas' },
 ]
 // Rutas permitidas por rol RESTRINGIDO. Los roles NO listados aquí (admin,
 // superadmin, dirección…) ven todo. Para acotar un rol nuevo —p. ej. logística—
@@ -55,13 +58,15 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
   logistica: ['dashboard', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
+  // Dirección: vista de solo lectura sobre proyectos, OC y finanzas (sin edición) + Movimientos (autoriza).
+  direccion: ['dashboard', 'projects', 'orders', 'payments', 'cobranza', 'internal_payments', 'movements', 'settings'],
 }
 /** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
 const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', projects: 'Proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
-  internal_payments: 'Pagos internos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
+  internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   admin: 'Administración', settings: 'Configuración',
 }
 
@@ -96,6 +101,7 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
   }
   const allowed = allowedRoutes(me?.role)
   const nav = NAV.filter(n => {
+    if (n.roles) return me?.role ? n.roles.includes(me.role) : false   // whitelist explícita de roles
     if (n.adminOnly) return isAdminRole(me?.role)
     return allowed ? allowed.includes(n.id) : true
   })
@@ -166,6 +172,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
   const [openProj, setOpenProj] = React.useState<Project | null>(null)
   const [editProj, setEditProj] = React.useState<Project | null>(null)
   const [openIPId, setOpenIPId] = React.useState<string | null>(null)   // pago interno a abrir (desde notificación)
+  const [openListId, setOpenMovId] = React.useState<string | null>(null) // movimiento a abrir (desde notificación)
 
   const onOpenProject = (p: Project) => { setOpenProj(p); setEditProj(null) }
 
@@ -183,6 +190,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'asignacion':  return <AsignacionPage />
       case 'remisiones':  return <RemisionesPage />
       case 'internal_payments': return <InternalPaymentsPage openId={openIPId} onConsumed={() => setOpenIPId(null)} />
+      case 'movements':   return (isAdminRole(me?.role) || isDireccion(me?.role)) ? <MovementsPage openId={openListId} onConsumed={() => setOpenMovId(null)} /> : <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
       case 'payments':    return <PaymentsPage />
       case 'cobranza':    return <CobranzaPage />
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
@@ -213,7 +221,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
           <button className="icon-btn" onClick={() => setTweak('light', !t.light)} title={t.light ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
             <Icon name={t.light ? 'sun' : 'moon'} size={17} />
           </button>
-          <NotificationsBell onOpenProject={onOpenProject} onOpenInternalPayment={(id) => { setRoute('internal_payments'); setOpenIPId(id) }} />
+          <NotificationsBell onOpenProject={onOpenProject} onOpenInternalPayment={(id) => { setRoute('internal_payments'); setOpenIPId(id) }} onOpenMovements={(id) => { setRoute('movements'); setOpenMovId(id) }} />
         </header>
         <main className="content blueprint">
           <div className="content-inner" key={route}>{page()}</div>

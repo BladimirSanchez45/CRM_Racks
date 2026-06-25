@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, canEditProject, isAdminRole } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, canEditProject, isAdminRole, isDireccion } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -13,7 +13,7 @@ const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)',
 const cobroBadge = (s: ClientPaymentStatus) => <Badge color={COBRO_COLOR[s]}>{s}</Badge>
 
 type CobroFormState = { id?: string; projectId: string; n: number | string; date: string; amount: number | string; concept: string; method: string; status: ClientPaymentStatus; comments: string; file?: string; filePath?: string }
-export function CobroForm({ project, cobro, onClose }: { project?: Project; cobro?: ClientPayment; onClose: () => void }) {
+export function CobroForm({ project, cobro, onClose, readOnly }: { project?: Project; cobro?: ClientPayment; onClose: () => void; readOnly?: boolean }) {
   const { state, dispatch } = useStore()
   const nextN = (pid: string) => Math.max(0, ...sel.clientPaymentsForProject(state, pid).map(c => c.n)) + 1
   const initPid = project?.id || cobro?.projectId || ''
@@ -33,9 +33,10 @@ export function CobroForm({ project, cobro, onClose }: { project?: Project; cobr
   return (
     <Modal width={500} icon={cobro ? 'edit' : 'plus'} title={cobro ? 'Editar cobro' : 'Registrar cobro del cliente'} sub={proj ? `${proj.code} · ${sel.clientName(state, proj.client)}` : undefined} onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
-        <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar cobro</button>
+        <button className="btn btn-ghost" onClick={requestClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
+        {!readOnly && <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar cobro</button>}
       </>}>
+      <fieldset disabled={readOnly} className="contents">
       {proj && (
         <div className="bg-bg-1 border border-line rounded-[8px] p-3 mb-3.5 grid grid-cols-3 gap-2 text-center">
           <div><div className="label-k">Total venta</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(total)}</div></div>
@@ -70,6 +71,7 @@ export function CobroForm({ project, cobro, onClose }: { project?: Project; cobr
           <FileField label="" value={c.file || ''} path={c.filePath} folder={`client_payments/${c.projectId || 'nuevos'}`} onChange={v => setC(s => ({ ...s, file: v.name, filePath: v.path }))} accept=".pdf,.jpg,.jpeg,.png" />
         </Field>
       </div>
+      </fieldset>
       {guard}
     </Modal>
   )
@@ -186,6 +188,7 @@ export function ServiceRow({ label, supplierId, budget, cost, state }: { label: 
 /* ---------- Project detail drawer ---------- */
 export function ProjectDetail({ project, onClose, onEdit }: { project: Project; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin editar/cobrar/mover etapa
   const p = state.projects.find(x => x.id === project.id) || project
   const client = sel.client(state, p.client)
   const seller = sel.seller(state, p.seller)
@@ -228,8 +231,8 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
             onClick={() => dispatch({ type: 'RECALC_COMMISSIONS', id: p.id })}><Icon name="commissions" size={15} /> Recalcular comisiones</button>
         )}
         <div className="flex-1"></div>
-        {/* Avanzar de etapa (confirmar/mover) solo para roles con gestión, no para Ventas. */}
-        {state.currentUser?.role !== 'ventas' && <MoveStage project={p} />}
+        {/* Avanzar de etapa (confirmar/mover) solo para roles con gestión, no para Ventas ni Dirección. */}
+        {state.currentUser?.role !== 'ventas' && !readOnly && <MoveStage project={p} />}
       </>}>
 
       {/* stage stepper full */}
@@ -392,7 +395,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
       <div className="mt-5">
         <div className="spread mb-2">
           <span className="label-k">Cobros del cliente</span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setCobro({})}><Icon name="plus" size={13} /> Registrar cobro</button>
+          {!readOnly && <button className="btn btn-ghost btn-sm" onClick={() => setCobro({})}><Icon name="plus" size={13} /> Registrar cobro</button>}
         </div>
         <div className="grid grid-cols-3 gap-3 mb-3">
           <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Total venta (c/IVA)</div><div className="font-display font-bold text-[16px] mt-0.5">{fmtMoney(ventaTotal)}</div></div>
@@ -414,10 +417,10 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
                     <td className="num">{fmtMoney(c.amount)}</td>
                     <td className="num text-[12px]">{fmtMoney(acum)}<div className="meta">de {fmtMoney(ventaTotal)}</div></td>
                     <td>{cobroBadge(c.status)}</td>
-                    <td><div className="flex gap-1 justify-end">
+                    <td>{!readOnly && <div className="flex gap-1 justify-end">
                       <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setCobro(c)}><Icon name="edit" size={13} /></button>
                       <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => dispatch({ type: 'DELETE_CLIENT_PAYMENT', id: c.id })}><Icon name="trash" size={13} /></button>
-                    </div></td>
+                    </div>}</td>
                   </tr>
                 ) })}
               </tbody>
@@ -426,7 +429,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
         )}
       </div>
 
-      {cobro && <CobroForm project={p} cobro={'id' in cobro ? cobro : undefined} onClose={() => setCobro(null)} />}
+      {cobro && <CobroForm project={p} cobro={'id' in cobro ? cobro : undefined} onClose={() => setCobro(null)} readOnly={readOnly} />}
     </Modal>
   )
 }

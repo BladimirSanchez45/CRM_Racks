@@ -2,7 +2,7 @@
 //  PROJECTS — Kanban board (drag + menu) + Table view
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr } from '../../core/data'
+import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion } from '../../core/data'
 import type { AppState } from '../../core/types'
 import { StageBadge, Seg, Empty, Badge, Avatar, Select } from '../../core/ui'
 import { ProjectDetail, ProjectForm } from './project_views'
@@ -218,6 +218,7 @@ export function ProjectsPage() {
   const { state } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
+  const isDir = isDireccion(me?.role)   // dirección: solo lectura (sin registrar ni mover)
   // Ventas solo ve SUS proyectos (donde es el vendedor).
   const mine = isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects
   const [view, setView] = React.useState('kanban')
@@ -249,7 +250,7 @@ export function ProjectsPage() {
         </div>
         <div className="flex gap-2.5 items-center">
           <Seg value={view} onChange={setView} options={[{ value: 'kanban', icon: 'kanban', label: 'Tablero' }, { value: 'table', icon: 'list', label: 'Tabla' }]} />
-          <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Registrar venta</button>
+          {!isDir && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Registrar venta</button>}
         </div>
       </div>
 
@@ -274,7 +275,7 @@ export function ProjectsPage() {
         {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', stage: '', client: '', supplier: '' })}><Icon name="close" size={13} /> Limpiar</button>}
       </div>
 
-      {view === 'kanban' ? <Kanban projects={filtered} onOpen={openDetail} canMove={!isVentas} /> : <ProjectsTable projects={filtered} onOpen={openDetail} />}
+      {view === 'kanban' ? <Kanban projects={filtered} onOpen={openDetail} canMove={!isVentas && !isDir} /> : <ProjectsTable projects={filtered} onOpen={openDetail} />}
 
       {detail && !editing && <ProjectDetail project={detail} onClose={() => setDetail(null)} onEdit={() => setEditing(true)} />}
       {detail && editing && <ProjectForm project={state.projects.find(x => x.id === detail.id)} onClose={() => { setEditing(false) }} />}

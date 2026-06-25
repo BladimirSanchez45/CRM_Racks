@@ -5,7 +5,7 @@
 //         → (logística) Programado → Pagado
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, fmtDate, TODAY_ISO, isAdminRole } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, fmtDate, TODAY_ISO, isAdminRole, isDireccion } from '../../core/data'
 import { signedDocUrl } from '../../core/api'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
@@ -135,6 +135,7 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
 function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: InternalPayment; onEdit: () => void; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const isAdmin = isAdminRole(state.currentUser?.role)
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin acciones (solo descargar)
   const [reject, setReject] = React.useState(false)
   const [reason, setReason] = React.useState('')
   const [confirmDel, setConfirmDel] = React.useState(false)
@@ -163,7 +164,7 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
   const waDigits = (supplier?.phone || '').replace(/\D/g, '')
   const waUrl = waDigits ? `https://wa.me/${waDigits.length === 10 ? '52' + waDigits : waDigits}` : null
 
-  const editable = payment.status === 'Pendiente'
+  const editable = payment.status === 'Pendiente' && !readOnly
   const showComprobante = payment.status === 'Aprobado' || payment.status === 'Programado' || payment.status === 'Pagado'
 
   return (
@@ -173,20 +174,20 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
         {editable && <button className="btn btn-danger" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /> Eliminar</button>}
         <div className="flex-1"></div>
         {/* Acciones del ADMIN: aprobar / rechazar mientras está pendiente */}
-        {isAdmin && payment.status === 'Pendiente' && (<>
+        {!readOnly && isAdmin && payment.status === 'Pendiente' && (<>
           <button className="btn btn-ghost" onClick={() => setReject(true)}><Icon name="close" size={14} /> Rechazar</button>
           <button className="btn btn-primary" onClick={() => dispatch({ type: 'DECIDE_INTERNAL_PAYMENT', id: payment.id, approve: true })}><Icon name="check" size={15} /> Aprobar</button>
         </>)}
         {/* Acciones de LOGÍSTICA tras la aprobación */}
-        {payment.status === 'Aprobado' && (
+        {!readOnly && payment.status === 'Aprobado' && (
           <button className="btn btn-primary" onClick={() => setStatus('Programado', { scheduledDate: payment.scheduledDate || TODAY_ISO })}><Icon name="calendar" size={15} /> Programar pago</button>
         )}
-        {(payment.status === 'Aprobado' || payment.status === 'Programado') && (
+        {!readOnly && (payment.status === 'Aprobado' || payment.status === 'Programado') && (
           <button className={'btn btn-primary' + (!hasComprobante ? ' opacity-50' : '')} disabled={!hasComprobante}
             title={!hasComprobante ? 'Sube el comprobante de pago para liberar' : undefined}
             onClick={() => setStatus('Pagado')}><Icon name="check" size={15} /> Marcar pagado</button>
         )}
-        {(payment.status === 'Aprobado' || payment.status === 'Programado') && (
+        {!readOnly && (payment.status === 'Aprobado' || payment.status === 'Programado') && (
           <button className="btn btn-ghost" onClick={() => setStatus('Cancelado')}>Cancelar pago</button>
         )}
       </>}>
@@ -227,8 +228,8 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
             Comprobante de pago
             {!hasComprobante && payment.status !== 'Pagado' && <span className="text-tx-3 font-normal"> · requerido para marcar pagado</span>}
           </div>
-          <FileField label="" value={payment.comprobante || ''} path={payment.comprobantePath}
-            folder={`internal_payments/${payment.id}`} onChange={setComprobante} accept=".pdf,.jpg,.jpeg,.png" />
+          {!readOnly && <FileField label="" value={payment.comprobante || ''} path={payment.comprobantePath}
+            folder={`internal_payments/${payment.id}`} onChange={setComprobante} accept=".pdf,.jpg,.jpeg,.png" />}
           {hasComprobante && (
             <div className="flex gap-2 mt-2">
               <button className="btn btn-sm btn-ghost" onClick={downloadComprobante}><Icon name="download" size={13} /> Descargar</button>
@@ -260,6 +261,7 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
 
 export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string | null; onConsumed?: () => void } = {}) {
   const { state } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: solo lectura
   const [detail, setDetail] = React.useState<InternalPayment | null>(null)
   const [form, setForm] = React.useState<InternalPayment | {} | null>(null)
   const [fStatus, setFStatus] = React.useState('')
@@ -287,7 +289,7 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Pagos internos</h2><span className="sub">Solicitudes con aprobación del administrador</span></div>
-        <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Solicitar pago</button>
+        {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Solicitar pago</button>}
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">

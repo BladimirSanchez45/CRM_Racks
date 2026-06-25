@@ -19,6 +19,9 @@ const KIND_ICON: Record<NotificationKind, IconName> = {
   project_paid: 'check',
   internal_payment_requested: 'money',
   internal_payment_decided: 'money',
+  movements_submitted: 'box',
+  movement_decided: 'box',
+  movement_changed: 'box',
 }
 
 /** Fecha relativa amigable ("hace 5 min"). */
@@ -34,7 +37,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('es-MX')
 }
 
-export function NotificationsBell({ onOpenProject, onOpenInternalPayment }: { onOpenProject: (p: Project) => void; onOpenInternalPayment?: (id: string) => void }) {
+export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpenMovements }: { onOpenProject: (p: Project) => void; onOpenInternalPayment?: (id: string) => void; onOpenMovements?: (id: string | null) => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
   const [open, setOpen] = React.useState(false)
@@ -88,6 +91,8 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment }: { on
   const isIP = detail?.kind === 'internal_payment_requested' || detail?.kind === 'internal_payment_decided'
   const ip = detail?.internalPaymentId ? state.internalPayments.find(p => p.id === detail.internalPaymentId) : undefined
   const ipProject = ip?.projectId ? state.projects.find(p => p.id === ip.projectId) : undefined
+  // Notificaciones de movimientos: todas llevan movementListId (abren esa lista).
+  const isMov = detail?.kind === 'movements_submitted' || detail?.kind === 'movement_decided' || detail?.kind === 'movement_changed'
 
   return (
     <>
@@ -137,7 +142,7 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment }: { on
       )}
 
       {detail && (
-        <Modal width={460} icon={isIP ? 'money' : 'bell'} title={detail.title} sub={timeAgo(detail.createdAt)} onClose={() => setDetail(null)}
+        <Modal width={460} icon={isIP ? 'money' : isMov ? 'box' : 'bell'} title={detail.title} sub={timeAgo(detail.createdAt)} onClose={() => setDetail(null)}
           footer={<>
             <button className="btn btn-ghost" onClick={() => setDetail(null)}>Cerrar</button>
             <div className="flex-1"></div>
@@ -146,7 +151,12 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment }: { on
                 <Icon name="money" size={15} /> Ver pago
               </button>
             )}
-            {!isIP && project && (
+            {isMov && onOpenMovements && (
+              <button className="btn btn-primary" onClick={() => { onOpenMovements(detail.movementListId ?? null); setDetail(null) }}>
+                <Icon name="box" size={15} /> Ver lista
+              </button>
+            )}
+            {!isIP && !isMov && project && (
               <button className="btn btn-primary" onClick={() => { onOpenProject(project); setDetail(null) }}>
                 <Icon name="kanban" size={15} /> Ver proyecto
               </button>

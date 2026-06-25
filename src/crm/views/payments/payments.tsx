@@ -2,7 +2,7 @@
 //  PAGOS — réplica de la hoja "Pagos" del Excel (abonos por OC)
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, TODAY_ISO } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, TODAY_ISO, isDireccion } from '../../core/data'
 import { Modal, Field, Input, Select, MoneyInput, PaymentBadge, Empty, KPI, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Payment, PaymentInput, PaymentStatus } from '../../core/types'
@@ -20,7 +20,7 @@ type PaymentFormState = {
   status: PaymentStatus
   comments: string
 }
-function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => void }) {
+function PaymentForm({ payment, onClose, readOnly }: { payment?: Payment; onClose: () => void; readOnly?: boolean }) {
   const { state, dispatch } = useStore()
   const [p, setP] = React.useState<PaymentFormState>(() => payment ? { ...payment } : {
     orderId: '', n: 1, date: TODAY_ISO, amount: '', method: '', status: 'Programado', comments: '',
@@ -44,13 +44,14 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
   const pagado = pagadoAntes + (p.status === 'Pagado' ? (+p.amount || 0) : 0)
   const saldoRestante = total - pagado
   return (
-    <Modal width={520} icon={payment ? 'edit' : 'plus'} title={payment ? 'Editar abono' : 'Nuevo abono'} onClose={requestClose}
+    <Modal width={520} icon={readOnly ? 'money' : payment ? 'edit' : 'plus'} title={readOnly ? 'Detalle del abono' : payment ? 'Editar abono' : 'Nuevo abono'} onClose={requestClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
-        <button className="btn btn-danger" style={{ visibility: payment ? 'visible' : 'hidden' }} onClick={() => { if (payment) dispatch({ type: 'DELETE_PAYMENT', id: payment.id }); onClose() }}><Icon name="trash" size={14} /> Eliminar</button>
+        <button className="btn btn-ghost" onClick={requestClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
+        {!readOnly && <button className="btn btn-danger" style={{ visibility: payment ? 'visible' : 'hidden' }} onClick={() => { if (payment) dispatch({ type: 'DELETE_PAYMENT', id: payment.id }); onClose() }}><Icon name="trash" size={14} /> Eliminar</button>}
         <div className="flex-1"></div>
-        <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
+        {!readOnly && <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>}
       </>}>
+      <fieldset disabled={readOnly} className="contents">
       {order && (
         <div className="bg-bg-1 border border-line rounded-[8px] p-3 mb-3.5 grid grid-cols-3 gap-2 text-center">
           <div><div className="label-k">Monto OC</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(total)}</div></div>
@@ -76,6 +77,7 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
         <Field label="Método / Ref." span={2}><Input value={p.method} onChange={e => set('method', e.target.value)} placeholder="Transferencia, cheque, folio…" /></Field>
         <Field label="Comentarios" span={2}><Input value={p.comments} onChange={e => set('comments', e.target.value)} /></Field>
       </div>
+      </fieldset>
       {guard}
     </Modal>
   )
@@ -83,6 +85,7 @@ function PaymentForm({ payment, onClose }: { payment?: Payment; onClose: () => v
 
 export function PaymentsPage() {
   const { state } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: solo lectura
   const [form, setForm] = React.useState<Payment | {} | null>(null)
   const [fStatus, setFStatus] = React.useState('')
 
@@ -106,7 +109,7 @@ export function PaymentsPage() {
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Pagos</h2><span className="sub">Abonos a órdenes de compra</span></div>
-        <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo abono</button>
+        {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo abono</button>}
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">
@@ -152,7 +155,7 @@ export function PaymentsPage() {
         {rows.length === 0 && <Empty icon="money">Sin abonos registrados</Empty>}
       </div>
 
-      {form && <PaymentForm payment={'id' in form ? form : undefined} onClose={() => setForm(null)} />}
+      {form && <PaymentForm payment={'id' in form ? form : undefined} onClose={() => setForm(null)} readOnly={readOnly} />}
     </div>
   )
 }

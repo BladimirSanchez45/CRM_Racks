@@ -2,7 +2,7 @@
 //  COBRANZA — estado de cobro por PROYECTO (una fila por proyecto)
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, isDireccion } from '../../core/data'
 import { Modal, Badge, Empty, KPI } from '../../core/ui'
 import { CobroForm } from '../projects/project_views'
 import { Icon } from '../../core/icons'
@@ -18,6 +18,7 @@ const estadoDe = (total: number, cobrado: number): Estado =>
 /* ---- Detalle de cobranza de un proyecto (registrar/ver cobros) ---- */
 function CobranzaDetail({ project, onClose }: { project: Project; onClose: () => void }) {
   const { state, dispatch } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin registrar/editar cobros
   const p = state.projects.find(x => x.id === project.id) || project
   const cobros = sel.clientPaymentsForProject(state, p.id)
   const total = sel.projectTotalConIva(p)
@@ -28,7 +29,7 @@ function CobranzaDetail({ project, onClose }: { project: Project; onClose: () =>
 
   return (
     <Modal width={720} icon="download" title={`${p.code} · ${sel.clientName(state, p.client)}`} sub="Cobranza del proyecto" onClose={onClose}
-      footer={<><div className="flex-1"></div><button className="btn btn-primary" onClick={() => setCobro({})}><Icon name="plus" size={15} /> Registrar cobro</button></>}>
+      footer={<><div className="flex-1"></div>{!readOnly && <button className="btn btn-primary" onClick={() => setCobro({})}><Icon name="plus" size={15} /> Registrar cobro</button>}</>}>
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Monto total (c/IVA)</div><div className="font-display font-bold text-[17px] mt-0.5">{fmtMoney(total)}</div></div>
         <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Cobrado</div><div className="font-display font-bold text-[17px] mt-0.5 text-ok">{fmtMoney(cobrado)}</div></div>
@@ -53,17 +54,17 @@ function CobranzaDetail({ project, onClose }: { project: Project; onClose: () =>
                   <td className="num text-[12px]">{fmtMoney(acumOf(c))}<div className="meta">de {fmtMoney(total)}</div></td>
                   <td className="text-tx-1 text-[12px]">{c.method || '—'}</td>
                   <td><Badge color={COBRO_COLOR[c.status]}>{c.status}</Badge></td>
-                  <td><div className="flex gap-1 justify-end">
+                  <td>{!readOnly && <div className="flex gap-1 justify-end">
                     <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setCobro(c)}><Icon name="edit" size={13} /></button>
                     <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => dispatch({ type: 'DELETE_CLIENT_PAYMENT', id: c.id })}><Icon name="trash" size={13} /></button>
-                  </div></td>
+                  </div>}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {cobro && <CobroForm project={p} cobro={'id' in cobro ? cobro : undefined} onClose={() => setCobro(null)} />}
+      {cobro && <CobroForm project={p} cobro={'id' in cobro ? cobro : undefined} onClose={() => setCobro(null)} readOnly={readOnly} />}
     </Modal>
   )
 }

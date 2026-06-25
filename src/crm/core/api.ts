@@ -7,7 +7,7 @@ import { supabase } from './supabase'
 import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
-  Remision, InternalPayment,
+  Remision, InternalPayment, Movement, MovementList, AppSettings,
 } from './types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -423,6 +423,77 @@ export async function fetchInternalPayments(): Promise<InternalPayment[]> {
 export const saveInternalPayment = (p: InternalPayment) => upsert('internal_payments', internalPaymentRow(p))
 export const deleteInternalPayment = (id: string) => removeRow('internal_payments', id)
 
+/* ---- Listas de movimientos "por fuera" (cada jueves = una lista) ---- */
+function mapMovementList(r: any): MovementList {
+  return {
+    id: r.id, name: r.name ?? '', date: r.date ?? '', bankBalance: Number(r.bank_balance ?? 0),
+    status: r.status, createdBy: r.created_by ?? '', createdAt: r.created_at,
+    ...(r.sent_at ? { sentAt: r.sent_at } : {}),
+    ...(r.authorized_by ? { authorizedBy: r.authorized_by } : {}),
+    ...(r.decided_at ? { decidedAt: r.decided_at } : {}),
+    ...(r.reject_reason ? { rejectReason: r.reject_reason } : {}),
+    ...(r.comprobante ? { comprobante: r.comprobante } : {}),
+    ...(r.comprobante_path ? { comprobantePath: r.comprobante_path } : {}),
+  }
+}
+function movementListRow(l: MovementList): Record<string, unknown> {
+  return {
+    id: l.id, name: l.name, date: orNull(l.date), bank_balance: l.bankBalance, status: l.status,
+    created_by: l.createdBy || null, sent_at: l.sentAt ?? null,
+    authorized_by: l.authorizedBy ?? null, decided_at: l.decidedAt ?? null,
+    reject_reason: orNull(l.rejectReason),
+    comprobante: l.comprobante ?? null, comprobante_path: l.comprobantePath ?? null,
+    created_at: l.createdAt,
+  }
+}
+export async function fetchMovementLists(): Promise<MovementList[]> {
+  const { data, error } = await supabase.from('movement_lists').select('*').order('date', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapMovementList)
+}
+export const saveMovementList = (l: MovementList) => upsert('movement_lists', movementListRow(l))
+export const deleteMovementList = (id: string) => removeRow('movement_lists', id)
+
+/* ---- Movimientos individuales (pertenecen a una lista) ---- */
+function mapMovement(r: any): Movement {
+  return {
+    id: r.id, listId: r.list_id ?? '', date: r.date ?? '', description: r.description ?? '', amount: Number(r.amount ?? 0),
+    status: r.status, createdBy: r.created_by ?? '', createdAt: r.created_at,
+    ...(r.project_id ? { projectId: r.project_id } : {}),
+    ...(r.authorized_by ? { authorizedBy: r.authorized_by } : {}),
+    ...(r.decided_at ? { decidedAt: r.decided_at } : {}),
+    ...(r.reject_reason ? { rejectReason: r.reject_reason } : {}),
+    ...(r.changed_by_direccion ? { changedByDireccion: r.changed_by_direccion } : {}),
+  }
+}
+function movementRow(m: Movement): Record<string, unknown> {
+  return {
+    id: m.id, list_id: m.listId || null, date: orNull(m.date), description: m.description, amount: m.amount,
+    project_id: m.projectId ?? null, status: m.status,
+    created_by: m.createdBy || null, authorized_by: m.authorizedBy ?? null,
+    decided_at: m.decidedAt ?? null, reject_reason: orNull(m.rejectReason),
+    changed_by_direccion: m.changedByDireccion ?? null,
+    created_at: m.createdAt,
+  }
+}
+export async function fetchMovements(): Promise<Movement[]> {
+  const { data, error } = await supabase.from('movements').select('*').order('date', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapMovement)
+}
+export const saveMovement = (m: Movement) => upsert('movements', movementRow(m))
+export const deleteMovement = (id: string) => removeRow('movements', id)
+
+/* ---- Configuración global (clave/valor) — p. ej. saldo bancario ---- */
+export async function fetchSettings(): Promise<AppSettings> {
+  const { data, error } = await supabase.from('app_settings').select('*')
+  if (error) throw error
+  const map = Object.fromEntries((data ?? []).map((r: any) => [r.key, r.value]))
+  return { bankBalance: Number(map['bank_balance'] ?? 0) }
+}
+export const saveSetting = (key: string, value: unknown) =>
+  upsert('app_settings', { key, value, updated_at: new Date().toISOString() })
+
 /* ---- Actividad ---- */
 function mapActivity(r: any): Activity {
   return { id: r.id, t: r.t, icon: r.icon, who: r.who, txt: r.txt, tgt: r.tgt ?? '', kind: r.kind }
@@ -522,6 +593,8 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   sellers: mapSeller,
   remisiones: mapRemision,
   internal_payments: mapInternalPayment,
+  movement_lists: mapMovementList,
+  movements: mapMovement,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -593,11 +666,11 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchActivity(), fetchNotifications(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, settings, activity, notifications }
 }
