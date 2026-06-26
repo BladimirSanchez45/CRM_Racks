@@ -41,7 +41,7 @@ export function LoginPage() {
         </div>
         <div className="login-head">
           <h1>Iniciar sesión</h1>
-          <p>CC Racks Industriales · Operaciones</p>
+          <p>CC RACKS MEXICO S.A. DE C.V · Operaciones</p>
         </div>
 
         {error && <div className="login-error"><Icon name="alert" size={15} /> <span>{error}</span></div>}
