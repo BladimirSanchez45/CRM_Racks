@@ -24,8 +24,9 @@ import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
 import { LoginPage } from './views/login/login'
 import type { Project, Role } from './core/types'
-import strakkLogo from '../assets/logos/strakk_logo.png'
+// import strakkLogo from '../assets/logos/strakk_logo.png'
 import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
+import cclogo from '../assets/logos/CCLOGO.png'
 
 type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
@@ -109,8 +110,8 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
     <aside className="sidebar">
       <div className="brand flex-col items-stretch gap-2">
         <div className="flex items-center justify-center px-1.5 pt-1">
-          <img src={strakkLogo} alt="STRAKK CRM" className="brand-logo brand-logo-dark" />
-          <img src={strakkLogoBlanco} alt="STRAKK CRM" className="brand-logo brand-logo-light" />
+          <img src={cclogo} alt="CC RACKS MEXICO" className="brand-logo brand-logo-dark" />
+          <img src={cclogo} alt="CC RACKS MEXICO" className="brand-logo brand-logo-light" />
         </div>
       </div>
       <nav className="nav">
@@ -209,7 +210,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
           <button className="icon-btn" onClick={() => setCollapsed(c => !c)} title="Colapsar menú"><Icon name="menu" size={17} /></button>
           <div>
             <h1>{TITLES[route]}</h1>
-            <div className="crumb">CC Racks Industriales</div>
+            <div className="crumb">CC RACKS MEXICO S.A. DE C.V</div>
           </div>
           <div className="flex-1"></div>
           {me && <span className={'badge-role mr-1 role-' + me.role}>{isSuperadmin(me.role) ? 'Super' : roleLabel(me.role)}</span>}
