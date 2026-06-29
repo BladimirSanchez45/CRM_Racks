@@ -73,7 +73,9 @@ export function Kanban({ projects, onOpen, canMove = true }: { projects: Project
   }
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-3 min-h-[400px]">
+    // Alto acotado al viewport (resta topbar + título + filtros) para que el tablero
+    // no crezca sin fin con muchos proyectos: cada columna hace su propio scroll.
+    <div className="flex gap-3 overflow-x-auto pb-3 h-[calc(100vh-230px)] min-h-[400px]">
       {cols.map(({ stage, items }) => {
         const total = items.reduce((a, p) => a + sel.projectTotalConIva(p), 0)
         const isOver = over === stage.id
@@ -82,9 +84,9 @@ export function Kanban({ projects, onOpen, canMove = true }: { projects: Project
             onDragOver={(e) => { e.preventDefault(); setOver(stage.id) }}
             onDragLeave={(e) => { if (e.currentTarget === e.target) setOver(null) }}
             onDrop={() => drop(stage.id)}
-            className="w-[244px] flex-none flex flex-col">
-            {/* column header */}
-            <div className="bg-bg-1 py-[9px] px-[11px] border border-line" style={{ borderTop: `2px solid ${stage.color}` }}>
+            className="w-[244px] flex-none flex flex-col min-h-0">
+            {/* column header (fijo: no se desplaza al scrollear la columna) */}
+            <div className="bg-bg-1 py-[9px] px-[11px] border border-line shrink-0" style={{ borderTop: `2px solid ${stage.color}` }}>
               <div className="flex items-center gap-[7px]">
                 <span className="font-mono text-[10px] font-bold" style={{ color: stage.color }}>{String(stage.n).padStart(2,'0')}</span>
                 <span className="font-bold text-[12.5px] font-display flex-1">{stage.short}</span>
@@ -92,8 +94,8 @@ export function Kanban({ projects, onOpen, canMove = true }: { projects: Project
               </div>
               {total > 0 && <div className="mono text-[10px] text-tx-3 mt-1">{fmtK(total)}</div>}
             </div>
-            {/* drop zone */}
-            <div className="flex-1 flex flex-col gap-[9px] p-[9px] border border-line border-t-0 min-h-[120px]"
+            {/* drop zone (scroll vertical propio por columna) */}
+            <div className="flex-1 flex flex-col gap-[9px] p-[9px] border border-line border-t-0 min-h-[120px] overflow-y-auto"
               style={{
                 background: isOver ? 'var(--acc-ghost)' : 'var(--bg-0)',
                 outline: isOver ? '1px dashed var(--acc)' : 'none', outlineOffset: -4,

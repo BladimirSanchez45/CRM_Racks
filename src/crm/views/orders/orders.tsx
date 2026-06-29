@@ -31,20 +31,35 @@ const ocDesc = (state: AppState, o: Order) => {
   return o.description
 }
 
-/* ---- Folio de OC por proveedor: cada proveedor lleva su propia secuencia.
-   Formato: OC-<PREFIJO>-<n> (p.ej. OC-IR-003). El prefijo sale del campo
-   "prefijo" del proveedor; si no tiene, se deriva de su nombre. La secuencia es
-   el mayor consecutivo ya usado por ese proveedor + 1 (robusto ante borrados). */
-const supplierPrefix = (s?: { prefijo?: string; name?: string }) =>
-  ((s?.prefijo || s?.name || 'OC').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4)) || 'OC'
+/* ---- Folio de OC por proveedor: cada proveedor lleva SU propia secuencia con SU
+   propio formato, tal como lo numeran ellos (p.ej. José Zavala usa "JZ-2238" y
+   Metálicos Guzmán "MG-00178"). El siguiente folio CONTINÚA la última OC de ese
+   proveedor conservando su prefijo y su cantidad de dígitos (ceros a la izquierda).
+   Si el proveedor aún no tiene OC, se sugiere "<PREFIJO>-" (prefijo del catálogo)
+   para que el usuario escriba el consecutivo inicial. El campo es EDITABLE: siempre
+   se puede corregir o escribir el siguiente a mano. */
+const supplierPrefix = (s?: { prefijo?: string; name?: string; notes?: string }) => {
+  // Prefijo: campo "prefijo" del catálogo; si no, el de las notas ("Prefijo de factura: JZ"); si no, del nombre.
+  const fromNotes = /prefijo de factura:\s*([A-Za-z0-9]+)/i.exec(s?.notes || '')?.[1]
+  return ((s?.prefijo || fromNotes || s?.name || 'OC').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)) || 'OC'
+}
+/** Descompone un folio en prefijo + número final + ancho, para conservar el formato. */
+const parseFolio = (folio: string) => {
+  const m = /^(.*?)(\d+)\s*$/.exec((folio || '').trim())
+  return m ? { prefix: m[1], n: +m[2], width: m[2].length } : null
+}
 const nextOcNumber = (state: AppState, supplierId: string) => {
-  const sup = sel.supplier(state, supplierId)
-  const prefix = supplierPrefix(sup)
-  const seqs = state.orders
-    .filter(o => o.supplierId === supplierId)
-    .map(o => { const m = /(\d+)\s*$/.exec(o.number || ''); return m ? +m[1] : 0 })
-  const next = (seqs.length ? Math.max(...seqs) : 0) + 1
-  return `OC-${prefix}-${String(next).padStart(3, '0')}`
+  // Toma la OC del proveedor con el número final más alto y le suma 1, conservando
+  // su prefijo y su ancho (JZ-2238 → JZ-2239, MG-00178 → MG-00179).
+  let best: { prefix: string; n: number; width: number } | null = null
+  for (const o of state.orders) {
+    if (o.supplierId !== supplierId) continue
+    const p = parseFolio(o.number || '')
+    if (p && (!best || p.n > best.n)) best = p
+  }
+  if (best) return `${best.prefix}${String(best.n + 1).padStart(best.width, '0')}`
+  // Sin OC previa: prefijo del catálogo + guion; el usuario completa el número.
+  return `${supplierPrefix(sel.supplier(state, supplierId))}-`
 }
 
 /* ---- Carga una imagen (logo) para incrustarla en el PDF; null si no existe ---- */
@@ -422,6 +437,8 @@ export function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose:
   const needsAnticipo = !editing && !!o.projectId && !hasAnticipo
   const [showCobro, setShowCobro] = React.useState(false)
   const { requestClose, guard } = useUnsavedGuard(o, onClose)
+  // Folio repetido para el MISMO proveedor (ignora la propia OC al editar).
+  const dupFolio = !!o.number && state.orders.some(x => x.id !== o.id && x.supplierId === o.supplierId && (x.number || '').trim().toLowerCase() === o.number.trim().toLowerCase())
   const valid = o.number && o.supplierId && (hasItems ? total > 0 : !!o.amount) && !needsAnticipo
   const [generating, setGenerating] = React.useState(false)
   // Genera el PDF real de la OC, lo SUBE como "OC firmada", guarda la OC con ese
@@ -503,8 +520,12 @@ export function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose:
         </div>
       )}
       <div className="grid grid-cols-2 gap-3.5">
-        {/* Folio automático y NO editable: se asigna por proveedor (OC-<PREFIJO>-<n>). */}
-        <Field label="No. de OC"><Input className="input mono" value={o.number} readOnly tabIndex={-1} placeholder="Se genera al elegir proveedor" style={{ opacity: 0.7, cursor: 'not-allowed' }} /></Field>
+        {/* Folio EDITABLE por proveedor: se autosugiere el siguiente (continúa la
+            secuencia del proveedor: JZ-2239, MG-00179…) pero se puede escribir a mano. */}
+        <Field label="No. de OC">
+          <Input className="input mono" value={o.number} onChange={e => set('number', e.target.value)} placeholder="Se sugiere al elegir proveedor (ej. JZ-2239)" />
+          {dupFolio && <div className="text-[11px] mt-1" style={{ color: 'var(--warn)' }}>Ya existe una OC con este folio para este proveedor.</div>}
+        </Field>
         <Field label="Fecha OC"><Input type="date" value={o.date} onChange={e => set('date', e.target.value)} /></Field>
         <Field label="Proyecto asociado" span={2}>
           <Select value={o.projectId || ''} onChange={e => onPickProject(e.target.value)}>
