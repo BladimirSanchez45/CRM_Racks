@@ -25,7 +25,7 @@ import { SettingsPage } from './views/settings/settings'
 import { LoginPage } from './views/login/login'
 import type { Project, Role } from './core/types'
 // import strakkLogo from '../assets/logos/strakk_logo.png'
-import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
+//import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
 type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
