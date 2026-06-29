@@ -318,6 +318,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
         <div className="flex flex-wrap gap-2">
           {DOC_LABELS.map(d => <DocChip key={d.key} doc={p.docs[d.key]} label={d.label} />)}
           {(p.docs.ordenCompra || []).map((oc, i) => <DocChip key={'oc' + i} doc={oc} label={`Orden de compra ${i + 1}`} />)}
+          <DocChip doc={p.docs.excel} label="Excel" />
         </div>
       </div>
 
@@ -606,10 +607,33 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
 
       <div className="mt-4">
         <div className="label-k mb-2">Documentos</div>
-        <div className="grid grid-cols-2 gap-3.5">
-          {DOC_LABELS.map(d => (
-            <FileField key={d.key} label={d.label} value={p.docs[d.key].name} path={p.docs[d.key].path} folder={docFolder} onChange={v => setDoc(d.key, v)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
-          ))}
+        {/* Dos columnas balanceadas (4 y 4): izquierda = docs impares + Excel; derecha = docs pares + Evidencia. */}
+        <div className="grid grid-cols-2 gap-3.5 items-start">
+          {/* Columna izquierda */}
+          <div className="flex flex-col gap-3.5">
+            {DOC_LABELS.filter((_, i) => i % 2 === 0).map(d => (
+              <FileField key={d.key} label={d.label} value={p.docs[d.key]?.name} path={p.docs[d.key]?.path} folder={docFolder} onChange={v => setDoc(d.key, v)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
+            ))}
+            <FileField label="Excel" value={p.docs.excel?.name} path={p.docs.excel?.path} folder={docFolder} onChange={v => setDoc('excel', v)} accept=".xlsx,.xls,.csv" />
+          </div>
+          {/* Columna derecha */}
+          <div className="flex flex-col gap-3.5">
+            {DOC_LABELS.filter((_, i) => i % 2 === 1).map(d => (
+              <FileField key={d.key} label={d.label} value={p.docs[d.key]?.name} path={p.docs[d.key]?.path} folder={docFolder} onChange={v => setDoc(d.key, v)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
+            ))}
+            <div className="field">
+              <label>Evidencia de obra terminada ({(p.docs.evidencia || []).length})</label>
+              <div className="flex flex-col gap-2">
+                {(p.docs.evidencia || []).map((ev, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0"><DocChip doc={ev} label={ev.name || `Evidencia ${i + 1}`} /></div>
+                    <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar" onClick={() => removeEvidencia(i)}><Icon name="trash" size={13} /></button>
+                  </div>
+                ))}
+                <FileField label="" value="" folder={`${docFolder}/evidencia`} onChange={addEvidencia} accept=".jpg,.jpeg,.png,.webp" />
+              </div>
+            </div>
+          </div>
         </div>
         {(p.docs.ordenCompra || []).length > 0 && (
           <div className="mt-3">
@@ -619,20 +643,7 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
             </div>
           </div>
         )}
-      </div>
-
-      <div className="mt-4">
-        <div className="label-k mb-2">Evidencia de obra terminada ({(p.docs.evidencia || []).length})</div>
-        <div className="grid grid-cols-2 gap-3.5">
-          {(p.docs.evidencia || []).map((ev, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <div className="flex-1 min-w-0"><DocChip doc={ev} label={ev.name || `Evidencia ${i + 1}`} /></div>
-              <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar" onClick={() => removeEvidencia(i)}><Icon name="trash" size={13} /></button>
-            </div>
-          ))}
-          <FileField label="" value="" folder={`${docFolder}/evidencia`} onChange={addEvidencia} accept=".jpg,.jpeg,.png,.webp" />
-        </div>
-        <div className="meta mt-1">Requisito para finalizar el proyecto: Carta fin de obra + al menos una imagen de evidencia.</div>
+        <div className="meta mt-2">Requisito para finalizar el proyecto: Carta fin de obra + al menos una imagen de evidencia.</div>
       </div>
 
       {guard}

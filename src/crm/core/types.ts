@@ -319,6 +319,7 @@ export interface ProjectDocs {
   finiquito: DocRef         // Comprobante de finiquito
   remision: DocRef          // Remisión de salida
   cartaFin: DocRef          // Carta fin de obra
+  excel?: DocRef            // Excel del proyecto (control / cotización en hoja de cálculo). Opcional.
   evidencia?: DocRef[]      // Imágenes de evidencia de obra terminada (varias). Requisito para finalizar.
 }
 

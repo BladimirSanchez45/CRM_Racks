@@ -126,6 +126,9 @@ export function DocPreview({ path, name, onClose }: { path: string; name: string
   }, [path])
   const isImg = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)
   const isPdf = /\.pdf$/i.test(name)
+  // Office (Excel/Word/PowerPoint): el navegador no los previsualiza; usamos el visor de Office Online.
+  const isOffice = /\.(xlsx?|docx?|pptx?)$/i.test(name)
+  const officeSrc = url ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}` : ''
   return (
     <Modal width={900} icon="doc" title={name} onClose={onClose}
       footer={url ? <a className="btn btn-ghost" href={url} target="_blank" rel="noreferrer"><Icon name="download" size={15} /> Abrir / Descargar</a> : <span></span>}>
@@ -134,6 +137,7 @@ export function DocPreview({ path, name, onClose }: { path: string; name: string
           : !url ? <div className="text-tx-3 text-[13px] py-12 text-center">Cargando…</div>
           : isImg ? <img src={url} alt={name} />
           : isPdf ? <iframe src={url} title={name} />
+          : isOffice ? <iframe src={officeSrc} title={name} />
           : <div className="text-tx-2 text-[13px] py-12 text-center">Sin vista previa para este tipo de archivo.<br /><a className="text-acc" href={url} target="_blank" rel="noreferrer">Descargar archivo</a></div>}
       </div>
     </Modal>
