@@ -2,7 +2,7 @@
 //  PROJECTS — Kanban board (drag + menu) + Table view
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion } from '../../core/data'
+import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion, isIngenieria } from '../../core/data'
 import type { AppState } from '../../core/types'
 import { StageBadge, Seg, Empty, Badge, Avatar, Select } from '../../core/ui'
 import { ProjectDetail, ProjectForm } from './project_views'
@@ -220,7 +220,8 @@ export function ProjectsPage() {
   const { state } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
-  const isDir = isDireccion(me?.role)   // dirección: solo lectura (sin registrar ni mover)
+  // dirección e ingeniería: solo lectura (sin registrar ni mover etapas).
+  const isDir = isDireccion(me?.role) || isIngenieria(me?.role)
   // Ventas solo ve SUS proyectos (donde es el vendedor).
   const mine = isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects
   const [view, setView] = React.useState('kanban')

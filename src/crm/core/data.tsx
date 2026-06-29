@@ -53,6 +53,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   logistica: 'Logística',
   almacen: 'Almacén',
   direccion: 'Dirección',
+  ingenieria: 'Ingeniería',
 }
 export const roleLabel = (role?: Role | null) => (role ? ROLE_LABELS[role] : '—')
 /** Acceso a nivel administrador (panel admin, gestión de usuarios). */
@@ -65,6 +66,8 @@ export const isVentasRole = (role?: Role | null) => role === 'ventas'
 export const isLogisticaRole = (role?: Role | null) => role === 'logistica'
 /** Rol Dirección: acceso de solo lectura a proyectos, OC, pagos, cobranza y pagos internos. */
 export const isDireccion = (role?: Role | null) => role === 'direccion'
+/** Rol Ingeniería: por ahora SOLO ve proyectos (solo lectura). Se ampliará después. */
+export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 
 /** Comisión bancaria fija sobre la lista de movimientos "por fuera" (total = subtotal × (1 + esto)). */
 export const COMISION_BANCARIA = 0.053

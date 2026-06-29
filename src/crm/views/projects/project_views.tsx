@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, canEditProject, isAdminRole, isDireccion } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -188,7 +188,7 @@ export function ServiceRow({ label, supplierId, budget, cost, state }: { label: 
 /* ---------- Project detail drawer ---------- */
 export function ProjectDetail({ project, onClose, onEdit }: { project: Project; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
-  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin editar/cobrar/mover etapa
+  const readOnly = isDireccion(state.currentUser?.role) || isIngenieria(state.currentUser?.role)   // dirección/ingeniería: ver sin editar/cobrar/mover etapa
   const p = state.projects.find(x => x.id === project.id) || project
   const client = sel.client(state, p.client)
   const seller = sel.seller(state, p.seller)
