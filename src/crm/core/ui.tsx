@@ -127,7 +127,8 @@ export function DocPreview({ path, name, onClose }: { path: string; name: string
   const isImg = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(name)
   const isPdf = /\.pdf$/i.test(name)
   // Office (Excel/Word/PowerPoint): el navegador no los previsualiza; usamos el visor de Office Online.
-  const isOffice = /\.(xlsx?|docx?|pptx?)$/i.test(name)
+  // Incluye .xlsm/.xlsb (Excel con macros / binario) además de los formatos estándar.
+  const isOffice = /\.(xlsx|xlsm|xlsb|xls|docx|doc|pptx|ppt)$/i.test(name)
   const officeSrc = url ? `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(url)}` : ''
   return (
     <Modal width={900} icon="doc" title={name} onClose={onClose}
