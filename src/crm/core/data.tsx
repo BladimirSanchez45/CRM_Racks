@@ -26,6 +26,7 @@ import type {
   InternalPayment,
   Movement,
   MovementList,
+  Campaign,
 } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
@@ -39,6 +40,7 @@ import {
   saveInternalPayment, deleteInternalPayment as apiDeleteInternalPayment,
   saveMovementList, deleteMovementList as apiDeleteMovementList,
   saveMovement, deleteMovement as apiDeleteMovement,
+  saveCampaign, deleteCampaign as apiDeleteCampaign,
   saveActivity,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
   subscribeToData,
@@ -214,7 +216,7 @@ export const regimenLabel = (code?: string) =>
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
-  movementLists: [], movements: [], settings: { bankBalance: 0 },
+  movementLists: [], movements: [], campaigns: [], settings: { bankBalance: 0 },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
@@ -288,6 +290,8 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_MOVEMENT_LIST': return { ...state, movementLists: state.movementLists.filter(l => l.id !== a.id), movements: state.movements.filter(m => m.listId !== a.id) }
     case 'UPSERT_MOVEMENT': return { ...state, movements: upsertBy(state.movements, a.movement) }
     case 'REMOVE_MOVEMENT': return { ...state, movements: state.movements.filter(m => m.id !== a.id) }
+    case 'UPSERT_CAMPAIGN': return { ...state, campaigns: upsertBy(state.campaigns, a.campaign) }
+    case 'REMOVE_CAMPAIGN': return { ...state, campaigns: state.campaigns.filter(c => c.id !== a.id) }
     case 'SET_SETTINGS': return { ...state, settings: a.settings }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
@@ -927,6 +931,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist(thunks); return
       }
 
+      case 'SAVE_CAMPAIGN': {
+        const isNew = !action.campaign.id || !s.campaigns.some(c => c.id === action.campaign.id)
+        const full: Campaign = {
+          ...(action.campaign as Campaign),
+          id: action.campaign.id ?? uid('cmp'),
+          createdBy: action.campaign.createdBy ?? s.currentUser?.id,
+          createdAt: action.campaign.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_CAMPAIGN', campaign: full })
+        const thunks: (() => Promise<void>)[] = [() => saveCampaign(full)]
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'trendUp', who: whoName(s), txt: `${isNew ? 'registró' : 'actualizó'} la campaña`, tgt: full.name, kind: 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        persist(thunks); return
+      }
+      case 'DELETE_CAMPAIGN': {
+        rawDispatch({ type: 'REMOVE_CAMPAIGN', id: action.id })
+        persist([() => apiDeleteCampaign(action.id)]); return
+      }
+
       case 'MARK_NOTIFICATION_READ': {
         const n = s.notifications.find(x => x.id === action.id); if (!n || n.read) return
         rawDispatch({ type: 'UPSERT_NOTIFICATION', notification: { ...n, read: true } })
@@ -1025,6 +1049,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'internal_payments': rawDispatch({ type: 'REMOVE_INTERNAL_PAYMENT', id: c.id }); break
           case 'movement_lists':  rawDispatch({ type: 'REMOVE_MOVEMENT_LIST', id: c.id }); break
           case 'movements':       rawDispatch({ type: 'REMOVE_MOVEMENT', id: c.id }); break
+          case 'campaigns':       rawDispatch({ type: 'REMOVE_CAMPAIGN', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -1040,6 +1065,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'internal_payments': rawDispatch({ type: 'UPSERT_INTERNAL_PAYMENT', payment: c.row }); break
           case 'movement_lists':  rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: c.row }); break
           case 'movements':       rawDispatch({ type: 'UPSERT_MOVEMENT', movement: c.row }); break
+          case 'campaigns':       rawDispatch({ type: 'UPSERT_CAMPAIGN', campaign: c.row }); break
         }
       }
     })

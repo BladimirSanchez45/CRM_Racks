@@ -412,6 +412,25 @@ export interface Notification {
   actorName?: string      // quién la originó
 }
 
+/** Anuncio dentro de una campaña de marketing. Toma un trozo del presupuesto total
+ *  de la campaña; el % es derivado (amount / campaign.budget). */
+export interface CampaignAd {
+  id: string
+  name: string            // nombre del anuncio (ej. "Anuncio 1", "WebAd Mezzanines")
+  amount: number          // presupuesto asignado al anuncio (MXN)
+}
+
+/** Campaña de marketing: presupuesto total repartido entre 1..n anuncios.
+ *  La ve el rol Marketing (y admin). */
+export interface Campaign {
+  id: string
+  name: string            // nombre de la campaña
+  budget: number          // presupuesto TOTAL de la campaña (MXN)
+  ads: CampaignAd[]       // anuncios que la componen (con su % del total)
+  createdBy?: string      // usuario que la registró
+  createdAt: string       // ISO
+}
+
 /** Estado global de la aplicación. */
 export interface AppState {
   projects: Project[]
@@ -426,6 +445,7 @@ export interface AppState {
   internalPayments: InternalPayment[]
   movementLists: MovementList[]
   movements: Movement[]
+  campaigns: Campaign[]
   settings: AppSettings
   activity: Activity[]
   notifications: Notification[]
@@ -465,6 +485,11 @@ export type MovementInput = Omit<Movement, 'id' | 'createdBy' | 'createdAt'> & {
   createdAt?: string
 }
 export type MovementListInput = Omit<MovementList, 'id' | 'createdBy' | 'createdAt'> & {
+  id?: string
+  createdBy?: string
+  createdAt?: string
+}
+export type CampaignInput = Omit<Campaign, 'id' | 'createdBy' | 'createdAt'> & {
   id?: string
   createdBy?: string
   createdAt?: string
@@ -509,6 +534,8 @@ export type Action =
   | { type: 'DELETE_MOVEMENT'; id: string }
   /** Decisión de dirección sobre un movimiento individual (autorizar/rechazar). */
   | { type: 'DECIDE_MOVEMENT'; id: string; approve: boolean; reason?: string }
+  | { type: 'SAVE_CAMPAIGN'; campaign: CampaignInput }
+  | { type: 'DELETE_CAMPAIGN'; id: string }
   | { type: 'MARK_NOTIFICATION_READ'; id: string }
   | { type: 'MARK_ALL_NOTIFICATIONS_READ' }
   | { type: 'LOGIN'; user: User }
@@ -544,6 +571,8 @@ export type StateAction =
   | { type: 'REMOVE_MOVEMENT_LIST'; id: string }
   | { type: 'UPSERT_MOVEMENT'; movement: Movement }
   | { type: 'REMOVE_MOVEMENT'; id: string }
+  | { type: 'UPSERT_CAMPAIGN'; campaign: Campaign }
+  | { type: 'REMOVE_CAMPAIGN'; id: string }
   | { type: 'SET_SETTINGS'; settings: AppSettings }
   | { type: 'PUSH_ACTIVITY'; activity: Activity }
   | { type: 'UPSERT_NOTIFICATION'; notification: Notification }

@@ -7,7 +7,7 @@ import { supabase } from './supabase'
 import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
-  Remision, InternalPayment, Movement, MovementList, AppSettings,
+  Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign,
 } from './types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -484,6 +484,29 @@ export async function fetchMovements(): Promise<Movement[]> {
 export const saveMovement = (m: Movement) => upsert('movements', movementRow(m))
 export const deleteMovement = (id: string) => removeRow('movements', id)
 
+/* ---- Campañas de marketing (presupuesto total + anuncios en JSONB) ---- */
+function mapCampaign(r: any): Campaign {
+  return {
+    id: r.id, name: r.name ?? '', budget: Number(r.budget ?? 0),
+    ads: Array.isArray(r.ads) ? r.ads.map((a: any) => ({ id: String(a.id), name: a.name ?? '', amount: Number(a.amount ?? 0) })) : [],
+    createdAt: r.created_at,
+    ...(r.created_by ? { createdBy: r.created_by } : {}),
+  }
+}
+function campaignRow(c: Campaign): Record<string, unknown> {
+  return {
+    id: c.id, name: c.name, budget: c.budget, ads: c.ads,
+    created_by: c.createdBy ?? null, created_at: c.createdAt,
+  }
+}
+export async function fetchCampaigns(): Promise<Campaign[]> {
+  const { data, error } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapCampaign)
+}
+export const saveCampaign = (c: Campaign) => upsert('campaigns', campaignRow(c))
+export const deleteCampaign = (id: string) => removeRow('campaigns', id)
+
 /* ---- Configuración global (clave/valor) — p. ej. saldo bancario ---- */
 export async function fetchSettings(): Promise<AppSettings> {
   const { data, error } = await supabase.from('app_settings').select('*')
@@ -595,6 +618,7 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   internal_payments: mapInternalPayment,
   movement_lists: mapMovementList,
   movements: mapMovement,
+  campaigns: mapCampaign,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -666,11 +690,11 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchSettings(), fetchActivity(), fetchNotifications(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, settings, activity, notifications }
 }

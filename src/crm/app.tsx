@@ -20,6 +20,7 @@ import { RemisionesPage } from './views/remisiones/remisiones'
 import { InternalPaymentsPage } from './views/internal_payments/internal_payments'
 import { MovementsPage } from './views/movements/movements'
 import { EstadisticasPage } from './views/estadisticas/estadisticas'
+import { CampaignsPage } from './views/campaigns/campaigns'
 import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
@@ -29,17 +30,18 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'admin' | 'settings'
+type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
 // queden sin ítems visibles (por el rol) se ocultan solas. `SECTIONS` define el orden.
-const SECTIONS = ['General', 'Comercial', 'Compras', 'Logística', 'Finanzas'] as const
+const SECTIONS = ['General', 'Comercial', 'Marketing', 'Compras', 'Logística', 'Finanzas'] as const
 type Section = typeof SECTIONS[number]
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; section: Section }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
-  // Estadísticas por origen: admin/superadmin y el rol Marketing (que solo ve esto).
-  { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing'], section: 'General' },
+  // Estadísticas por origen y Campañas: admin/superadmin y el rol Marketing.
+  { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing'], section: 'Marketing' },
+  { id: 'campaigns',   label: 'Campañas',     icon: 'layers', roles: ['admin', 'superadmin', 'marketing'], section: 'Marketing' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions', section: 'Comercial' },
@@ -66,8 +68,8 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   direccion: ['dashboard', 'projects', 'orders', 'payments', 'cobranza', 'internal_payments', 'movements', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
   ingenieria: ['dashboard', 'projects', 'settings'],
-  // Marketing: por ahora SOLO el módulo de Estadísticas por origen (+ configuración personal).
-  marketing: ['estadisticas', 'settings'],
+  // Marketing: módulos de Estadísticas por origen y Campañas (+ configuración personal).
+  marketing: ['estadisticas', 'campaigns', 'settings'],
 }
 /** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
 const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
@@ -82,7 +84,7 @@ const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', projects: 'Proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
-  estadisticas: 'Estadísticas por origen',
+  estadisticas: 'Estadísticas por origen', campaigns: 'Campañas',
   admin: 'Administración', settings: 'Configuración',
 }
 
@@ -211,6 +213,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
       case 'commissions': return <CommissionsPage />
       case 'estadisticas': return <EstadisticasPage />
+      case 'campaigns':   return <CampaignsPage />
       case 'settings':    return <SettingsPage />
       case 'admin':       return isAdminRole(me?.role) ? <AdminPage /> : <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       default: return null
