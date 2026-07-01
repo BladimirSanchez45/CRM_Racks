@@ -19,6 +19,7 @@ import { AsignacionPage } from './views/asignacion/asignacion'
 import { RemisionesPage } from './views/remisiones/remisiones'
 import { InternalPaymentsPage } from './views/internal_payments/internal_payments'
 import { MovementsPage } from './views/movements/movements'
+import { EstadisticasPage } from './views/estadisticas/estadisticas'
 import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
@@ -28,7 +29,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'admin' | 'settings'
+type Route = 'dashboard' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -37,6 +38,8 @@ const SECTIONS = ['General', 'Comercial', 'Compras', 'Logística', 'Finanzas'] a
 type Section = typeof SECTIONS[number]
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; section: Section }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
+  // Estadísticas por origen: admin/superadmin y el rol Marketing (que solo ve esto).
+  { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing'], section: 'General' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions', section: 'Comercial' },
@@ -63,13 +66,23 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   direccion: ['dashboard', 'projects', 'orders', 'payments', 'cobranza', 'internal_payments', 'movements', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
   ingenieria: ['dashboard', 'projects', 'settings'],
+  // Marketing: por ahora SOLO el módulo de Estadísticas por origen (+ configuración personal).
+  marketing: ['estadisticas', 'settings'],
 }
 /** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
 const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
+/** Ruta de aterrizaje del rol: el Panel si puede verlo, si no la primera ruta permitida.
+ *  Evita que un rol sin acceso al Panel (p. ej. Marketing) caiga en él por defecto. */
+const landingRoute = (role?: Role | null): Route => {
+  const allowed = allowedRoutes(role)
+  if (!allowed || allowed.includes('dashboard')) return 'dashboard'
+  return allowed[0] ?? 'dashboard'
+}
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', projects: 'Proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
+  estadisticas: 'Estadísticas por origen',
   admin: 'Administración', settings: 'Configuración',
 }
 
@@ -170,7 +183,7 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
 function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
   const { state } = useStore()
   const me = state.currentUser
-  const [route, setRoute] = React.useState<Route>('dashboard')
+  const [route, setRoute] = React.useState<Route>(() => landingRoute(me?.role))
   const [collapsed, setCollapsed] = React.useState(false)
   const [openProj, setOpenProj] = React.useState<Project | null>(null)
   const [editProj, setEditProj] = React.useState<Project | null>(null)
@@ -180,26 +193,26 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
   const onOpenProject = (p: Project) => { setOpenProj(p); setEditProj(null) }
 
   const page = () => {
-    // Un rol restringido solo puede entrar a sus rutas; cualquier otra cae al panel.
+    // Un rol restringido solo puede entrar a sus rutas; cualquier otra cae a su
+    // ruta de aterrizaje (Panel, o la primera permitida si no tiene Panel).
     const allowed = allowedRoutes(me?.role)
-    if (allowed && !allowed.includes(route)) {
-      return <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
-    }
-    switch (route) {
-      case 'dashboard':   return <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
+    const r: Route = (allowed && !allowed.includes(route)) ? landingRoute(me?.role) : route
+    switch (r) {
+      case 'dashboard':   return <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'projects':    return <ProjectsPage />
       case 'suppliers':   return <SuppliersPage />
       case 'orders':      return <OrdersPage />
       case 'asignacion':  return <AsignacionPage />
       case 'remisiones':  return <RemisionesPage />
       case 'internal_payments': return <InternalPaymentsPage openId={openIPId} onConsumed={() => setOpenIPId(null)} />
-      case 'movements':   return (isAdminRole(me?.role) || isDireccion(me?.role)) ? <MovementsPage openId={openListId} onConsumed={() => setOpenMovId(null)} /> : <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
+      case 'movements':   return (isAdminRole(me?.role) || isDireccion(me?.role)) ? <MovementsPage openId={openListId} onConsumed={() => setOpenMovId(null)} /> : <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'payments':    return <PaymentsPage />
       case 'cobranza':    return <CobranzaPage />
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
       case 'commissions': return <CommissionsPage />
+      case 'estadisticas': return <EstadisticasPage />
       case 'settings':    return <SettingsPage />
-      case 'admin':       return isAdminRole(me?.role) ? <AdminPage /> : <DashboardPage onNavigate={(r) => setRoute(r as Route)} onOpenProject={onOpenProject} />
+      case 'admin':       return isAdminRole(me?.role) ? <AdminPage /> : <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       default: return null
     }
   }

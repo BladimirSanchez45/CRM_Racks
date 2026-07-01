@@ -40,7 +40,7 @@ export interface Seller {
 /** Roles de acceso. Por ahora todos ven todo; a futuro se limitará por rol. */
 /** superadmin = acceso total + cosas exclusivas (p. ej. suplantar usuarios).
  *  admin = gestión normal. El resto son roles operativos. */
-export type Role = 'superadmin' | 'admin' | 'ventas' | 'logistica' | 'almacen' | 'direccion' | 'ingenieria'
+export type Role = 'superadmin' | 'admin' | 'ventas' | 'logistica' | 'almacen' | 'direccion' | 'ingenieria' | 'marketing'
 
 export interface User {
   id: string

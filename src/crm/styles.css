@@ -155,6 +155,7 @@ body.light .brand-logo-dark { @apply hidden; }
 .role-almacen   { color: #34d399; background: color-mix(in srgb, #34d399 16%, transparent); }
 .role-direccion { color: #c084fc; background: color-mix(in srgb, #c084fc 16%, transparent); }
 .role-ingenieria { color: #f472b6; background: color-mix(in srgb, #f472b6 16%, transparent); }
+.role-marketing { color: #2dd4bf; background: color-mix(in srgb, #2dd4bf 16%, transparent); }
 
 /* ---- Login ---- */
 .login-wrap { @apply min-h-screen w-full flex flex-col items-center justify-center gap-5 p-6; background: var(--bg-0); }

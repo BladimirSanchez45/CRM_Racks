@@ -17,6 +17,7 @@ const ROLES: { id: Role; label: string }[] = [
   { id: 'almacen', label: ROLE_LABELS.almacen },
   { id: 'direccion', label: ROLE_LABELS.direccion },
   { id: 'ingenieria', label: ROLE_LABELS.ingenieria },
+  { id: 'marketing', label: ROLE_LABELS.marketing },
 ]
 const roleClass = (r: Role) => `role-${r}`
 const initialsOf = (name: string) =>
