@@ -139,6 +139,7 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
   const [reject, setReject] = React.useState(false)
   const [reason, setReason] = React.useState('')
   const [confirmDel, setConfirmDel] = React.useState(false)
+  const [confirmRevert, setConfirmRevert] = React.useState(false)
 
   const proj = payment.projectId ? state.projects.find(x => x.id === payment.projectId) : undefined
   const supplier = payment.supplierId ? sel.supplier(state, payment.supplierId) : undefined
@@ -189,6 +190,11 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
         )}
         {!readOnly && (payment.status === 'Aprobado' || payment.status === 'Programado') && (
           <button className="btn btn-ghost" onClick={() => setStatus('Cancelado')}>Cancelar pago</button>
+        )}
+        {/* Corrección: solo el admin puede revertir un pago ya liquidado. Al volver a
+            "Pendiente" deja de descontar utilidad y se habilita Editar/Eliminar. */}
+        {!readOnly && isAdmin && payment.status === 'Pagado' && (
+          <button className="btn btn-ghost" onClick={() => setConfirmRevert(true)}><Icon name="alert" size={14} /> Revertir pago</button>
         )}
       </>}>
       <div className="bg-bg-1 border border-line rounded-[8px] p-3.5 mb-3.5 flex items-center justify-between">
@@ -255,6 +261,7 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
         </Modal>
       )}
       {confirmDel && <Confirm title="Eliminar solicitud" message={`¿Eliminar el pago "${payment.concept}"?`} onConfirm={() => { dispatch({ type: 'DELETE_INTERNAL_PAYMENT', id: payment.id }); onClose() }} onClose={() => setConfirmDel(false)} />}
+      {confirmRevert && <Confirm title="Revertir pago" message={`¿Revertir "${payment.concept}" a Pendiente? Dejará de descontar utilidad del proyecto y podrás editarlo o eliminarlo.`} onConfirm={() => { setStatus('Pendiente'); setConfirmRevert(false) }} onClose={() => setConfirmRevert(false)} />}
     </Modal>
   )
 }
