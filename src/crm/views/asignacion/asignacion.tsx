@@ -4,7 +4,7 @@
 //  El costo real resta utilidad → impacta la comisión de todos.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney } from '../../core/data'
+import { useStore, sel, fmtMoney, isDireccion } from '../../core/data'
 import { Modal, Field, Select, MoneyInput, Empty, KPI, StageBadge, Badge, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Project, Supplier } from '../../core/types'
@@ -131,6 +131,7 @@ function AssignForm({ project, onClose }: { project: Project; onClose: () => voi
 
 export function AsignacionPage() {
   const { state } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin asignar/editar
   const [assign, setAssign] = React.useState<Project | null>(null)
   const [f, setF] = React.useState('')   // '', 'sin', 'over'
 
@@ -183,7 +184,7 @@ export function AsignacionPage() {
                 const fSup = p.freightSupplierId ? sel.supplier(state, p.freightSupplierId) : undefined
                 const iSup = p.installSupplierId ? sel.supplier(state, p.installSupplierId) : undefined
                 return (
-                <tr key={p.id} onClick={() => setAssign(p)}>
+                <tr key={p.id} onClick={() => { if (!readOnly) setAssign(p) }} style={readOnly ? { cursor: 'default' } : undefined}>
                   <td><span className="mono text-acc font-semibold">{p.code}</span></td>
                   <td className="text-[12.5px]">{sel.clientName(state, p.client)}</td>
                   <td><StageBadge stage={p.stage} /></td>
@@ -192,7 +193,7 @@ export function AsignacionPage() {
                   <td className="num text-[12px]">{fmtMoney(budget)}</td>
                   <td className="num text-[12px] font-semibold">{cost > 0 ? fmtMoney(cost) : <span className="text-tx-3">—</span>}</td>
                   <td className="num text-[12px]" style={{ color: cost > 0 ? (over ? 'var(--danger)' : 'var(--ok)') : 'var(--tx-3)' }}>{cost > 0 ? `${budget - cost > 0 ? '' : ''}${fmtMoney(budget - cost)}` : '—'}</td>
-                  <td><button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setAssign(p) }}><Icon name="edit" size={13} /> Asignar</button></td>
+                  <td>{!readOnly && <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); setAssign(p) }}><Icon name="edit" size={13} /> Asignar</button>}</td>
                 </tr>
               ) })}
             </tbody>

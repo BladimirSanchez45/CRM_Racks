@@ -2,7 +2,7 @@
 //  SUPPLIERS — CRUD, purchase history, active toggle
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDate, fmtK } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDate, fmtK, isDireccion } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, Rating, Badge, OCStatus, Empty, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { OrderDetail, OrderForm } from '../orders/orders'
@@ -57,7 +57,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
   )
 }
 
-function SupplierDetail({ supplier, onClose, onEdit, onDelete }: { supplier: Supplier; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
+function SupplierDetail({ supplier, onClose, onEdit, onDelete, readOnly }: { supplier: Supplier; onClose: () => void; onEdit: () => void; onDelete: () => void; readOnly?: boolean }) {
   const { state } = useStore()
   const ocs = sel.ordersForSupplier(state, supplier.id)
   // Al hacer clic en una OC del historial, abre su detalle (y permite editarla).
@@ -70,7 +70,7 @@ function SupplierDetail({ supplier, onClose, onEdit, onDelete }: { supplier: Sup
     <Modal width={680} onClose={onClose} icon="suppliers"
       title={supplier.name}
       sub={`${supplier.cat} · ${supplier.city}`}
-      footer={<>
+      footer={readOnly ? <button className="btn btn-ghost" onClick={onClose}>Cerrar</button> : <>
         <button className="btn btn-danger" disabled={ocs.length > 0} title={ocs.length > 0 ? 'No se puede eliminar: tiene órdenes de compra' : 'Eliminar proveedor'} onClick={onDelete}><Icon name="trash" size={15} /> Eliminar</button>
         <div className="flex-1"></div>
         <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button>
@@ -135,6 +135,7 @@ function SupplierDetail({ supplier, onClose, onEdit, onDelete }: { supplier: Sup
 
 export function SuppliersPage() {
   const { state, dispatch } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin crear/editar/eliminar
   const [detail, setDetail] = React.useState<Supplier | null>(null)
   const [del, setDel] = React.useState<Supplier | null>(null)
   const [form, setForm] = React.useState<Partial<Supplier> | null>(null)
@@ -153,7 +154,7 @@ export function SuppliersPage() {
             {cities.map(c => <option key={c} value={c}>{c}</option>)}
           </Select>
           <button className="btn btn-ghost btn-sm" onClick={() => setShowInactive(v => !v)}>{showInactive ? 'Ocultar inactivos' : 'Mostrar inactivos'}</button>
-          <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo proveedor</button>
+          {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo proveedor</button>}
         </div>
       </div>
 
@@ -182,16 +183,16 @@ export function SuppliersPage() {
                   <div className="text-right"><div className="label-k">Acumulado</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtK(total)}</div></div>
                 </div>
               </div>
-              <div className="flex border-t border-line">
+              {!readOnly && <div className="flex border-t border-line">
                 <button className="btn btn-ghost btn-sm flex-1 border-none justify-center" onClick={() => setForm(s)}><Icon name="edit" size={13} /> Editar</button>
                 <button className="btn btn-ghost btn-sm flex-1 justify-center" style={{ border: 'none', borderLeft: '1px solid var(--line)', color: s.active ? 'var(--tx-2)' : 'var(--ok)' }} onClick={() => dispatch({ type: 'TOGGLE_SUPPLIER', id: s.id })}>{s.active ? 'Desactivar' : 'Activar'}</button>
-              </div>
+              </div>}
             </div>
           )
         })}
       </div>
 
-      {detail && <SupplierDetail supplier={state.suppliers.find(x => x.id === detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} />}
+      {detail && <SupplierDetail supplier={state.suppliers.find(x => x.id === detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} readOnly={readOnly} />}
       {form && <SupplierForm supplier={form.id ? (form as Supplier) : undefined} onClose={() => setForm(null)} />}
       {del && <Confirm title="Eliminar proveedor" message={`¿Eliminar a ${del.name}? Esta acción no se puede deshacer.`} onConfirm={() => { dispatch({ type: 'DELETE_SUPPLIER', id: del.id }); setDel(null) }} onClose={() => setDel(null)} />}
     </div>

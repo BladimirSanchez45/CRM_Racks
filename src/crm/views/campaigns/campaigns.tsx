@@ -4,7 +4,7 @@
 //  su monto y su % del total). Vista de lista expandible + modal.
 // ============================================================
 import * as React from 'react'
-import { useStore, fmtMoney, uid } from '../../core/data'
+import { useStore, fmtMoney, uid, isDireccion } from '../../core/data'
 import { Modal, Field, Input, MoneyInput, Confirm, SecTitle, Empty, KPI, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Campaign, CampaignInput } from '../../core/types'
@@ -111,7 +111,7 @@ function CampaignForm({ campaign, onClose }: { campaign?: Campaign; onClose: () 
 }
 
 /* ---- Fila de campaña (expandible) ---- */
-function CampaignRow({ campaign, onEdit }: { campaign: Campaign; onEdit: () => void }) {
+function CampaignRow({ campaign, onEdit, readOnly }: { campaign: Campaign; onEdit: () => void; readOnly?: boolean }) {
   const { dispatch } = useStore()
   const [open, setOpen] = React.useState(false)
   const [confirmDel, setConfirmDel] = React.useState(false)
@@ -126,8 +126,8 @@ function CampaignRow({ campaign, onEdit }: { campaign: Campaign; onEdit: () => v
           <div className="meta mt-px">{campaign.ads.length} {campaign.ads.length === 1 ? 'anuncio' : 'anuncios'}</div>
         </div>
         <div className="mono font-display font-extrabold text-[17px] mr-1">{fmtMoney(campaign.budget)}</div>
-        <button className="btn btn-sm btn-ghost shrink-0" onClick={e => { e.stopPropagation(); onEdit() }}><Icon name="edit" size={13} /> Editar</button>
-        <button className="icon-btn shrink-0" title="Eliminar campaña" onClick={e => { e.stopPropagation(); setConfirmDel(true) }}><Icon name="trash" size={15} /></button>
+        {!readOnly && <button className="btn btn-sm btn-ghost shrink-0" onClick={e => { e.stopPropagation(); onEdit() }}><Icon name="edit" size={13} /> Editar</button>}
+        {!readOnly && <button className="icon-btn shrink-0" title="Eliminar campaña" onClick={e => { e.stopPropagation(); setConfirmDel(true) }}><Icon name="trash" size={15} /></button>}
       </div>
 
       {open && (
@@ -166,6 +166,7 @@ function CampaignRow({ campaign, onEdit }: { campaign: Campaign; onEdit: () => v
 
 export function CampaignsPage() {
   const { state } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin registrar/editar/eliminar
   const [form, setForm] = React.useState<Campaign | {} | null>(null)
 
   const campaigns = [...state.campaigns].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
@@ -175,7 +176,7 @@ export function CampaignsPage() {
   return (
     <div>
       <SecTitle title="Campañas" sub="Presupuesto de marketing por campaña y anuncio"
-        right={<button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Registrar campaña</button>} />
+        right={readOnly ? undefined : <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Registrar campaña</button>} />
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">
         <KPI label="Campañas" value={campaigns.length} icon="layers" accent />
@@ -187,7 +188,7 @@ export function CampaignsPage() {
         <div className="card"><div className="card-b"><Empty icon="trendUp">Aún no hay campañas registradas</Empty></div></div>
       ) : (
         <div className="flex flex-col gap-3">
-          {campaigns.map(c => <CampaignRow key={c.id} campaign={c} onEdit={() => setForm(c)} />)}
+          {campaigns.map(c => <CampaignRow key={c.id} campaign={c} onEdit={() => setForm(c)} readOnly={readOnly} />)}
         </div>
       )}
 

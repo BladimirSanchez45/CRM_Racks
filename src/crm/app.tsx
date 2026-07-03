@@ -39,9 +39,9 @@ const SECTIONS = ['General', 'Comercial', 'Marketing', 'Compras', 'Logística', 
 type Section = typeof SECTIONS[number]
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; section: Section }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
-  // Estadísticas por origen y Campañas: admin/superadmin y el rol Marketing.
-  { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing'], section: 'Marketing' },
-  { id: 'campaigns',   label: 'Campañas',     icon: 'layers', roles: ['admin', 'superadmin', 'marketing'], section: 'Marketing' },
+  // Estadísticas por origen y Campañas: admin/superadmin, Marketing y Dirección (solo lectura).
+  { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
+  { id: 'campaigns',   label: 'Campañas',     icon: 'layers', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions', section: 'Comercial' },
@@ -56,16 +56,16 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'movements',   label: 'Movimientos',  icon: 'box',         roles: ['admin', 'superadmin', 'direccion'], section: 'Finanzas' },
 ]
 // Rutas permitidas por rol RESTRINGIDO. Los roles NO listados aquí (admin,
-// superadmin, dirección…) ven todo. Para acotar un rol nuevo —p. ej. logística—
-// agrega su entrada con las rutas que sí puede ver (incluidas las vistas nuevas
-// que se creen para él). `settings` (Configuración) conviene incluirla siempre.
+// superadmin y dirección) ven TODAS las vistas. Para acotar un rol nuevo —p. ej.
+// logística— agrega su entrada con las rutas que sí puede ver (incluidas las vistas
+// nuevas que se creen para él). `settings` (Configuración) conviene incluirla siempre.
+// NOTA: Dirección NO se lista aquí a propósito: ve todo como admin, pero cada vista
+// lo trata como SOLO LECTURA (isDireccion) — puede ver todo, sin crear/editar/eliminar.
 const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   ventas: ['dashboard', 'projects', 'orders', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
   logistica: ['dashboard', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
-  // Dirección: vista de solo lectura sobre proyectos, OC y finanzas (sin edición) + Movimientos (autoriza).
-  direccion: ['dashboard', 'projects', 'orders', 'payments', 'cobranza', 'internal_payments', 'movements', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
   ingenieria: ['dashboard', 'projects', 'settings'],
   // Marketing: módulos de Estadísticas por origen y Campañas (+ configuración personal).
@@ -132,9 +132,9 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
         </div>
       </div>
       <nav className="nav">
-        {/* Solo admin/superadmin ven las vistas AGRUPADAS por área; el resto de roles
-            mantienen la lista plana de siempre ("Operación"). */}
-        {isAdminRole(me?.role) ? (
+        {/* Admin/superadmin y dirección ven las vistas AGRUPADAS por área (dirección ve
+            todo en solo lectura); el resto de roles mantiene la lista plana ("Operación"). */}
+        {(isAdminRole(me?.role) || isDireccion(me?.role)) ? (
           SECTIONS.map(section => {
             const items = nav.filter(n => n.section === section)
             if (items.length === 0) return null   // oculta secciones sin ítems visibles

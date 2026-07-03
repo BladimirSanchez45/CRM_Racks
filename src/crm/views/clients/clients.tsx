@@ -2,7 +2,7 @@
 //  CLIENTS — list, project history, payment status
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtK, fmtDate, fmtMoney2, REGIMEN_FISCAL, regimenLabel } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtK, fmtDate, fmtMoney2, REGIMEN_FISCAL, regimenLabel, isDireccion } from '../../core/data'
 import { Modal, Field, Input, Select, StageBadge, PayBadge, Badge, Avatar, Empty, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Client, ClientInput, Project } from '../../core/types'
@@ -49,7 +49,7 @@ function FiscalRow({ label, value, mono, span2 }: { label: string; value?: strin
   )
 }
 
-function ClientDetail({ client, onClose, onEdit, onDelete, onOpenProject }: { client: Client; onClose: () => void; onEdit: () => void; onDelete: () => void; onOpenProject: (p: Project) => void }) {
+function ClientDetail({ client, onClose, onEdit, onDelete, onOpenProject, readOnly }: { client: Client; onClose: () => void; onEdit: () => void; onDelete: () => void; onOpenProject: (p: Project) => void; readOnly?: boolean }) {
   const { state } = useStore()
   const projects = sel.projectsForClient(state, client.id)
   const total = projects.reduce((a, p) => a + sel.budget(p), 0)
@@ -57,7 +57,7 @@ function ClientDetail({ client, onClose, onEdit, onDelete, onOpenProject }: { cl
   const sub = [client.rfc || client.city, `Cliente desde ${fmtDate(client.since)}`].filter(Boolean).join(' · ')
   return (
     <Modal width={680} icon="clients" title={client.name} sub={sub} onClose={onClose}
-      footer={<>
+      footer={readOnly ? <button className="btn btn-ghost" onClick={onClose}>Cerrar</button> : <>
         <button className="btn btn-danger" disabled={projects.length > 0} title={projects.length > 0 ? 'No se puede eliminar: tiene proyectos asociados' : 'Eliminar cliente'} onClick={onDelete}><Icon name="trash" size={15} /> Eliminar</button>
         <div className="flex-1"></div>
         <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button>
@@ -118,6 +118,7 @@ const CLIENTS_PAGE_SIZE = 60
 
 export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => void }) {
   const { state, dispatch } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin crear/editar/eliminar
   const [detail, setDetail] = React.useState<Client | null>(null)
   const [del, setDel] = React.useState<Client | null>(null)
   const [form, setForm] = React.useState<Partial<Client> | null>(null)
@@ -137,7 +138,7 @@ export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => 
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Clientes</h2><span className="sub">{filtered.length} de {state.clients.length} registrados</span></div>
-        <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo cliente</button>
+        {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo cliente</button>}
       </div>
       <div className="relative mb-4 max-w-[380px]">
         <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
@@ -180,7 +181,7 @@ export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => 
           </button>
         </div>
       )}
-      {detail && <ClientDetail client={state.clients.find(x=>x.id===detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} onOpenProject={onOpenProject} />}
+      {detail && <ClientDetail client={state.clients.find(x=>x.id===detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} onOpenProject={onOpenProject} readOnly={readOnly} />}
       {form && <ClientForm client={form.id ? (form as Client) : undefined} onClose={() => setForm(null)} />}
       {del && <Confirm title="Eliminar cliente" message={`¿Eliminar a ${del.name}? Esta acción no se puede deshacer.`} onConfirm={() => { dispatch({ type: 'DELETE_CLIENT', id: del.id }); setDel(null) }} onClose={() => setDel(null)} />}
     </div>

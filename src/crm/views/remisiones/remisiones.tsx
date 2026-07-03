@@ -6,7 +6,7 @@
 import * as React from 'react'
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { useStore, sel, fmtDateShort, fmtDate, TODAY_ISO, nextFolio, uid } from '../../core/data'
+import { useStore, sel, fmtDateShort, fmtDate, TODAY_ISO, nextFolio, uid, isDireccion } from '../../core/data'
 import { uploadDoc } from '../../core/api'
 import { Modal, Field, Input, TextArea, Select, FileField, Badge, Empty, KPI, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
@@ -179,7 +179,7 @@ type FormState = {
 }
 
 /* ---- Formulario de remisión ---- */
-function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () => void }) {
+function RemisionForm({ remision, onClose, readOnly }: { remision?: Remision; onClose: () => void; readOnly?: boolean }) {
   const { state, dispatch } = useStore()
   const [r, setR] = React.useState<FormState>(() => remision ? {
     ...remision, carrierId: remision.carrierId ?? '', phone: remision.phone ?? '', receivedBy: remision.receivedBy ?? '',
@@ -285,8 +285,12 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
   }
 
   return (
-    <Modal width={680} icon={remision ? 'edit' : 'plus'} title={remision ? 'Editar remisión' : 'Nueva remisión de salida'} sub={r.number} onClose={requestClose}
-      footer={<>
+    <Modal width={680} icon={readOnly ? 'truck' : remision ? 'edit' : 'plus'} title={readOnly ? 'Detalle de remisión' : remision ? 'Editar remisión' : 'Nueva remisión de salida'} sub={r.number} onClose={requestClose}
+      footer={readOnly ? <>
+        <button className={'btn btn-ghost' + (generating ? ' opacity-50' : '')} disabled={generating} onClick={genPdf}><Icon name="download" size={14} /> {generating ? 'Generando…' : 'Ver PDF'}</button>
+        <div className="flex-1"></div>
+        <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
+      </> : <>
         <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         {remision && <button className="btn btn-danger" onClick={() => { dispatch({ type: 'DELETE_REMISION', id: remision.id }); onClose() }}><Icon name="trash" size={14} /> Eliminar</button>}
         <button className={'btn btn-ghost' + (!valid || generating ? ' opacity-50' : '')} disabled={!valid || generating} onClick={genPdf} title="Genera el PDF, lo guarda en la remisión del proyecto y lo abre">
@@ -295,6 +299,7 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
         <div className="flex-1"></div>
         <button className={'btn btn-primary' + (!valid || generating ? ' opacity-50' : '')} disabled={!valid || generating} onClick={save}><Icon name="check" size={15} /> {generating ? 'Guardando…' : 'Guardar'}</button>
       </>}>
+      <fieldset disabled={readOnly} className="contents">
       <div className="grid grid-cols-3 gap-3.5">
         <Field label="Folio"><Input className="input mono" value={r.number} onChange={e => set('number', e.target.value)} /></Field>
         <Field label="Fecha de salida"><Input type="date" value={r.date} onChange={e => set('date', e.target.value)} /></Field>
@@ -358,6 +363,7 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
             onChange={v => setR(s => ({ ...s, file: v.name, filePath: v.path || undefined }))} accept=".pdf,.jpg,.png,.xlsx" />
         </div>
       </div>
+      </fieldset>
       {guard}
     </Modal>
   )
@@ -365,6 +371,7 @@ function RemisionForm({ remision, onClose }: { remision?: Remision; onClose: () 
 
 export function RemisionesPage() {
   const { state } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin crear/editar/eliminar
   const [form, setForm] = React.useState<Remision | {} | null>(null)
   const [fStatus, setFStatus] = React.useState('')
 
@@ -379,7 +386,7 @@ export function RemisionesPage() {
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Remisiones de salida</h2><span className="sub">Salida de material a destino</span></div>
-        <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nueva remisión</button>
+        {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nueva remisión</button>}
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">
@@ -422,7 +429,7 @@ export function RemisionesPage() {
         {rows.length === 0 && <Empty icon="truck">Sin remisiones registradas</Empty>}
       </div>
 
-      {form && <RemisionForm remision={'id' in form ? form : undefined} onClose={() => setForm(null)} />}
+      {form && <RemisionForm remision={'id' in form ? form : undefined} onClose={() => setForm(null)} readOnly={readOnly} />}
     </div>
   )
 }

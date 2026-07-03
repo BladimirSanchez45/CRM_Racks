@@ -2,7 +2,7 @@
 //  COMMISSIONS — finalized projects this month, seller, paid/pending
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, MESES_L, TODAY_ISO } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, MESES_L, TODAY_ISO, isDireccion } from '../../core/data'
 import { Badge, Avatar, Empty, Seg, Select } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Commission, Project } from '../../core/types'
@@ -14,6 +14,7 @@ type Group = { key: string; earner?: EarnerLike; items: CommissionRow[]; total: 
 
 export function CommissionsPage() {
   const { state, dispatch } = useStore()
+  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin marcar pagos
   const [view, setView] = React.useState('all') // all | pending | paid
   const [open, setOpen] = React.useState<Set<string>>(new Set())
   const [month, setMonth] = React.useState(TODAY_ISO.slice(0, 7)) // 'YYYY-MM' o 'all'
@@ -97,7 +98,7 @@ export function CommissionsPage() {
                       <td className="num font-display font-bold text-[14px]">{fmtMoney(g.total)}</td>
                       <td>{g.pending > 0 ? <Badge color="var(--warn)">{fmtMoney(g.pending)} pend.</Badge> : <Badge color="var(--ok)">Pagado</Badge>}</td>
                       <td onClick={e => e.stopPropagation()}>
-                        {g.pending > 0 && <button className="btn btn-sm btn-primary" onClick={() => markGroupPaid(g)}><Icon name="check" size={13} /> Pagar todo</button>}
+                        {!readOnly && g.pending > 0 && <button className="btn btn-sm btn-primary" onClick={() => markGroupPaid(g)}><Icon name="check" size={13} /> Pagar todo</button>}
                       </td>
                     </tr>
                     {/* desglose: comisiones propias + overrides */}
@@ -117,9 +118,9 @@ export function CommissionsPage() {
                           <td className="num font-semibold">{fmtMoney2(r.amount)}<div className="meta mt-0.5">{pct.toFixed(1)}%</div></td>
                           <td>{r.status === 'paid' ? <Badge color="var(--ok)">Pagada</Badge> : <Badge color="var(--warn)">Pendiente</Badge>}</td>
                           <td>
-                            <button className={'btn btn-sm ' + (r.status === 'paid' ? 'btn-ghost' : 'btn-primary')} onClick={() => dispatch({ type: 'TOGGLE_COMMISSION', id: r.id })}>
+                            {!readOnly && <button className={'btn btn-sm ' + (r.status === 'paid' ? 'btn-ghost' : 'btn-primary')} onClick={() => dispatch({ type: 'TOGGLE_COMMISSION', id: r.id })}>
                               {r.status === 'paid' ? 'Revertir' : <><Icon name="check" size={13} /> Marcar pagada</>}
-                            </button>
+                            </button>}
                           </td>
                         </tr>
                       )

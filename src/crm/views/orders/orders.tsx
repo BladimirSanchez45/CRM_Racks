@@ -705,16 +705,20 @@ export function OrdersPage() {
   const supplierOpts = state.suppliers.filter(s => orders.some(o => o.supplierId === s.id))
   const sinAsignar = readOnly ? [] : state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado')
 
-  // KPIs
-  const totalOC = orders.reduce((a, o) => a + o.amount, 0)
-  const totalPaid = orders.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
+  // KPIs — respetan el filtro de proveedor (NO el de estatus, para no colapsar la
+  // gráfica de estatus ni el conteo de vencidas). Así, al filtrar por un proveedor
+  // (p.ej. Metálicos Guzmán), el "Saldo pendiente" es el adeudo total de ESE proveedor.
+  const kpiBase = fSupplier ? orders.filter(o => o.supplierId === fSupplier) : orders
+  const supplierName = fSupplier ? (sel.supplier(state, fSupplier)?.name || '') : ''
+  const totalOC = kpiBase.reduce((a, o) => a + o.amount, 0)
+  const totalPaid = kpiBase.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
   const saldo = totalOC - totalPaid
-  const vencidas = orders.filter(o => ocStatusOf(o) === 'Vencida').length
-  const prox7 = orders.filter(o => {
+  const vencidas = kpiBase.filter(o => ocStatusOf(o) === 'Vencida').length
+  const prox7 = kpiBase.filter(o => {
     const n = sel.ocNextPayment(state, o.id); if (!n) return false
     const d = daysBetween(n); return d != null && d >= 0 && d <= 7 && sel.ocBalance(state, o) > 0
   }).length
-  const statusCounts = OC_STATES.map(s => ({ s, n: orders.filter(o => ocStatusOf(o) === s).length }))
+  const statusCounts = OC_STATES.map(s => ({ s, n: kpiBase.filter(o => ocStatusOf(o) === s).length }))
   const maxCount = Math.max(1, ...statusCounts.map(c => c.n))
 
   const openOcForProject = (project: Project, sid: string) => {
@@ -756,9 +760,9 @@ export function OrdersPage() {
         <>
           {/* KPIs estilo Dashboard del Excel */}
           <div className="grid grid-cols-5 gap-3.5 mb-4">
-            <KPI label="Total OC" value={totalOC} format={fmtMoney} icon="orders" accent />
+            <KPI label={supplierName ? `Total OC · ${supplierName}` : 'Total OC'} value={totalOC} format={fmtMoney} icon="orders" accent foot={supplierName ? `${kpiBase.length} OC` : undefined} />
             <KPI label="Total pagado" value={totalPaid} format={fmtMoney} icon="money" />
-            <KPI label="Saldo pendiente" value={saldo} format={fmtMoney} icon="alert" footTrend="dn" foot={saldo > 0 ? 'Por pagar' : 'Al corriente'} />
+            <KPI label={supplierName ? `Adeudo · ${supplierName}` : 'Saldo pendiente'} value={saldo} format={fmtMoney} icon="alert" footTrend="dn" foot={saldo > 0 ? 'Por pagar' : 'Al corriente'} />
             <KPI label="OC vencidas" value={vencidas} icon="alert" foot={vencidas ? 'Requieren atención' : 'Ninguna'} />
             <KPI label="Pagos próx. 7 días" value={prox7} icon="calendar" foot="OC con vencimiento" />
           </div>
