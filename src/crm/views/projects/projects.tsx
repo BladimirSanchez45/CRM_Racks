@@ -228,12 +228,13 @@ export function ProjectsPage() {
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [form, setForm] = React.useState<object | null>(null) // {} para nuevo
   const [editing, setEditing] = React.useState(false)
-  const [f, setF] = React.useState({ q: '', stage: '', client: '', supplier: '' })
+  const [f, setF] = React.useState({ q: '', stage: '', client: '', supplier: '', seller: '' })
 
   const filtered = mine.filter(p => {
     if (f.stage && p.stage !== f.stage) return false
     if (f.client && p.client !== f.client) return false
     if (f.supplier && !p.suppliers.includes(f.supplier)) return false
+    if (f.seller && p.seller !== f.seller) return false
     if (f.q) {
       const hay = (p.code + ' ' + sel.clientName(state, p.client) + ' ' + p.city).toLowerCase()
       if (!hay.includes(f.q.toLowerCase())) return false
@@ -242,7 +243,7 @@ export function ProjectsPage() {
   })
 
   const openDetail = (p: Project) => { setDetail(p); setEditing(false) }
-  const hasFilters = f.stage || f.client || f.supplier || f.q
+  const hasFilters = f.stage || f.client || f.supplier || f.seller || f.q
 
   return (
     <div>
@@ -271,11 +272,17 @@ export function ProjectsPage() {
           <option value="">Todos los clientes</option>
           {state.clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </Select>
+        {!isVentas && (
+          <Select value={f.seller} onChange={e => setF({ ...f, seller: e.target.value })} className="w-auto min-w-[150px]">
+            <option value="">Todos los vendedores</option>
+            {state.sellers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </Select>
+        )}
         <Select value={f.supplier} onChange={e => setF({ ...f, supplier: e.target.value })} className="w-auto min-w-[150px]">
           <option value="">Todos los proveedores</option>
           {state.suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </Select>
-        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', stage: '', client: '', supplier: '' })}><Icon name="close" size={13} /> Limpiar</button>}
+        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', stage: '', client: '', supplier: '', seller: '' })}><Icon name="close" size={13} /> Limpiar</button>}
       </div>
 
       {view === 'kanban' ? <Kanban projects={filtered} onOpen={openDetail} canMove={!isVentas && !isDir} /> : <ProjectsTable projects={filtered} onOpen={openDetail} />}
