@@ -203,8 +203,11 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
   const comprasTotal = sel.projectComprasConIva(state, p.id)
   const comprasSub = comprasTotal / 1.16
   const internalCost = sel.projectInternalPaymentsCost(state, p.id)
+  // Movimientos "por fuera" (sin IVA) ligados al proyecto: ya restan en projectUtilidadSub,
+  // así que también deben restarse en la utilidad con IVA para que ambas bases coincidan.
+  const movementsCost = sel.projectMovementsCost(state, p.id)
   const utilSub = sel.projectUtilidadSub(state, p)
-  const utilTotal = ventaTotal - comprasTotal - internalCost
+  const utilTotal = ventaTotal - comprasTotal - internalCost - movementsCost
   const margen = ventaSub > 0 ? (utilSub / ventaSub) * 100 : null
   const cobros = sel.clientPaymentsForProject(state, p.id)
   const cobrado = sel.projectCobrado(state, p.id)
@@ -281,11 +284,13 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
             <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Subtotal de la venta</span><span className="mono">{fmtMoney(ventaSub)}</span></div>
             <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (sin IVA)</span><span className="mono">−{fmtMoney(comprasSub)}</span></div>
             {internalCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Pagos internos (pagados)</span><span className="mono">−{fmtMoney(internalCost)}</span></div>}
+            {movementsCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Movimientos (pagados)</span><span className="mono">−{fmtMoney(movementsCost)}</span></div>}
             <div className="flex justify-between text-[12.5px] py-[3px]"><span className="text-tx-1 font-semibold">Utilidad sin IVA</span><span className="mono font-semibold" style={{ color: utilSub >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilSub)}</span></div>
             <div className="h-px bg-line my-2"></div>
             <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Total con IVA</span><span className="mono">{fmtMoney(ventaTotal)}</span></div>
             <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (con IVA)</span><span className="mono">−{fmtMoney(comprasTotal)}</span></div>
             {internalCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Pagos internos (pagados)</span><span className="mono">−{fmtMoney(internalCost)}</span></div>}
+            {movementsCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Movimientos (pagados)</span><span className="mono">−{fmtMoney(movementsCost)}</span></div>}
             <div className="flex justify-between items-baseline mt-1"><span className="label-k">Utilidad con IVA</span><span className="font-display font-extrabold text-[19px]" style={{ color: utilTotal >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilTotal)}</span></div>
             {margen != null && <div className="flex justify-between text-[11px] text-tx-3 mt-1.5"><span>Margen sobre venta</span><span className="mono">{margen.toFixed(1)}%</span></div>}
           </div>

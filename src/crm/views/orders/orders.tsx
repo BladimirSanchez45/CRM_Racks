@@ -747,10 +747,15 @@ export function OrdersPage() {
   const totalPaid = kpiBase.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
   const saldo = totalOC - totalPaid
   const vencidas = kpiBase.filter(o => ocStatusOf(o) === 'Vencida').length
-  const prox7 = kpiBase.filter(o => {
-    const n = sel.ocNextPayment(state, o.id); if (!n) return false
-    const d = daysBetween(n); return d != null && d >= 0 && d <= 7 && sel.ocBalance(state, o) > 0
-  }).length
+  // Por cobrar (a clientes):
+  //  · con proveedor filtrado → solo los proyectos ligados a las OC de ESE proveedor
+  //    (sin duplicar cuando un proyecto tiene varias OC del mismo proveedor);
+  //  · sin filtro → el total de TODOS los proyectos.
+  const porCobrarProyectos = fSupplier
+    ? ([...new Set(kpiBase.map(o => o.projectId).filter(Boolean) as string[])]
+        .map(pid => state.projects.find(p => p.id === pid)).filter(Boolean) as Project[])
+    : state.projects
+  const porCobrar = porCobrarProyectos.reduce((a, p) => a + Math.max(0, sel.projectSaldoCliente(state, p)), 0)
   const statusCounts = OC_STATES.map(s => ({ s, n: kpiBase.filter(o => ocStatusOf(o) === s).length }))
   const maxCount = Math.max(1, ...statusCounts.map(c => c.n))
 
@@ -797,7 +802,7 @@ export function OrdersPage() {
             <KPI label="Total pagado" value={totalPaid} format={fmtMoney} icon="money" />
             <KPI label={supplierName ? `Adeudo · ${supplierName}` : 'Saldo pendiente'} value={saldo} format={fmtMoney} icon="alert" footTrend="dn" foot={saldo > 0 ? 'Por pagar' : 'Al corriente'} />
             <KPI label="OC vencidas" value={vencidas} icon="alert" foot={vencidas ? 'Requieren atención' : 'Ninguna'} />
-            <KPI label="Pagos próx. 7 días" value={prox7} icon="calendar" foot="OC con vencimiento" />
+            <KPI label={supplierName ? `Por cobrar · ${supplierName}` : 'Por cobrar (proyectos)'} value={porCobrar} format={fmtMoney} icon="download" foot={supplierName ? `${porCobrarProyectos.length} proyecto${porCobrarProyectos.length === 1 ? '' : 's'} con OC` : 'Todos los proyectos'} />
           </div>
 
           <div className="grid grid-cols-[1fr_1.5fr] gap-4 mb-4">

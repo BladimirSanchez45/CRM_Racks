@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, isDireccion } from '../../core/data'
-import { Modal, Badge, Empty, KPI } from '../../core/ui'
+import { Modal, Badge, Empty, KPI, Select } from '../../core/ui'
 import { CobroForm } from '../projects/project_views'
 import { Icon } from '../../core/icons'
 import type { Project, ClientPayment, ClientPaymentStatus } from '../../core/types'
@@ -73,6 +73,7 @@ export function CobranzaPage() {
   const { state } = useStore()
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [q, setQ] = React.useState('')
+  const [fSupplier, setFSupplier] = React.useState('')
 
   // ---- Marcador "Nuevo" (no abierto), por usuario y persistido en el navegador ----
   // Cada usuario lleva su propio set de proyectos ya abiertos. Las filas que NO estén
@@ -106,21 +107,27 @@ export function CobranzaPage() {
     return { p, client: sel.clientName(state, p.client), total, cobrado, saldo: total - cobrado, estado: estadoDe(total, cobrado), forma: formas.join(', '), coment }
   })
 
+  // Alcance por proveedor: proyectos con OC de ESE proveedor (mismo criterio que Órdenes de compra).
+  const projSet = fSupplier ? new Set(state.orders.filter(o => o.supplierId === fSupplier && o.projectId).map(o => o.projectId)) : null
+  const scopeRows = projSet ? rows.filter(r => projSet.has(r.p.id)) : rows
   const needle = q.trim().toLowerCase()
   const filtered = needle
-    ? rows.filter(r => `${r.p.code} ${r.client} ${r.total} ${r.cobrado} ${fmtMoney(r.total)} ${fmtMoney(r.cobrado)}`.toLowerCase().includes(needle))
-    : rows
+    ? scopeRows.filter(r => `${r.p.code} ${r.client} ${r.total} ${r.cobrado} ${fmtMoney(r.total)} ${fmtMoney(r.cobrado)}`.toLowerCase().includes(needle))
+    : scopeRows
   const ord: Record<Estado, number> = { 'Sin cobro': 0, Parcial: 1, Cobrado: 2 }
   // No abiertos (Nuevo) arriba; dentro de cada grupo, por estado y luego por código.
   const sorted = [...filtered].sort((a, b) =>
     (isNew(a.p.id) ? 0 : 1) - (isNew(b.p.id) ? 0 : 1)
     || ord[a.estado] - ord[b.estado]
     || (a.p.code < b.p.code ? 1 : -1))
-  const newCount = rows.filter(r => isNew(r.p.id)).length
+  const newCount = scopeRows.filter(r => isNew(r.p.id)).length
 
-  const totalCobrado = rows.reduce((a, r) => a + r.cobrado, 0)
-  const totalPorCobrar = rows.reduce((a, r) => a + Math.max(0, r.saldo), 0)
-  const sinCobro = rows.filter(r => r.estado === 'Sin cobro').length
+  const totalCobrado = scopeRows.reduce((a, r) => a + r.cobrado, 0)
+  const totalPorCobrar = scopeRows.reduce((a, r) => a + Math.max(0, r.saldo), 0)
+  const sinCobro = scopeRows.filter(r => r.estado === 'Sin cobro').length
+  const supplierName = fSupplier ? (sel.supplier(state, fSupplier)?.name || '') : ''
+  // Proveedores que tienen al menos una OC ligada a un proyecto (para poblar el filtro).
+  const supplierOpts = state.suppliers.filter(s => state.orders.some(o => o.supplierId === s.id && o.projectId))
 
   return (
     <div>
@@ -129,8 +136,8 @@ export function CobranzaPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">
-        <KPI label="Total cobrado" value={totalCobrado} format={fmtMoney} icon="money" accent />
-        <KPI label="Por cobrar (saldo)" value={totalPorCobrar} format={fmtMoney} icon="calendar" foot="Pendiente de entrar" />
+        <KPI label={supplierName ? `Cobrado · ${supplierName}` : 'Total cobrado'} value={totalCobrado} format={fmtMoney} icon="money" accent />
+        <KPI label={supplierName ? `Por cobrar · ${supplierName}` : 'Por cobrar (saldo)'} value={totalPorCobrar} format={fmtMoney} icon="calendar" foot={supplierName ? `${scopeRows.length} proyecto${scopeRows.length === 1 ? '' : 's'} con OC` : 'Pendiente de entrar'} />
         <KPI label="Proyectos sin cobro" value={sinCobro} icon="alert" />
       </div>
 
@@ -139,6 +146,11 @@ export function CobranzaPage() {
           <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
           <input className="input pl-[34px]" placeholder="Buscar por proyecto, cliente, monto total o cobrado…" value={q} onChange={e => setQ(e.target.value)} />
         </div>
+        <Select value={fSupplier} onChange={e => setFSupplier(e.target.value)} className="w-auto min-w-[200px]">
+          <option value="">Todos los proveedores</option>
+          {supplierOpts.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </Select>
+        {fSupplier && <button className="btn btn-ghost btn-sm" onClick={() => setFSupplier('')}><Icon name="close" size={13} /> Limpiar</button>}
         {newCount > 0 && (
           <span className="flex items-center gap-2">
             <Badge color="var(--acc)">{newCount} nuevo{newCount === 1 ? '' : 's'}</Badge>

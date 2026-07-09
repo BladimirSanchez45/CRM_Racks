@@ -168,10 +168,15 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
   const role = state.currentUser?.role
   const isAdmin = isAdminRole(role)
   const isDir = isDireccion(role)
-  const editable = isAdmin && list.status === 'Borrador'         // admin arma mientras está en borrador
-  const dirReview = isDir && list.status === 'Pendiente'         // dirección revisa/edita la lista enviada
-  const canEditMov = editable || dirReview                       // quién puede agregar/editar/eliminar movimientos
-  const canAuthorize = isDir && list.status === 'Pendiente'      // dirección decide cuando está pendiente
+  const isBorrador = list.status === 'Borrador'
+  const isPendiente = list.status === 'Pendiente'
+  // El admin puede seguir ajustando la lista mientras NO esté autorizada/rechazada: en Borrador
+  // y también en Pendiente (ya enviada a Dirección), p. ej. si cambió el saldo en cuenta o
+  // entró/salió dinero. Enviar y Eliminar siguen siendo solo de Borrador.
+  const adminEdit = isAdmin && (isBorrador || isPendiente)
+  const dirReview = isDir && isPendiente                          // dirección revisa/edita la lista enviada
+  const canEditMov = adminEdit || dirReview                       // quién puede agregar/editar/eliminar movimientos
+  const canAuthorize = isDir && isPendiente                       // dirección decide cuando está pendiente
 
   const [movForm, setMovForm] = React.useState<Movement | {} | null>(null)
   const [editList, setEditList] = React.useState(false)
@@ -198,7 +203,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
         <div className="sec-title m-0 flex items-center gap-3"><h2 className="m-0">{list.name}</h2> {listBadge(list)}</div>
         <div className="flex-1"></div>
         {canEditMov && <button className="btn btn-ghost" onClick={() => setMovForm({})}><Icon name="plus" size={15} /> Agregar movimiento</button>}
-        {editable && movs.length > 0 && <button className="btn btn-primary" onClick={() => dispatch({ type: 'SUBMIT_MOVEMENT_LIST', id: list.id })}><Icon name="arrowRight" size={15} /> Enviar lista</button>}
+        {isAdmin && isBorrador && movs.length > 0 && <button className="btn btn-primary" onClick={() => dispatch({ type: 'SUBMIT_MOVEMENT_LIST', id: list.id })}><Icon name="arrowRight" size={15} /> Enviar lista</button>}
         {canAuthorize && (<>
           <button className="btn btn-ghost" onClick={() => setRejectList(true)}><Icon name="close" size={14} /> Rechazar lista</button>
           <button className="btn btn-primary" onClick={() => dispatch({ type: 'DECIDE_MOVEMENT_LIST', id: list.id, approve: true })}><Icon name="check" size={15} /> Autorizar lista</button>
@@ -254,7 +259,8 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
       {(canEditMov || list.status === 'Rechazada') && (
         <div className="flex gap-2 mb-3.5 items-center">
           {canEditMov && <button className="btn btn-ghost btn-sm" onClick={() => setEditList(true)}><Icon name="edit" size={13} /> Editar lista</button>}
-          {editable && <button className="btn btn-ghost btn-sm" onClick={() => setDelList(true)}><Icon name="trash" size={13} /> Eliminar lista</button>}
+          {isAdmin && isBorrador && <button className="btn btn-ghost btn-sm" onClick={() => setDelList(true)}><Icon name="trash" size={13} /> Eliminar lista</button>}
+          {adminEdit && isPendiente && <span className="text-[12px] text-tx-2">Lista ya enviada — puedes ajustarla mientras Dirección no la autorice.</span>}
           {dirReview && <span className="text-[12px] text-tx-2">Estás revisando la lista — tus cambios quedan marcados.</span>}
           {list.status === 'Rechazada' && list.rejectReason && <span className="text-[12px]" style={{ color: 'var(--danger)' }}>Rechazo: {list.rejectReason}</span>}
         </div>
@@ -303,7 +309,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
             )}
           </table>
         </div>
-        {movs.length === 0 && <Empty icon="box">Esta lista no tiene movimientos{editable ? ' — agrega el primero' : ''}</Empty>}
+        {movs.length === 0 && <Empty icon="box">Esta lista no tiene movimientos{canEditMov ? ' — agrega el primero' : ''}</Empty>}
       </div>
 
       {movForm && <MovementForm listId={list.id} movement={'id' in movForm ? movForm : undefined} onClose={() => setMovForm(null)} />}
