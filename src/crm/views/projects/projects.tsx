@@ -36,6 +36,7 @@ function KanbanCard({ p, onOpen, onDragStart, onDragEnd, dragging, draggable = t
         <Avatar name={seller ? seller.name : ''} size={20} />
       </div>
       <div className="font-semibold text-[13.5px] mt-[7px] leading-[1.3]">{client ? client.name : '—'}</div>
+      {p.alias && <div className="text-[11.5px] text-tx-2 mt-[2px] leading-[1.25] truncate" title={p.alias}>“{p.alias}”</div>}
       <div className="meta mt-[3px] flex items-center gap-1"><Icon name="pin" size={11} className="opacity-50" />{p.city}</div>
 
       <div className="flex justify-between items-center mt-[11px]">
@@ -142,7 +143,7 @@ function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
 
   const rows = projects.filter(p =>
     has(p.code, cf.proyecto) &&
-    has(sel.clientName(state, p.client), cf.cliente) &&
+    has(sel.clientName(state, p.client) + ' ' + (p.alias || ''), cf.cliente) &&
     has(p.sistemaVendido || '', cf.sistema) &&
     has(cityAbbr(p.city) + ' ' + p.city, cf.ciudad) &&
     has(STAGE_MAP[p.stage]?.label || '', cf.etapa) &&
@@ -193,7 +194,7 @@ function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
               return (
                 <tr key={p.id} onClick={() => onOpen(p)}>
                   <td><span className="mono text-acc font-semibold">{p.code}</span></td>
-                  <td>{sel.clientName(state, p.client)}</td>
+                  <td>{sel.clientName(state, p.client)}{p.alias && <div className="meta mt-px truncate max-w-[180px]" title={p.alias}>“{p.alias}”</div>}</td>
                   <td className="text-tx-1 text-[12.5px]">{p.sistemaVendido || '—'}</td>
                   <td className="text-tx-1"><span title={p.city}>{cityAbbr(p.city)}</span></td>
                   <td><StageBadge stage={p.stage} size="sm" /></td>
@@ -236,7 +237,7 @@ export function ProjectsPage() {
     if (f.supplier && !p.suppliers.includes(f.supplier)) return false
     if (f.seller && p.seller !== f.seller) return false
     if (f.q) {
-      const hay = (p.code + ' ' + sel.clientName(state, p.client) + ' ' + p.city).toLowerCase()
+      const hay = (p.code + ' ' + sel.clientName(state, p.client) + ' ' + (p.alias || '') + ' ' + p.city).toLowerCase()
       if (!hay.includes(f.q.toLowerCase())) return false
     }
     return true

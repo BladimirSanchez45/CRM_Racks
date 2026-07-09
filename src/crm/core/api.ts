@@ -225,6 +225,7 @@ function mapProject(r: any): Project {
   return {
     id: r.id, code: r.code, stage: r.stage,
     client: r.client ?? '', seller: r.seller ?? '', city: r.city ?? '',
+    ...(r.alias ? { alias: r.alias } : {}),
     ...(r.origen ? { origen: r.origen } : {}),
     ...(r.sistema_vendido ? { sistemaVendido: r.sistema_vendido } : {}),
     ...(r.venta_subtotal != null ? { ventaSubtotal: Number(r.venta_subtotal) } : {}),
@@ -245,6 +246,7 @@ function mapProject(r: any): Project {
 function projectRow(p: Project): Record<string, unknown> {
   return {
     id: p.id, code: p.code, stage: p.stage, client: p.client, seller: p.seller, city: p.city,
+    alias: p.alias ?? null,
     origen: p.origen ?? null,
     sistema_vendido: p.sistemaVendido ?? null, venta_subtotal: p.ventaSubtotal ?? null,
     freight: p.freight, install: p.install,

@@ -695,6 +695,7 @@ export function OrdersPage() {
   const [assignProj, setAssignProj] = React.useState<Project | null>(null)
   const [fStatus, setFStatus] = React.useState('')
   const [fSupplier, setFSupplier] = React.useState('')
+  const [q, setQ] = React.useState('')
   // Orden de la tabla: sin orden (dir 0) respeta el orden original; al hacer clic
   // en una columna numérica se ordena descendente (mayor→menor) y luego ascendente.
   const [sort, setSort] = React.useState<{ key: string; dir: number }>({ key: '', dir: 0 })
@@ -704,23 +705,33 @@ export function OrdersPage() {
   const orders = isVentas
     ? state.orders.filter(o => { const proj = state.projects.find(p => p.id === o.projectId); return !!proj && proj.seller === me!.id })
     : state.orders
-  const sortVal = (o: Order): number => {
+  // Compara dos OC según la columna activa. El folio (OC) se ordena como texto
+  // (alfanumérico, respetando números: JZ-2238 < JZ-2239); el resto como número.
+  const cmp = (a: Order, b: Order): number => {
     switch (sort.key) {
-      case 'amount': return o.amount
-      case 'paid': return sel.ocPaid(state, o.id)
-      case 'balance': return sel.ocBalance(state, o)
-      case 'pct': return sel.ocPct(state, o)
+      case 'number': return (a.number || '').localeCompare(b.number || '', 'es', { numeric: true, sensitivity: 'base' })
+      case 'amount': return a.amount - b.amount
+      case 'paid': return sel.ocPaid(state, a.id) - sel.ocPaid(state, b.id)
+      case 'balance': return sel.ocBalance(state, a) - sel.ocBalance(state, b)
+      case 'pct': return sel.ocPct(state, a) - sel.ocPct(state, b)
       default: return 0
     }
   }
+  const needle = q.trim().toLowerCase()
+  const matchesQ = (o: Order) => {
+    if (!needle) return true
+    const hay = [o.number, sel.supplier(state, o.supplierId)?.name, ocDesc(state, o), o.conditions, o.responsible]
+      .filter(Boolean).join(' ').toLowerCase()
+    return hay.includes(needle)
+  }
   const list = orders
-    .filter(o => (!fStatus || ocStatusOf(o) === fStatus) && (!fSupplier || o.supplierId === fSupplier))
-    .sort((a, b) => sort.dir === 0 ? 0 : (sortVal(a) - sortVal(b)) * sort.dir)
-  // Clic en encabezado numérico: 1er clic = descendente (mayor→menor), 2º = ascendente, 3º = sin orden.
+    .filter(o => (!fStatus || ocStatusOf(o) === fStatus) && (!fSupplier || o.supplierId === fSupplier) && matchesQ(o))
+    .sort((a, b) => sort.dir === 0 ? 0 : cmp(a, b) * sort.dir)
+  // Clic en encabezado: 1er clic = descendente (mayor→menor), 2º = ascendente, 3º = sin orden.
   const toggleSort = (key: string) => setSort(s =>
     s.key !== key ? { key, dir: -1 } : s.dir === -1 ? { key, dir: 1 } : { key: '', dir: 0 })
-  const sortableTh = (key: string, label: string) => (
-    <th className="num sortable" onClick={() => toggleSort(key)} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
+  const sortableTh = (key: string, label: string, cls = 'num') => (
+    <th className={cls + ' sortable'} onClick={() => toggleSort(key)} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
       {label}{sort.key === key && <span className="text-acc"> {sort.dir < 0 ? '▼' : '▲'}</span>}
     </th>
   )
@@ -811,6 +822,10 @@ export function OrdersPage() {
           </div>
 
           <div className="flex gap-2 mb-3.5 items-center flex-wrap">
+            <div className="relative flex-[1_1_220px] max-w-[300px]">
+              <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+              <input className="input pl-[34px]" placeholder="Buscar OC, proveedor, descripción…" value={q} onChange={e => setQ(e.target.value)} />
+            </div>
             <span className="label-k">Filtrar:</span>
             <div className="seg">
               <button className={!fStatus ? 'on' : ''} onClick={() => setFStatus('')}>Todas</button>
@@ -820,7 +835,7 @@ export function OrdersPage() {
               <option value="">Todos los proveedores</option>
               {supplierOpts.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
-            {(fStatus || fSupplier || sort.dir !== 0) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier(''); setSort({ key: '', dir: 0 }) }}><Icon name="close" size={13} /> Limpiar</button>}
+            {(fStatus || fSupplier || q || sort.dir !== 0) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier(''); setQ(''); setSort({ key: '', dir: 0 }) }}><Icon name="close" size={13} /> Limpiar</button>}
             <span className="meta">{list.length} de {orders.length}</span>
           </div>
 
@@ -828,7 +843,7 @@ export function OrdersPage() {
             <div className="overflow-x-auto">
               <table className="tbl">
                 <thead><tr>
-                  <th>OC</th><th>Fecha</th><th>Proveedor</th><th>Descripción</th><th>Condiciones</th>
+                  {sortableTh('number', 'OC', '')}<th>Fecha</th><th>Proveedor</th><th>Descripción</th><th>Condiciones</th>
                   {sortableTh('amount', 'Monto')}{sortableTh('paid', 'Pagado')}{sortableTh('balance', 'Saldo')}{sortableTh('pct', '%')}
                   <th>Entrega est.</th><th className="num">Días</th><th>Estatus</th><th>Responsable</th>
                 </tr></thead>

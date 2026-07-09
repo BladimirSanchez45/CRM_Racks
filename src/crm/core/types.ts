@@ -333,6 +333,7 @@ export interface Project {
   client: string
   seller: string
   city: string
+  alias?: string            // Nombre interno / alias con el que el vendedor ubica al cliente (la razón social a veces no la reconocen)
   origen?: string           // Origen del lead/venta (WebAd, CTC Ad…)
   sistemaVendido?: string   // Sistema vendido (tipo de rack/solución)
   ventaSubtotal?: number    // Subtotal de la venta (YA incluye flete e instalación). IVA y total se calculan de aquí.

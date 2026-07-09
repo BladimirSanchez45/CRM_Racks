@@ -85,6 +85,7 @@ type ProjectFormState = {
   client: string
   seller: string
   city: string
+  alias?: string
   origen?: string
   sistemaVendido?: string
   ventaSubtotal?: number | string
@@ -253,6 +254,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
         <div>
           <div className="label-k mb-2">Datos generales</div>
           <InfoRow k="Cliente">{client ? client.name : '—'}</InfoRow>
+          {p.alias && <InfoRow k="Nombre interno / Alias">{p.alias}</InfoRow>}
           <InfoRow k="Origen">{p.origen || '—'}</InfoRow>
           <InfoRow k="Sistema vendido">{p.sistemaVendido || '—'}</InfoRow>
           <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}</InfoRow>
@@ -450,7 +452,7 @@ const ORIGENES = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CT
 
 const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
-  client: '', seller: '', city: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
+  client: '', seller: '', city: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending',
   docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
 })
@@ -556,6 +558,9 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
               <Icon name="eye" size={15} />
             </button>
           </div>
+        </Field>
+        <Field label={<>Nombre interno / Alias <span className="meta font-normal">(opcional)</span></>}>
+          <Input value={p.alias || ''} onChange={e => set('alias', e.target.value)} placeholder="Cómo conoces al cliente" />
         </Field>
         <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey, N.L." /></Field>
         <Field label="Sistema vendido"><Input value={p.sistemaVendido || ''} onChange={e => set('sistemaVendido', e.target.value)} placeholder="Ej. Rack selectivo" /></Field>
