@@ -695,13 +695,35 @@ export function OrdersPage() {
   const [assignProj, setAssignProj] = React.useState<Project | null>(null)
   const [fStatus, setFStatus] = React.useState('')
   const [fSupplier, setFSupplier] = React.useState('')
+  // Orden de la tabla: sin orden (dir 0) respeta el orden original; al hacer clic
+  // en una columna numérica se ordena descendente (mayor→menor) y luego ascendente.
+  const [sort, setSort] = React.useState<{ key: string; dir: number }>({ key: '', dir: 0 })
 
   const ocStatusOf = (o: Order) => sel.ocStatus(state, o)
   // Ventas solo ve las OC asociadas a SUS proyectos (donde es el vendedor).
   const orders = isVentas
     ? state.orders.filter(o => { const proj = state.projects.find(p => p.id === o.projectId); return !!proj && proj.seller === me!.id })
     : state.orders
-  const list = orders.filter(o => (!fStatus || ocStatusOf(o) === fStatus) && (!fSupplier || o.supplierId === fSupplier))
+  const sortVal = (o: Order): number => {
+    switch (sort.key) {
+      case 'amount': return o.amount
+      case 'paid': return sel.ocPaid(state, o.id)
+      case 'balance': return sel.ocBalance(state, o)
+      case 'pct': return sel.ocPct(state, o)
+      default: return 0
+    }
+  }
+  const list = orders
+    .filter(o => (!fStatus || ocStatusOf(o) === fStatus) && (!fSupplier || o.supplierId === fSupplier))
+    .sort((a, b) => sort.dir === 0 ? 0 : (sortVal(a) - sortVal(b)) * sort.dir)
+  // Clic en encabezado numérico: 1er clic = descendente (mayor→menor), 2º = ascendente, 3º = sin orden.
+  const toggleSort = (key: string) => setSort(s =>
+    s.key !== key ? { key, dir: -1 } : s.dir === -1 ? { key, dir: 1 } : { key: '', dir: 0 })
+  const sortableTh = (key: string, label: string) => (
+    <th className="num sortable" onClick={() => toggleSort(key)} style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
+      {label}{sort.key === key && <span className="text-acc"> {sort.dir < 0 ? '▼' : '▲'}</span>}
+    </th>
+  )
   const supplierOpts = state.suppliers.filter(s => orders.some(o => o.supplierId === s.id))
   const sinAsignar = readOnly ? [] : state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado')
 
@@ -798,7 +820,7 @@ export function OrdersPage() {
               <option value="">Todos los proveedores</option>
               {supplierOpts.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
-            {(fStatus || fSupplier) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier('') }}><Icon name="close" size={13} /> Limpiar</button>}
+            {(fStatus || fSupplier || sort.dir !== 0) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier(''); setSort({ key: '', dir: 0 }) }}><Icon name="close" size={13} /> Limpiar</button>}
             <span className="meta">{list.length} de {orders.length}</span>
           </div>
 
@@ -807,7 +829,7 @@ export function OrdersPage() {
               <table className="tbl">
                 <thead><tr>
                   <th>OC</th><th>Fecha</th><th>Proveedor</th><th>Descripción</th><th>Condiciones</th>
-                  <th className="num">Monto</th><th className="num">Pagado</th><th className="num">Saldo</th><th className="num">%</th>
+                  {sortableTh('amount', 'Monto')}{sortableTh('paid', 'Pagado')}{sortableTh('balance', 'Saldo')}{sortableTh('pct', '%')}
                   <th>Entrega est.</th><th className="num">Días</th><th>Estatus</th><th>Responsable</th>
                 </tr></thead>
                 <tbody>
