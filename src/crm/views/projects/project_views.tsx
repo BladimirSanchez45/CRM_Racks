@@ -6,7 +6,7 @@ import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, day
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
-import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
+import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, InternalPayment, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
 /* ---- badge de estado de cobro + formulario de cobro del cliente ---- */
 const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)', Programado: 'var(--warn)', Cancelado: 'var(--tx-3)' }
@@ -162,17 +162,44 @@ function InfoRow({ k, children }: { k: React.ReactNode; children: React.ReactNod
   )
 }
 
+/* ---- Estado del PAGO INTERNO de un servicio (flete/instalación) ----
+   Resume las solicitudes de pago interno del proyecto para ese servicio y dice si:
+   no se ha solicitado, se solicitó (aprobado/programado), va parcial o ya se pagó.
+   Los pagos rechazados/cancelados no cuentan. */
+const PI_ACTIVE = (ip: InternalPayment) => ip.status !== 'Rechazado' && ip.status !== 'Cancelado'
+function pagoInternoEstado(payments: InternalPayment[], cost?: number): { label: string; color: string; detail: string } {
+  const activos = payments.filter(PI_ACTIVE)
+  if (activos.length === 0) return { label: 'Sin solicitar', color: 'var(--danger)', detail: 'No se ha solicitado el pago interno de este servicio' }
+  const pagado = activos.filter(p => p.status === 'Pagado').reduce((a, p) => a + (p.amount || 0), 0)
+  const solicitado = activos.reduce((a, p) => a + (p.amount || 0), 0)
+  const ref = cost && cost > 0 ? cost : solicitado
+  if (pagado <= 0) {
+    // Sin pagar aún: refleja qué tan avanzada está la solicitud.
+    const label = activos.some(p => p.status === 'Programado') ? 'Programado'
+      : activos.some(p => p.status === 'Aprobado') ? 'Aprobado'
+      : 'Solicitado'
+    return { label, color: 'var(--warn)', detail: `Solicitado ${fmtMoney(solicitado)} · sin pagar` }
+  }
+  if (pagado >= ref - 0.5) return { label: 'Pagado', color: 'var(--ok)', detail: `Pagado ${fmtMoney(pagado)}` }
+  return { label: 'Pago parcial', color: 'var(--st-5)', detail: `Pagado ${fmtMoney(pagado)} de ${fmtMoney(ref)}` }
+}
+
 /* ---- Renglón de servicio asignado (flete/instalación): proveedor + presupuesto vs costo ---- */
-export function ServiceRow({ label, supplierId, budget, cost, state }: { label: string; supplierId?: string; budget?: number; cost?: number; state: AppState }) {
+export function ServiceRow({ label, supplierId, budget, cost, state, payments }: { label: string; supplierId?: string; budget?: number; cost?: number; state: AppState; payments?: InternalPayment[] }) {
   const supplier = supplierId ? sel.supplier(state, supplierId) : undefined
   const hasCost = cost != null && cost > 0
   const over = hasCost && (budget || 0) > 0 && (cost || 0) > (budget || 0)
   const within = hasCost && !over
+  // El indicador de pago interno solo tiene sentido cuando el servicio ya tiene proveedor
+  // asignado o cuando ya existe alguna solicitud de pago interno.
+  const showPI = payments && (!!supplierId || payments.some(PI_ACTIVE))
+  const pi = showPI ? pagoInternoEstado(payments!, cost) : null
   return (
     <div className="flex items-center justify-between gap-3 text-[12.5px]">
       <div className="min-w-0">
         <div className="font-semibold text-tx-1">{label}</div>
         <div className="meta truncate">{supplier ? supplier.name : 'Sin proveedor asignado'}</div>
+        {pi && <div className="mt-1" title={pi.detail}><Badge color={pi.color}>{pi.label}</Badge></div>}
       </div>
       <div className="text-right shrink-0">
         <div className="meta">Presupuesto {fmtMoney(budget)}</div>
@@ -189,7 +216,9 @@ export function ServiceRow({ label, supplierId, budget, cost, state }: { label: 
 /* ---------- Project detail drawer ---------- */
 export function ProjectDetail({ project, onClose, onEdit }: { project: Project; onClose: () => void; onEdit: () => void }) {
   const { state, dispatch } = useStore()
-  const readOnly = isDireccion(state.currentUser?.role) || isIngenieria(state.currentUser?.role)   // dirección/ingeniería: ver sin editar/cobrar/mover etapa
+  // Ventas, dirección e ingeniería: ver sin registrar/editar cobros ni mover etapa.
+  // (Ventas registra la venta, pero la cobranza la maneja Administración/Finanzas.)
+  const readOnly = state.currentUser?.role === 'ventas' || isDireccion(state.currentUser?.role) || isIngenieria(state.currentUser?.role)
   const p = state.projects.find(x => x.id === project.id) || project
   const client = sel.client(state, p.client)
   const seller = sel.seller(state, p.seller)
@@ -297,8 +326,10 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
 
           <div className="label-k mb-2">Servicios asignados (logística)</div>
           <div className="bg-bg-1 border border-line p-3.5 mb-3.5 flex flex-col gap-2.5">
-            <ServiceRow label="Flete" supplierId={p.freightSupplierId} budget={p.freight} cost={p.freightCost} state={state} />
-            <ServiceRow label="Instalación" supplierId={p.installSupplierId} budget={p.install} cost={p.installCost} state={state} />
+            <ServiceRow label="Flete" supplierId={p.freightSupplierId} budget={p.freight} cost={p.freightCost} state={state}
+              payments={state.internalPayments.filter(ip => ip.projectId === p.id && ip.category === 'Flete')} />
+            <ServiceRow label="Instalación" supplierId={p.installSupplierId} budget={p.install} cost={p.installCost} state={state}
+              payments={state.internalPayments.filter(ip => ip.projectId === p.id && ip.category === 'Instalación')} />
           </div>
 
           <div className="label-k mb-2">Proveedores asignados</div>

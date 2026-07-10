@@ -18,7 +18,7 @@ const estadoDe = (total: number, cobrado: number): Estado =>
 /* ---- Detalle de cobranza de un proyecto (registrar/ver cobros) ---- */
 function CobranzaDetail({ project, onClose }: { project: Project; onClose: () => void }) {
   const { state, dispatch } = useStore()
-  const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin registrar/editar cobros
+  const readOnly = state.currentUser?.role === 'ventas' || isDireccion(state.currentUser?.role)   // ventas/dirección: ver sin registrar/editar cobros
   const p = state.projects.find(x => x.id === project.id) || project
   const cobros = sel.clientPaymentsForProject(state, p.id)
   const total = sel.projectTotalConIva(p)
