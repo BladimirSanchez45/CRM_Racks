@@ -5,6 +5,7 @@ import * as React from 'react'
 import { StoreProvider, useStore, isAdminRole, isSuperadmin, isDireccion, roleLabel } from './core/data'
 import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
+import { DueSoonModal } from './views/projects/due_soon'
 import { Icon, type IconName } from './core/icons'
 import { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakColor } from './core/tweaks-panel'
 import { DashboardPage } from './views/dashboard/dashboard'
@@ -175,7 +176,11 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
             <div className="text-[12.5px] font-semibold truncate">{me?.name ?? 'Invitado'}</div>
             <div className="meta text-[10.5px] truncate">{me?.title || roleLabel(me?.role)}</div>
           </div>
-          <button className="icon-btn shrink-0" title="Cerrar sesión" onClick={() => { void signOut(); dispatch({ type: 'LOGOUT' }) }}><Icon name="logout" size={16} /></button>
+          <button className="icon-btn shrink-0" title="Cerrar sesión" onClick={() => {
+            // Limpia la marca "por vencer visto" para que el recordatorio reaparezca al próximo login.
+            try { Object.keys(sessionStorage).filter(k => k.startsWith('due_soon_seen_')).forEach(k => sessionStorage.removeItem(k)) } catch { /* ignore */ }
+            void signOut(); dispatch({ type: 'LOGOUT' })
+          }}><Icon name="logout" size={16} /></button>
         </div>
       </div>
     </aside>
@@ -246,6 +251,9 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
           <div className="content-inner" key={route}>{page()}</div>
         </main>
       </div>
+
+      {/* recordatorio al iniciar sesión: proyectos por vencer (ventas/logística) */}
+      <DueSoonModal onOpenProject={onOpenProject} />
 
       {/* cross-module project overlay */}
       {openProj && !editProj && <ProjectDetail project={openProj} onClose={() => setOpenProj(null)} onEdit={() => setEditProj(openProj)} />}

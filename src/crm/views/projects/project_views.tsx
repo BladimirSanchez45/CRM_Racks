@@ -291,6 +291,7 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
           <InfoRow k="Sistema vendido">{p.sistemaVendido || '—'}</InfoRow>
           <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}</InfoRow>
           <InfoRow k="Vendedor"><span className="inline-flex items-center gap-1.5"><Avatar name={seller ? seller.name : ''} size={20} /> {seller ? seller.name : '—'}</span></InfoRow>
+          <InfoRow k="Fecha de registro">{p.created ? fmtDate(p.created) : '—'}</InfoRow>
           <InfoRow k="Semanas de entrega"><span className="mono">{p.weeks} sem</span></InfoRow>
           <InfoRow k="ETA proveedor">{p.eta ? <span>{fmtDate(p.eta)} {eta != null && <span className="font-mono text-[11px]" style={{ color: eta < 0 ? 'var(--danger)' : eta < 7 ? 'var(--warn)' : 'var(--tx-2)' }}>({eta < 0 ? `${-eta}d vencido` : eta + 'd'})</span>}</span> : '—'}</InfoRow>
           <InfoRow k="Finiquito"><PayBadge status={p.finiquito} /></InfoRow>
@@ -489,7 +490,7 @@ const ORIGENES = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CT
 const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
   client: '', seller: '', city: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
-  suppliers: [], eta: '', finiquito: 'pending',
+  suppliers: [], eta: '', finiquito: 'pending', created: TODAY_ISO,
   docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
 })
 
@@ -629,6 +630,7 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
         <Field label="Presupuesto flete (MXN)"><MoneyInput value={p.freight} onChange={v => set('freight', v)} placeholder="0" /></Field>
         <Field label="Presupuesto instalación (MXN)"><MoneyInput value={p.install} onChange={v => set('install', v)} placeholder="0" /></Field>
         <Field label={<>ETA proveedor <span className="meta font-normal">(auto)</span></>}><Input type="date" value={p.eta} onChange={e => set('eta', e.target.value)} /></Field>
+        <Field label="Fecha de registro"><Input type="date" value={(p.created || '').slice(0, 10)} onChange={e => set('created', e.target.value)} /></Field>
       </div>
 
       {/* venta: subtotal (ya incluye flete e instalación) → IVA → total */}

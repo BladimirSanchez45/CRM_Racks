@@ -438,7 +438,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case 'SAVE_PROJECT': {
         const isNew = !action.project.id || !s.projects.some(p => p.id === action.project.id)
         const full: Project = isNew
-          ? { ...(action.project as Project), id: action.project.id ?? uid('p'), created: today(), updated: today() }
+          ? { ...(action.project as Project), id: action.project.id ?? uid('p'), created: action.project.created || today(), updated: today() }
           : { ...(action.project as Project), updated: today() }
         rawDispatch({ type: 'UPSERT_PROJECT', project: full })
         const thunks: (() => Promise<void>)[] = [() => saveProject(full)]

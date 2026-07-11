@@ -74,9 +74,10 @@ export function Kanban({ projects, onOpen, canMove = true }: { projects: Project
   }
 
   return (
-    // Alto acotado al viewport (resta topbar + título + filtros) para que el tablero
-    // no crezca sin fin con muchos proyectos: cada columna hace su propio scroll.
-    <div className="flex gap-3 overflow-x-auto pb-3 h-[calc(100vh-230px)] min-h-[400px]">
+    // flex-1 + min-h-0: el tablero llena la altura que le da su contenedor (ver
+    // ProjectsPage), así su barra de scroll horizontal queda al fondo, siempre
+    // visible; cada columna hace su propio scroll vertical.
+    <div className="flex gap-3 overflow-x-auto pb-3 flex-1 min-h-0">
       {cols.map(({ stage, items }) => {
         const total = items.reduce((a, p) => a + sel.projectTotalConIva(p), 0)
         const isOver = over === stage.id
@@ -246,8 +247,30 @@ export function ProjectsPage() {
   const openDetail = (p: Project) => { setDetail(p); setEditing(false) }
   const hasFilters = f.stage || f.client || f.supplier || f.seller || f.q
 
+  // Para la vista Tablero: fijamos la altura de esta página al área visible del
+  // contenedor de scroll (.content), de modo que el tablero (flex-1) llene justo
+  // ese espacio y su barra horizontal quede al fondo, siempre visible, sin que la
+  // página tenga que hacer scroll vertical. Se observa por si cambia el tamaño.
+  const rootRef = React.useRef<HTMLDivElement>(null)
+  const [viewportH, setViewportH] = React.useState<number>()
+  React.useLayoutEffect(() => {
+    const scroller = rootRef.current?.closest('.content') as HTMLElement | null
+    if (!scroller) return
+    const recalc = () => {
+      const cs = getComputedStyle(scroller)
+      const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+      setViewportH(scroller.clientHeight - padY)
+    }
+    recalc()
+    window.addEventListener('resize', recalc)
+    const ro = new ResizeObserver(recalc); ro.observe(scroller)
+    return () => { window.removeEventListener('resize', recalc); ro.disconnect() }
+  }, [])
+  const isKanban = view === 'kanban'
+
   return (
-    <div>
+    <div ref={rootRef} className={isKanban ? 'flex flex-col min-h-0' : undefined}
+      style={isKanban && viewportH ? { height: viewportH } : undefined}>
       <div className="spread mb-[18px] flex-wrap">
         <div className="sec-title m-0">
           <h2>Proyectos</h2>
