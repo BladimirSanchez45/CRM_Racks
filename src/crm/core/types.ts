@@ -71,6 +71,10 @@ export interface Client {
   limiteCredito?: number
   metodoPago?: string
   formaPago?: string
+  /* ---- Alta con aprobación: un vendedor puede proponer un cliente; queda
+     "pending" hasta que un administrador lo aprueba (o lo rechaza = se elimina). ---- */
+  pending?: boolean          // true = propuesto por un vendedor, falta aprobación del admin
+  requestedBy?: string       // userId de quien lo propuso
 }
 
 export interface Supplier {
@@ -395,6 +399,7 @@ export type NotificationKind =
   | 'movements_submitted'        // admin envió la lista de movimientos → se avisa a dirección
   | 'movement_decided'           // dirección autorizó/rechazó la lista → se avisa al creador
   | 'movement_changed'           // dirección modificó (agregó/editó/eliminó) la lista → se avisa al creador
+  | 'client_pending'             // un vendedor propuso un cliente nuevo → se avisa a los administradores
 
 /** Notificación dirigida a un usuario concreto (a diferencia del feed de
  *  actividad, que es global). Se entrega por id de usuario destinatario. */
@@ -432,8 +437,50 @@ export interface Campaign {
   createdAt: string       // ISO
 }
 
+/** Etapa de seguimiento de un prospecto (antes de convertirlo en Proyecto). */
+export type ProspectEstado = 'Nuevo' | 'Contactado' | 'Cotizado' | 'Negociación'
+/** Resultado/desenlace del prospecto. 'Vendido' habilita registrar la venta (Proyecto). */
+export type ProspectResultado = 'En espera' | 'Vendido' | 'Perdido'
+
+/** Comentario dentro del hilo de seguimiento de un prospecto. */
+export interface ProspectComment {
+  id: string
+  author: string       // userId de quien comentó
+  authorName: string   // nombre (snapshot) para mostrar aunque cambie el usuario
+  text: string
+  at: string           // ISO
+}
+
+/** Prospecto / lead que un vendedor gestiona ANTES de registrar la venta como Proyecto.
+ *  Guarda datos sueltos del contacto; al marcarse como Vendido se puede convertir en
+ *  Proyecto prellenando el formulario con estos datos. */
+export interface Prospect {
+  id: string
+  name: string                 // Nombre del prospecto / contacto
+  seller: string               // vendedor dueño del prospecto (seller id)
+  empresa?: string
+  email?: string
+  phone?: string
+  city?: string
+  fechaAsignacion?: string     // Fecha de asignación (ISO date)
+  estado: ProspectEstado
+  ultimoContacto?: string      // Fecha del último contacto (ISO date); base del "Seguimiento"
+  cotizacion?: string          // Nombre del archivo de cotización
+  cotizacionPath?: string      // Ruta del archivo en Storage
+  costo?: number               // COSTO / monto cotizado (prellenaría el subtotal de la venta)
+  resultado: ProspectResultado
+  sistema?: string             // Sistema (→ project.sistemaVendido)
+  anuncio?: string             // Anuncio / origen del lead (→ project.origen)
+  notas?: string
+  comments?: ProspectComment[] // Hilo de comentarios de seguimiento
+  convertedProjectId?: string  // id del Proyecto creado al registrar la venta (si ya se convirtió)
+  createdAt: string            // ISO
+  updated?: string             // ISO
+}
+
 /** Estado global de la aplicación. */
 export interface AppState {
+  prospects: Prospect[]
   projects: Project[]
   suppliers: Supplier[]
   orders: Order[]
@@ -495,6 +542,10 @@ export type CampaignInput = Omit<Campaign, 'id' | 'createdBy' | 'createdAt'> & {
   createdBy?: string
   createdAt?: string
 }
+export type ProspectInput = Omit<Prospect, 'id' | 'createdAt'> & {
+  id?: string
+  createdAt?: string
+}
 
 /** Acciones del store. */
 export type Action =
@@ -537,6 +588,8 @@ export type Action =
   | { type: 'DECIDE_MOVEMENT'; id: string; approve: boolean; reason?: string }
   | { type: 'SAVE_CAMPAIGN'; campaign: CampaignInput }
   | { type: 'DELETE_CAMPAIGN'; id: string }
+  | { type: 'SAVE_PROSPECT'; prospect: ProspectInput }
+  | { type: 'DELETE_PROSPECT'; id: string }
   | { type: 'MARK_NOTIFICATION_READ'; id: string }
   | { type: 'MARK_ALL_NOTIFICATIONS_READ' }
   | { type: 'LOGIN'; user: User }
@@ -574,6 +627,8 @@ export type StateAction =
   | { type: 'REMOVE_MOVEMENT'; id: string }
   | { type: 'UPSERT_CAMPAIGN'; campaign: Campaign }
   | { type: 'REMOVE_CAMPAIGN'; id: string }
+  | { type: 'UPSERT_PROSPECT'; prospect: Prospect }
+  | { type: 'REMOVE_PROSPECT'; id: string }
   | { type: 'SET_SETTINGS'; settings: AppSettings }
   | { type: 'PUSH_ACTIVITY'; activity: Activity }
   | { type: 'UPSERT_NOTIFICATION'; notification: Notification }

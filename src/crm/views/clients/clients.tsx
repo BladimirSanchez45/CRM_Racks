@@ -2,20 +2,38 @@
 //  CLIENTS — list, project history, payment status
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtK, fmtDate, fmtMoney2, REGIMEN_FISCAL, regimenLabel, isDireccion } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtK, fmtDate, fmtMoney2, uid, REGIMEN_FISCAL, regimenLabel, isDireccion, isAdminRole } from '../../core/data'
 import { Modal, Field, Input, Select, StageBadge, PayBadge, Badge, Avatar, Empty, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Client, ClientInput, Project } from '../../core/types'
 
-function ClientForm({ client, onClose }: { client?: Client; onClose: () => void }) {
-  const { dispatch } = useStore()
+export function ClientForm({ client, onClose, requestApproval, onCreated }: { client?: Client; onClose: () => void; requestApproval?: boolean; onCreated?: (client: Client) => void }) {
+  const { state, dispatch } = useStore()
   const [c, setC] = React.useState<ClientInput>(() => client ? { ...client } : { name: '', city: '', contact: '', phone: '', email: '' })
   const set = (k: keyof ClientInput, v: unknown) => setC(o => ({ ...o, [k]: v }))
   const setNum = (k: keyof ClientInput, v: string) => setC(o => ({ ...o, [k]: v === '' ? undefined : Number(v) }))
   const { requestClose, guard } = useUnsavedGuard(c, onClose)
+  // Un cliente NUEVO propuesto por alguien que no es admin queda "pending" (falta que
+  // el administrador lo apruebe). Al editar o si lo crea un admin, no requiere aprobación.
+  const needsApproval = !!requestApproval && !client?.id && !isAdminRole(state.currentUser?.role)
+  const save = () => {
+    const full: Client = {
+      ...(c as Client), id: client?.id ?? uid('c'),
+      ...(needsApproval ? { pending: true, requestedBy: state.currentUser?.id } : {}),
+    }
+    dispatch({ type: 'SAVE_CLIENT', client: full })
+    onCreated?.(full)
+    onClose()
+  }
   return (
-    <Modal width={620} icon={client ? 'edit' : 'plus'} title={client ? 'Editar cliente' : 'Nuevo cliente'} onClose={requestClose}
-      footer={<><button className="btn btn-ghost" onClick={requestClose}>Cancelar</button><button className={'btn btn-primary' + (!c.name ? ' opacity-50' : '')} disabled={!c.name} onClick={() => { dispatch({ type: 'SAVE_CLIENT', client: c }); onClose() }}><Icon name="check" size={15} /> Guardar</button></>}>
+    <Modal width={620} icon={client ? 'edit' : 'plus'} title={client ? 'Editar cliente' : (needsApproval ? 'Nuevo cliente (requiere aprobación)' : 'Nuevo cliente')} onClose={requestClose}
+      footer={<><button className="btn btn-ghost" onClick={requestClose}>Cancelar</button><button className={'btn btn-primary' + (!c.name ? ' opacity-50' : '')} disabled={!c.name} onClick={save}><Icon name="check" size={15} /> {needsApproval ? 'Enviar a aprobación' : 'Guardar'}</button></>}>
+      {needsApproval && (
+        <div className="flex items-start gap-3 mb-4 p-3 rounded-[8px] border" style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 10%, transparent)' }}>
+          <Icon name="alert" size={18} className="mt-0.5 flex-none" style={{ color: 'var(--warn)' }} />
+          <div className="text-[12.5px] text-tx-2">El cliente quedará <strong>pendiente de aprobación</strong>: un administrador recibirá una notificación para aceptarlo o rechazarlo. Podrás usarlo en el proyecto mientras tanto.</div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="Nombre comercial" span={2}><Input value={c.name} onChange={e => set('name', e.target.value)} /></Field>
         <Field label="Razón social" span={2}><Input value={c.razonSocial || ''} onChange={e => set('razonSocial', e.target.value)} /></Field>
@@ -49,18 +67,30 @@ function FiscalRow({ label, value, mono, span2 }: { label: string; value?: strin
   )
 }
 
-function ClientDetail({ client, onClose, onEdit, onDelete, onOpenProject, readOnly }: { client: Client; onClose: () => void; onEdit: () => void; onDelete: () => void; onOpenProject: (p: Project) => void; readOnly?: boolean }) {
+function ClientDetail({ client, onClose, onEdit, onDelete, onApprove, onReject, onOpenProject, readOnly }: { client: Client; onClose: () => void; onEdit: () => void; onDelete: () => void; onApprove: () => void; onReject: () => void; onOpenProject: (p: Project) => void; readOnly?: boolean }) {
   const { state } = useStore()
   const projects = sel.projectsForClient(state, client.id)
   const total = projects.reduce((a, p) => a + sel.budget(p), 0)
   const active = projects.filter(p => p.stage !== 'finalizado').length
+  const canApprove = !readOnly && client.pending && isAdminRole(state.currentUser?.role)
   const sub = [client.rfc || client.city, `Cliente desde ${fmtDate(client.since)}`].filter(Boolean).join(' · ')
   return (
-    <Modal width={680} icon="clients" title={client.name} sub={sub} onClose={onClose}
+    <Modal width={680} icon="clients" title={<span className="flex items-center gap-2.5">{client.name}{client.pending && <Badge color="var(--warn)">Por aprobar</Badge>}</span>} sub={sub} onClose={onClose}
       footer={readOnly ? <button className="btn btn-ghost" onClick={onClose}>Cerrar</button> : <>
-        <button className="btn btn-danger" disabled={projects.length > 0} title={projects.length > 0 ? 'No se puede eliminar: tiene proyectos asociados' : 'Eliminar cliente'} onClick={onDelete}><Icon name="trash" size={15} /> Eliminar</button>
-        <div className="flex-1"></div>
-        <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button>
+        {canApprove ? (
+          <>
+            <button className="btn btn-danger" onClick={onReject}><Icon name="close" size={15} /> Rechazar</button>
+            <div className="flex-1"></div>
+            <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button>
+            <button className="btn btn-primary" onClick={onApprove}><Icon name="check" size={15} /> Aprobar cliente</button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-danger" disabled={projects.length > 0} title={projects.length > 0 ? 'No se puede eliminar: tiene proyectos asociados' : 'Eliminar cliente'} onClick={onDelete}><Icon name="trash" size={15} /> Eliminar</button>
+            <div className="flex-1"></div>
+            <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar</button>
+          </>
+        )}
       </>}>
       <div className="grid grid-cols-2 gap-5 mb-5">
         <div className="flex flex-col gap-2.5">
@@ -119,18 +149,23 @@ const CLIENTS_PAGE_SIZE = 60
 export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => void }) {
   const { state, dispatch } = useStore()
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin crear/editar/eliminar
+  const isAdmin = isAdminRole(state.currentUser?.role)
   const [detail, setDetail] = React.useState<Client | null>(null)
   const [del, setDel] = React.useState<Client | null>(null)
   const [form, setForm] = React.useState<Partial<Client> | null>(null)
   const [q, setQ] = React.useState('')
   const [limit, setLimit] = React.useState(CLIENTS_PAGE_SIZE)
 
+  const pendientes = state.clients.filter(c => c.pending)
+  const approve = (c: Client) => dispatch({ type: 'SAVE_CLIENT', client: { ...c, pending: false, requestedBy: undefined } })
+
   const filtered = React.useMemo(() => {
     const needle = q.trim().toLowerCase()
-    if (!needle) return state.clients
-    return state.clients.filter(c =>
+    const base = needle ? state.clients.filter(c =>
       (c.name + ' ' + (c.razonSocial || '') + ' ' + (c.rfc || '') + ' ' + (c.city || '') + ' ' + (c.email || ''))
-        .toLowerCase().includes(needle))
+        .toLowerCase().includes(needle)) : state.clients
+    // Los pendientes de aprobación se muestran primero.
+    return [...base].sort((a, b) => (a.pending ? 0 : 1) - (b.pending ? 0 : 1))
   }, [state.clients, q])
   const shown = filtered.slice(0, limit)
 
@@ -140,6 +175,14 @@ export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => 
         <div className="sec-title m-0"><h2>Clientes</h2><span className="sub">{filtered.length} de {state.clients.length} registrados</span></div>
         {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo cliente</button>}
       </div>
+      {isAdmin && pendientes.length > 0 && (
+        <div className="flex items-center gap-3 mb-4 p-3 rounded-[8px] border" style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 10%, transparent)' }}>
+          <Icon name="alert" size={18} className="flex-none" style={{ color: 'var(--warn)' }} />
+          <div className="text-[12.5px] text-tx-1 flex-1">
+            Tienes <strong>{pendientes.length} cliente{pendientes.length === 1 ? '' : 's'} por aprobar</strong> (propuestos por vendedores). Ábrelos para aceptarlos o rechazarlos.
+          </div>
+        </div>
+      )}
       <div className="relative mb-4 max-w-[380px]">
         <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
         <input className="input pl-[34px]" placeholder="Buscar nombre, RFC, razón social, correo…" value={q}
@@ -162,7 +205,7 @@ export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => 
                       ? <div className="meta mt-[3px] flex items-center gap-1"><Icon name="pin" size={11} className="opacity-60" /> {c.city}</div>
                       : c.rfc && <div className="meta mt-[3px] flex items-center gap-1 mono"><Icon name="doc" size={11} className="opacity-60" /> {c.rfc}</div>}
                   </div>
-                  {pendingPay && <Badge color="var(--warn)">Por cobrar</Badge>}
+                  {c.pending ? <Badge color="var(--warn)">Por aprobar</Badge> : pendingPay && <Badge color="var(--warn)">Por cobrar</Badge>}
                 </div>
                 <div className="flex justify-between mt-3.5 pt-3 border-t border-line-soft">
                   <div><div className="label-k">Proyectos</div><div className="font-mono font-semibold text-[15px] mt-0.5">{projects.length} <span className="text-tx-3 text-[11px]">({active} act.)</span></div></div>
@@ -181,9 +224,18 @@ export function ClientsPage({ onOpenProject }: { onOpenProject: (p: Project) => 
           </button>
         </div>
       )}
-      {detail && <ClientDetail client={state.clients.find(x=>x.id===detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} onOpenProject={onOpenProject} readOnly={readOnly} />}
+      {detail && <ClientDetail client={state.clients.find(x=>x.id===detail.id)!} onClose={() => setDetail(null)} onEdit={() => { setForm(detail); setDetail(null) }} onDelete={() => { setDel(detail); setDetail(null) }} onApprove={() => { approve(detail); setDetail(null) }} onReject={() => { setDel(detail); setDetail(null) }} onOpenProject={onOpenProject} readOnly={readOnly} />}
       {form && <ClientForm client={form.id ? (form as Client) : undefined} onClose={() => setForm(null)} />}
-      {del && <Confirm title="Eliminar cliente" message={`¿Eliminar a ${del.name}? Esta acción no se puede deshacer.`} onConfirm={() => { dispatch({ type: 'DELETE_CLIENT', id: del.id }); setDel(null) }} onClose={() => setDel(null)} />}
+      {del && (() => {
+        const usados = sel.projectsForClient(state, del.id).length
+        return <Confirm danger
+          title={del.pending ? 'Rechazar cliente' : 'Eliminar cliente'}
+          message={del.pending
+            ? `¿Rechazar a ${del.name}? Se eliminará del catálogo.${usados ? ` Atención: ya está en ${usados} proyecto${usados === 1 ? '' : 's'}, que quedarían sin cliente. Mejor edítalo y apruébalo si los datos solo necesitan corrección.` : ''}`
+            : `¿Eliminar a ${del.name}? Esta acción no se puede deshacer.`}
+          onConfirm={() => { dispatch({ type: 'DELETE_CLIENT', id: del.id }); setDel(null) }}
+          onClose={() => setDel(null)} />
+      })()}
     </div>
   )
 }

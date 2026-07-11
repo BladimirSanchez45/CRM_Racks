@@ -22,6 +22,7 @@ const KIND_ICON: Record<NotificationKind, IconName> = {
   movements_submitted: 'box',
   movement_decided: 'box',
   movement_changed: 'box',
+  client_pending: 'clients',
 }
 
 /** Fecha relativa amigable ("hace 5 min"). */
@@ -37,7 +38,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('es-MX')
 }
 
-export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpenMovements }: { onOpenProject: (p: Project) => void; onOpenInternalPayment?: (id: string) => void; onOpenMovements?: (id: string | null) => void }) {
+export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpenMovements, onOpenClients }: { onOpenProject: (p: Project) => void; onOpenInternalPayment?: (id: string) => void; onOpenMovements?: (id: string | null) => void; onOpenClients?: () => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
   const [open, setOpen] = React.useState(false)
@@ -93,6 +94,8 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
   const ipProject = ip?.projectId ? state.projects.find(p => p.id === ip.projectId) : undefined
   // Notificaciones de movimientos: todas llevan movementListId (abren esa lista).
   const isMov = detail?.kind === 'movements_submitted' || detail?.kind === 'movement_decided' || detail?.kind === 'movement_changed'
+  // Notificación de cliente por aprobar: lleva a la vista de Clientes.
+  const isClient = detail?.kind === 'client_pending'
 
   return (
     <>
@@ -142,10 +145,15 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
       )}
 
       {detail && (
-        <Modal width={460} icon={isIP ? 'money' : isMov ? 'box' : 'bell'} title={detail.title} sub={timeAgo(detail.createdAt)} onClose={() => setDetail(null)}
+        <Modal width={460} icon={isIP ? 'money' : isMov ? 'box' : isClient ? 'clients' : 'bell'} title={detail.title} sub={timeAgo(detail.createdAt)} onClose={() => setDetail(null)}
           footer={<>
             <button className="btn btn-ghost" onClick={() => setDetail(null)}>Cerrar</button>
             <div className="flex-1"></div>
+            {isClient && onOpenClients && (
+              <button className="btn btn-primary" onClick={() => { onOpenClients(); setDetail(null) }}>
+                <Icon name="clients" size={15} /> Ver clientes
+              </button>
+            )}
             {isIP && ip && onOpenInternalPayment && (
               <button className="btn btn-primary" onClick={() => { onOpenInternalPayment(ip.id); setDetail(null) }}>
                 <Icon name="money" size={15} /> Ver pago
@@ -165,7 +173,7 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
           <p className="text-[13px] text-tx-1 mb-3.5">{detail.body}</p>
           {detail.actorName && (
             <div className="flex items-center gap-2 mb-3.5 text-[12.5px]">
-              <Avatar name={detail.actorName} size={26} /> <span>{isIP ? 'Por' : 'Asignado por'} <b>{detail.actorName}</b></span>
+              <Avatar name={detail.actorName} size={26} /> <span>{isIP ? 'Por' : isClient ? 'Propuesto por' : 'Asignado por'} <b>{detail.actorName}</b></span>
             </div>
           )}
           {isIP ? (
@@ -188,6 +196,8 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
               <div className="spread"><span className="text-tx-2">Sistema</span><span>{project.sistemaVendido || '—'}</span></div>
               <div className="spread"><span className="text-tx-2">Venta (c/IVA)</span><span className="font-semibold">{fmtMoney(sel.projectTotalConIva(project))}</span></div>
             </div>
+          ) : isClient ? (
+            <div className="meta">Ve a <b>Clientes</b> para aprobar o rechazar el cliente propuesto.</div>
           ) : (
             <div className="meta">El proyecto ya no está disponible.</div>
           )}

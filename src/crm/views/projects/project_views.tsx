@@ -2,10 +2,11 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
+import { ClientForm } from '../clients/clients'
 import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, InternalPayment, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
 /* ---- badge de estado de cobro + formulario de cobro del cliente ---- */
@@ -533,19 +534,22 @@ function ClientInfoModal({ clientId, onClose }: { clientId: string; onClose: () 
   )
 }
 
-export function ProjectForm({ project, onClose }: { project?: Project; onClose: () => void }) {
+export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: Project; prefill?: Partial<Project>; onClose: () => void; onSaved?: (project: Project) => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
   const [p, setP] = React.useState<ProjectFormState>(() => project
     ? JSON.parse(JSON.stringify(project))
-    : { ...blank(), code: nextProjectCode(state.projects), seller: isVentas ? me!.id : '' })
+    // Proyecto nuevo (opcionalmente prellenado desde un prospecto): id estable para poder
+    // enlazar el prospecto convertido; el reducer lo trata como nuevo igualmente.
+    : { ...blank(), code: nextProjectCode(state.projects), seller: isVentas ? me!.id : '', id: uid('p'), ...prefill })
   const isNew = !project
   const set = (k: keyof ProjectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   // Origen: si el valor guardado no es uno de los presets, se considera "Otro" (texto libre).
   const presetOrigenes = ORIGENES.slice(0, -1)
   const [origenOtro, setOrigenOtro] = React.useState(() => !!p.origen && !presetOrigenes.includes(p.origen))
   const [showClient, setShowClient] = React.useState(false)
+  const [addClient, setAddClient] = React.useState(false)
   // ETA proveedor automático: fecha base (creación o hoy) + semanas de entrega × 7 días.
   const etaBase = (project?.created || '').slice(0, 10) || TODAY_ISO
   const setWeeks = (v: string) => setP(s => {
@@ -567,7 +571,9 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
   const save = () => {
     // Ventas: el vendedor SIEMPRE es él mismo (no puede registrar ventas a nombre de otro).
     const seller = isVentas ? me!.id : p.seller
-    dispatch({ type: 'SAVE_PROJECT', project: { ...p, seller, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } })
+    const project = { ...p, seller, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } as Project
+    dispatch({ type: 'SAVE_PROJECT', project })
+    onSaved?.(project)
     onClose()
   }
 
@@ -593,6 +599,9 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
             <button type="button" className="btn btn-ghost px-2.5 shrink-0" disabled={!p.client}
               title={p.client ? 'Ver información del cliente' : 'Selecciona un cliente'} onClick={() => setShowClient(true)}>
               <Icon name="eye" size={15} />
+            </button>
+            <button type="button" className="btn btn-ghost px-2.5 shrink-0" title="Agregar cliente nuevo" onClick={() => setAddClient(true)}>
+              <Icon name="plus" size={15} />
             </button>
           </div>
         </Field>
@@ -691,6 +700,7 @@ export function ProjectForm({ project, onClose }: { project?: Project; onClose: 
 
       {guard}
       {showClient && p.client && <ClientInfoModal clientId={p.client} onClose={() => setShowClient(false)} />}
+      {addClient && <ClientForm requestApproval onCreated={(cli) => setP(s => ({ ...s, client: cli.id }))} onClose={() => setAddClient(false)} />}
     </Modal>
   )
 }

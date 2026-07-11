@@ -7,7 +7,7 @@ import { supabase } from './supabase'
 import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
-  Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign,
+  Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
 } from './types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -42,6 +42,8 @@ function mapClient(r: any): Client {
     ...(r.limite_credito != null ? { limiteCredito: Number(r.limite_credito) } : {}),
     ...(r.metodo_pago ? { metodoPago: r.metodo_pago } : {}),
     ...(r.forma_pago ? { formaPago: r.forma_pago } : {}),
+    ...(r.pending ? { pending: true } : {}),
+    ...(r.requested_by ? { requestedBy: r.requested_by } : {}),
   }
 }
 
@@ -509,6 +511,52 @@ export async function fetchCampaigns(): Promise<Campaign[]> {
 export const saveCampaign = (c: Campaign) => upsert('campaigns', campaignRow(c))
 export const deleteCampaign = (id: string) => removeRow('campaigns', id)
 
+/* ---- Prospectos / leads (CRM previo a Proyectos) ---- */
+function mapProspect(r: any): Prospect {
+  return {
+    id: r.id, name: r.name ?? '', seller: r.seller ?? '',
+    estado: (r.estado ?? 'Nuevo') as Prospect['estado'],
+    resultado: (r.resultado ?? 'En espera') as Prospect['resultado'],
+    ...(r.empresa ? { empresa: r.empresa } : {}),
+    ...(r.email ? { email: r.email } : {}),
+    ...(r.phone ? { phone: r.phone } : {}),
+    ...(r.city ? { city: r.city } : {}),
+    ...(r.fecha_asignacion ? { fechaAsignacion: r.fecha_asignacion } : {}),
+    ...(r.ultimo_contacto ? { ultimoContacto: r.ultimo_contacto } : {}),
+    ...(r.cotizacion ? { cotizacion: r.cotizacion } : {}),
+    ...(r.cotizacion_path ? { cotizacionPath: r.cotizacion_path } : {}),
+    ...(r.costo != null ? { costo: Number(r.costo) } : {}),
+    ...(r.sistema ? { sistema: r.sistema } : {}),
+    ...(r.anuncio ? { anuncio: r.anuncio } : {}),
+    ...(r.notas ? { notas: r.notas } : {}),
+    ...((() => {
+      // El JSONB puede llegar como arreglo (REST) o, en algunos casos de realtime, como texto.
+      const raw = typeof r.comments === 'string' ? (() => { try { return JSON.parse(r.comments) } catch { return [] } })() : r.comments
+      return Array.isArray(raw) && raw.length ? { comments: raw.map((c: any) => ({ id: String(c.id), author: c.author ?? '', authorName: c.authorName ?? '', text: c.text ?? '', at: c.at ?? '' })) } : {}
+    })()),
+    ...(r.converted_project_id ? { convertedProjectId: r.converted_project_id } : {}),
+    createdAt: r.created_at, ...(r.updated ? { updated: r.updated } : {}),
+  }
+}
+function prospectRow(p: Prospect): Record<string, unknown> {
+  return {
+    id: p.id, name: p.name, seller: p.seller, estado: p.estado, resultado: p.resultado,
+    empresa: p.empresa ?? null, email: p.email ?? null, phone: p.phone ?? null, city: p.city ?? null,
+    fecha_asignacion: orNull(p.fechaAsignacion), ultimo_contacto: orNull(p.ultimoContacto),
+    cotizacion: p.cotizacion ?? null, cotizacion_path: p.cotizacionPath ?? null,
+    costo: p.costo ?? null, sistema: p.sistema ?? null, anuncio: p.anuncio ?? null, notas: p.notas ?? null,
+    comments: p.comments ?? [],
+    converted_project_id: p.convertedProjectId ?? null, created_at: p.createdAt, updated: p.updated ?? null,
+  }
+}
+export async function fetchProspects(): Promise<Prospect[]> {
+  const { data, error } = await supabase.from('prospects').select('*').order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapProspect)
+}
+export const saveProspect = (p: Prospect) => upsert('prospects', prospectRow(p))
+export const deleteProspect = (id: string) => removeRow('prospects', id)
+
 /* ---- Configuración global (clave/valor) — p. ej. saldo bancario ---- */
 export async function fetchSettings(): Promise<AppSettings> {
   const { data, error } = await supabase.from('app_settings').select('*')
@@ -621,6 +669,7 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   movement_lists: mapMovementList,
   movements: mapMovement,
   campaigns: mapCampaign,
+  prospects: mapProspect,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -654,6 +703,7 @@ export const saveClientRow = (c: Client) => upsert('clients', {
   regimen_fiscal: c.regimenFiscal ?? null, cp: c.cp ?? null, uso_cfdi: c.usoCFDI ?? null,
   dias_credito: c.diasCredito ?? null, limite_credito: c.limiteCredito ?? null,
   metodo_pago: c.metodoPago ?? null, forma_pago: c.formaPago ?? null,
+  pending: c.pending ?? false, requested_by: c.requestedBy ?? null,
 })
 export const deleteClient = (id: string) => removeRow('clients', id)
 export const saveSupplierRow = (s: Supplier) => upsert('suppliers', {
@@ -692,11 +742,11 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchSettings(), fetchActivity(), fetchNotifications(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, settings, activity, notifications }
 }

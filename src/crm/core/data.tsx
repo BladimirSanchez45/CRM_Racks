@@ -27,6 +27,7 @@ import type {
   Movement,
   MovementList,
   Campaign,
+  Prospect,
 } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
@@ -41,6 +42,7 @@ import {
   saveMovementList, deleteMovementList as apiDeleteMovementList,
   saveMovement, deleteMovement as apiDeleteMovement,
   saveCampaign, deleteCampaign as apiDeleteCampaign,
+  saveProspect, deleteProspect as apiDeleteProspect,
   saveActivity,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
   subscribeToData,
@@ -216,7 +218,7 @@ export const regimenLabel = (code?: string) =>
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
-  movementLists: [], movements: [], campaigns: [], settings: { bankBalance: 0 },
+  movementLists: [], movements: [], campaigns: [], prospects: [], settings: { bankBalance: 0 },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
@@ -292,6 +294,8 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_MOVEMENT': return { ...state, movements: state.movements.filter(m => m.id !== a.id) }
     case 'UPSERT_CAMPAIGN': return { ...state, campaigns: upsertBy(state.campaigns, a.campaign) }
     case 'REMOVE_CAMPAIGN': return { ...state, campaigns: state.campaigns.filter(c => c.id !== a.id) }
+    case 'UPSERT_PROSPECT': return { ...state, prospects: upsertBy(state.prospects, a.prospect) }
+    case 'REMOVE_PROSPECT': return { ...state, prospects: state.prospects.filter(p => p.id !== a.id) }
     case 'SET_SETTINGS': return { ...state, settings: a.settings }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
@@ -557,7 +561,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           since: action.client.since ?? existing?.since ?? today(),
         }
         rawDispatch({ type: 'UPSERT_CLIENT', client: full })
-        persist([() => saveClientRow(full)]); return
+        const thunks: (() => Promise<void>)[] = [() => saveClientRow(full)]
+        // Alta con aprobación: si es un cliente NUEVO propuesto (pending) por alguien que no
+        // es admin, avisa a los administradores para que lo aprueben o rechacen.
+        if (full.pending && !existing && !isAdminRole(s.currentUser?.role)) {
+          const admins = s.users.filter(u => isAdminRole(u.role) && u.active && u.id !== s.currentUser?.id)
+          for (const adminUser of admins) {
+            const notification: Notification = {
+              id: uid('nt'), userId: adminUser.id, kind: 'client_pending',
+              title: `Cliente por aprobar: ${full.name}`,
+              body: `${whoName(s)} registró un cliente nuevo${full.rfc ? ` (RFC ${full.rfc})` : ''}. Revísalo y apruébalo o recházalo en Clientes.`,
+              read: false, createdAt: nowISO(), actorName: whoName(s),
+            }
+            saveNotification(notification).catch(err =>
+              console.error('[notif] no se pudo crear la notificación para', adminUser.email, err))
+          }
+        }
+        persist(thunks); return
       }
       case 'DELETE_CLIENT':
         rawDispatch({ type: 'REMOVE_CLIENT', id: action.id })
@@ -951,6 +971,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => apiDeleteCampaign(action.id)]); return
       }
 
+      case 'SAVE_PROSPECT': {
+        const full: Prospect = {
+          ...(action.prospect as Prospect),
+          id: action.prospect.id ?? uid('pr'),
+          createdAt: action.prospect.createdAt ?? nowISO(),
+          updated: nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_PROSPECT', prospect: full })
+        persist([() => saveProspect(full)]); return
+      }
+      case 'DELETE_PROSPECT': {
+        rawDispatch({ type: 'REMOVE_PROSPECT', id: action.id })
+        persist([() => apiDeleteProspect(action.id)]); return
+      }
+
       case 'MARK_NOTIFICATION_READ': {
         const n = s.notifications.find(x => x.id === action.id); if (!n || n.read) return
         rawDispatch({ type: 'UPSERT_NOTIFICATION', notification: { ...n, read: true } })
@@ -1050,6 +1085,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movement_lists':  rawDispatch({ type: 'REMOVE_MOVEMENT_LIST', id: c.id }); break
           case 'movements':       rawDispatch({ type: 'REMOVE_MOVEMENT', id: c.id }); break
           case 'campaigns':       rawDispatch({ type: 'REMOVE_CAMPAIGN', id: c.id }); break
+          case 'prospects':       rawDispatch({ type: 'REMOVE_PROSPECT', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -1066,6 +1102,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movement_lists':  rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: c.row }); break
           case 'movements':       rawDispatch({ type: 'UPSERT_MOVEMENT', movement: c.row }); break
           case 'campaigns':       rawDispatch({ type: 'UPSERT_CAMPAIGN', campaign: c.row }); break
+          case 'prospects':       rawDispatch({ type: 'UPSERT_PROSPECT', prospect: c.row }); break
         }
       }
     })
