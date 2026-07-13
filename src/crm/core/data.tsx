@@ -76,6 +76,21 @@ export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 /** Rol Marketing: por ahora SOLO ve el módulo de Estadísticas por origen (solo lectura). */
 export const isMarketing = (role?: Role | null) => role === 'marketing'
 
+/** PUESTOS (no roles) de Ventas con visibilidad TOTAL: aunque su rol sea "ventas",
+ *  Gerente General y Gerente de Ventas ven los prospectos de todo el equipo. */
+export const PUESTOS_VENTAS_GLOBAL = ['GERENTE GENERAL', 'GERENTE DE VENTAS']
+/** Normaliza un puesto para compararlo: mayúsculas, sin acentos ni espacios de más. */
+const normTitle = (t?: string) =>
+  (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim().replace(/\s+/g, ' ')
+/** ¿El usuario ve TODOS los prospectos (no solo los suyos)?
+ *  - Roles distintos de "ventas" (admin, superadmin, dirección…): sí.
+ *  - Rol "ventas": solo si su PUESTO es Gerente General o Gerente de Ventas. */
+export const canSeeAllProspects = (u?: { role?: Role; title?: string } | null): boolean => {
+  if (!u) return false
+  if (u.role !== 'ventas') return true
+  return PUESTOS_VENTAS_GLOBAL.includes(normTitle(u.title))
+}
+
 /** Comisión bancaria fija sobre la lista de movimientos "por fuera" (total = subtotal × (1 + esto)). */
 export const COMISION_BANCARIA = 0.053
 
@@ -341,6 +356,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // Avisa al VENDEDOR del proyecto que cambió de etapa (movida manual o auto-avance).
+  // Solo aplica si ese vendedor tiene usuario con login (los vendedores del catálogo sin
+  // usuario comparten id con el usuario cuando lo tienen) y no es quien hizo el cambio.
+  const notifySellerStage = React.useCallback((st: AppState, proj: Project, stage: StageId, actor?: string) => {
+    const sellerUser = st.users.find(u => u.id === proj.seller && u.active)
+    if (!sellerUser || sellerUser.id === st.currentUser?.id) return
+    const stg = STAGE_MAP[stage]
+    const cliente = sel.clientName(st, proj.client)
+    notify([{ id: sellerUser.id }], {
+      kind: 'project_stage_moved',
+      title: `${proj.code} → ${stg.short}`,
+      body: actor
+        ? `${actor} movió tu proyecto ${proj.code}${cliente && cliente !== '—' ? ` (${cliente})` : ''} a la etapa "${stg.label}".`
+        : `Tu proyecto ${proj.code}${cliente && cliente !== '—' ? ` (${cliente})` : ''} avanzó automáticamente a la etapa "${stg.label}".`,
+      projectId: proj.id,
+      ...(actor ? { actorName: actor } : {}),
+    })
+  }, [notify])
+
   // Reconciliación de un proyecto a partir de sus datos:
   //  1) Finiquito: "paid" si el cliente cubrió el total con IVA (bidireccional).
   //  2) Etapa: auto-avance SOLO hacia adelante y a partir de "creación"
@@ -366,6 +400,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const activity: Activity = { id: uid('a'), t: nowISO(), icon: stg.icon, who: 'Sistema', txt: `avanzó automáticamente a ${stg.short}`, tgt: proj.code, kind: 'info' }
       rawDispatch({ type: 'PUSH_ACTIVITY', activity })
       thunks.push(() => saveActivity(activity))
+      // Su vendedor se entera del cambio de etapa (avance automático).
+      notifySellerStage(ns, proj, stage)
       // Notificaciones de hand-off según la etapa alcanzada (se disparan UNA vez, en la
       // transición; al siguiente reconcile la etapa ya coincide y no se repiten).
       const others = (pred: (r: Role) => boolean) => ns.users.filter(u => u.active && u.id !== ns.currentUser?.id && pred(u.role))
@@ -390,7 +426,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     }
     persist(thunks)
-  }, [persist, notify])
+  }, [persist, notify, notifySellerStage])
 
   // dispatch PÚBLICO: aplica el cambio localmente (optimista) y lo persiste.
   const dispatch = React.useCallback((action: Action) => {
@@ -425,6 +461,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const updated: Project = { ...proj, stage: action.stage, updated: today(), ...(action.stage === 'finalizado' ? { closedOn: today() } : {}) }
         rawDispatch({ type: 'UPSERT_PROJECT', project: updated })
         const thunks: (() => Promise<void>)[] = [() => saveProject(updated)]
+        // Su vendedor se entera de que le movieron el proyecto de etapa.
+        notifySellerStage(s, proj, action.stage, whoName(s))
         if (action.stage === 'finalizado' && !s.commissions.some(c => c.projectId === action.id)) {
           // Principal (vendedor) + override de cada persona con override, según el estado actual.
           for (const cm of buildCommissions(s, updated)) {
@@ -1033,7 +1071,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => markAllNotificationsRead()]); return
       }
     }
-  }, [persist, notify])
+  }, [persist, notify, notifySellerStage])
 
   // Reconciliación: tras cualquier cambio en proyectos / OC / pagos / cobros
   // (incluida la carga inicial), recalcula etapa y finiquito de cada proyecto.

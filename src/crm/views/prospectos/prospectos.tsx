@@ -5,7 +5,7 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, canSeeAllProspects } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
@@ -86,6 +86,17 @@ const calidadOf = (p: Prospect): string | null => {
 }
 const CALIDADES = ['Caliente', 'Bueno', 'Tibio', 'Frío', 'Sin evaluar']
 
+/** Mes al que pertenece el prospecto ('YYYY-MM'), por fecha de asignación
+ *  (o la fecha de alta si no tiene). Base del filtro por mes. */
+const mesKey = (p: Prospect): string => (p.fechaAsignacion || p.createdAt || '').slice(0, 7)
+/** Etiqueta legible del mes: "Julio 2026". */
+const mesLabel = (key: string): string => {
+  const [y, m] = key.split('-').map(Number)
+  if (!y || !m) return key
+  const t = new Date(y, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
 /** Días transcurridos desde el último contacto (para el "Seguimiento"). */
 function seguimiento(p: Prospect): { label: string; color: string } {
   if (!p.ultimoContacto) return { label: '—', color: 'var(--tx-3)' }
@@ -108,7 +119,9 @@ type ProspectFormState = {
 function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
-  const isVentas = me?.role === 'ventas'
+  // Un vendedor "de piso" solo puede crear prospectos a su nombre; los gerentes
+  // (Gerente General / de Ventas) y el admin sí pueden asignarlos a otro vendedor.
+  const isVentas = !canSeeAllProspects(me)
   const [p, setP] = React.useState<ProspectFormState>(() => prospect ? {
     ...prospect,
     empresa: prospect.empresa || '', email: prospect.email || '', phone: prospect.phone || '', city: prospect.city || '',
@@ -327,7 +340,7 @@ export function ProspectosPage() {
   const [del, setDel] = React.useState<Prospect | null>(null)
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
-  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '' })
+  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })
 
   // Nombre del vendedor tolerante a id de vendedor O id de usuario (ventas).
   const sellerName = (id: string) => {
@@ -335,8 +348,14 @@ export function ProspectosPage() {
     return s !== '—' ? s : (sel.userName(state, id) || '—')
   }
 
-  const rows = state.prospects.filter(p => {
+  // Alcance: los de rol Ventas solo ven SUS prospectos, salvo que su PUESTO sea
+  // Gerente General o Gerente de Ventas (esos ven los de todo el equipo, como el admin).
+  const verTodo = canSeeAllProspects(me)
+  const visibles = verTodo ? state.prospects : state.prospects.filter(p => p.seller === me?.id)
+
+  const rows = visibles.filter(p => {
     if (f.seller && p.seller !== f.seller) return false
+    if (f.mes && mesKey(p) !== f.mes) return false
     if (f.estado && p.estado !== f.estado) return false
     if (f.resultado && p.resultado !== f.resultado) return false
     if (f.calidad) {
@@ -350,16 +369,19 @@ export function ProspectosPage() {
     return true
   })
 
-  // Opciones de vendedor (ids presentes en prospectos).
-  const sellerOpts = [...new Set(state.prospects.map(p => p.seller).filter(Boolean))]
-  // KPIs — respetan el filtro de VENDEDOR (no los de estado/resultado, para no vaciar
-  // los conteos). Al elegir un vendedor, muestran solo sus prospectos.
-  const kpiBase = f.seller ? state.prospects.filter(p => p.seller === f.seller) : state.prospects
+  // Opciones de vendedor (ids presentes en los prospectos VISIBLES).
+  const sellerOpts = [...new Set(visibles.map(p => p.seller).filter(Boolean))]
+  // Meses presentes en los prospectos (más reciente primero).
+  const mesOpts = [...new Set(visibles.map(mesKey).filter(Boolean))].sort((a, b) => (a < b ? 1 : -1))
+  // KPIs — respetan los filtros de ALCANCE (vendedor y mes), no los de estado/resultado
+  // (esos vaciarían los conteos de cada categoría).
+  const kpiBase = visibles.filter(p =>
+    (!f.seller || p.seller === f.seller) && (!f.mes || mesKey(p) === f.mes))
   const enEspera = kpiBase.filter(p => p.resultado === 'En espera').length
   const vendidosPorConvertir = kpiBase.filter(p => p.resultado === 'Vendido' && !p.convertedProjectId).length
   const cotizados = kpiBase.filter(p => p.estado === 'Cotizado').length
   const totalCosto = kpiBase.reduce((a, p) => a + (p.costo || 0), 0)
-  const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad
+  const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad || f.mes
 
   const markSold = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'Vendido' } })
 
@@ -399,10 +421,13 @@ export function ProspectosPage() {
           <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
           <input className="input pl-[34px]" placeholder="Buscar nombre, empresa, teléfono…" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} />
         </div>
-        <Select value={f.seller} onChange={e => setF({ ...f, seller: e.target.value })} className="w-auto min-w-[160px]">
-          <option value="">Todos los vendedores</option>
-          {sellerOpts.map(id => <option key={id} value={id}>{sellerName(id)}</option>)}
-        </Select>
+        {/* El filtro por vendedor solo tiene sentido para quien ve a todo el equipo. */}
+        {verTodo && (
+          <Select value={f.seller} onChange={e => setF({ ...f, seller: e.target.value })} className="w-auto min-w-[160px]">
+            <option value="">Todos los vendedores</option>
+            {sellerOpts.map(id => <option key={id} value={id}>{sellerName(id)}</option>)}
+          </Select>
+        )}
         <Select value={f.estado} onChange={e => setF({ ...f, estado: e.target.value })} className="w-auto min-w-[140px]">
           <option value="">Todos los estados</option>
           {ESTADOS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -415,8 +440,12 @@ export function ProspectosPage() {
           <option value="">Toda calidad</option>
           {CALIDADES.map(s => <option key={s} value={s}>{s}</option>)}
         </Select>
-        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '', calidad: '' })}><Icon name="close" size={13} /> Limpiar</button>}
-        <span className="meta">{rows.length} de {state.prospects.length}</span>
+        <Select value={f.mes} onChange={e => setF({ ...f, mes: e.target.value })} className="w-auto min-w-[150px]">
+          <option value="">Todos los meses</option>
+          {mesOpts.map(m => <option key={m} value={m}>{mesLabel(m)}</option>)}
+        </Select>
+        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })}><Icon name="close" size={13} /> Limpiar</button>}
+        <span className="meta">{rows.length} de {visibles.length}</span>
       </div>
 
       <div className="card overflow-hidden">

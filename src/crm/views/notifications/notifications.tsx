@@ -23,6 +23,7 @@ const KIND_ICON: Record<NotificationKind, IconName> = {
   movement_decided: 'box',
   movement_changed: 'box',
   client_pending: 'clients',
+  project_stage_moved: 'kanban',
 }
 
 /** Fecha relativa amigable ("hace 5 min"). */
@@ -96,6 +97,8 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
   const isMov = detail?.kind === 'movements_submitted' || detail?.kind === 'movement_decided' || detail?.kind === 'movement_changed'
   // Notificación de cliente por aprobar: lleva a la vista de Clientes.
   const isClient = detail?.kind === 'client_pending'
+  // Cambio de etapa del proyecto (avisa a su vendedor).
+  const isStage = detail?.kind === 'project_stage_moved'
 
   return (
     <>
@@ -173,7 +176,7 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
           <p className="text-[13px] text-tx-1 mb-3.5">{detail.body}</p>
           {detail.actorName && (
             <div className="flex items-center gap-2 mb-3.5 text-[12.5px]">
-              <Avatar name={detail.actorName} size={26} /> <span>{isIP ? 'Por' : isClient ? 'Propuesto por' : 'Asignado por'} <b>{detail.actorName}</b></span>
+              <Avatar name={detail.actorName} size={26} /> <span>{isIP ? 'Por' : isClient ? 'Propuesto por' : isStage ? 'Movido por' : 'Asignado por'} <b>{detail.actorName}</b></span>
             </div>
           )}
           {isIP ? (

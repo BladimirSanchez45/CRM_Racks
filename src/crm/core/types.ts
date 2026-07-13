@@ -410,6 +410,7 @@ export type NotificationKind =
   | 'movement_decided'           // dirección autorizó/rechazó la lista → se avisa al creador
   | 'movement_changed'           // dirección modificó (agregó/editó/eliminó) la lista → se avisa al creador
   | 'client_pending'             // un vendedor propuso un cliente nuevo → se avisa a los administradores
+  | 'project_stage_moved'        // el proyecto cambió de etapa → se avisa a SU vendedor
 
 /** Notificación dirigida a un usuario concreto (a diferencia del feed de
  *  actividad, que es global). Se entrega por id de usuario destinatario. */
