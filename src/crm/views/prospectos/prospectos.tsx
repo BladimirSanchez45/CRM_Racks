@@ -9,7 +9,7 @@ import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isD
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
-import type { Project, Prospect, ProspectComment, ProspectEstado, ProspectInput, ProspectResultado } from '../../core/types'
+import type { Project, Prospect, ProspectComment, ProspectEstado, ProspectEvaluation, ProspectInput, ProspectResultado } from '../../core/types'
 
 const ESTADOS: ProspectEstado[] = ['Nuevo', 'Contactado', 'Cotizado', 'Negociación']
 const RESULTADOS: ProspectResultado[] = ['En espera', 'Vendido', 'Perdido']
@@ -20,6 +20,71 @@ const RESULTADO_COLOR: Record<ProspectResultado, string> = {
   'En espera': 'var(--warn)', Vendido: 'var(--ok)', Perdido: 'var(--danger)',
 }
 const ANUNCIOS = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack', 'Referido', 'Otro']
+
+/* ---- Evaluación rápida de calidad del prospecto (5 criterios × 5/3/1) ---- */
+type EvalKey = 'necesidad' | 'autoridad' | 'informacion' | 'urgencia' | 'presupuesto'
+const EVAL_CRITERIOS: { key: EvalKey; label: string; question: string; options: { v: number; t: string }[] }[] = [
+  {
+    key: 'necesidad', label: '1. Necesidad real del prospecto',
+    question: '¿El prospecto tiene una necesidad real y clara para el proyecto?',
+    options: [
+      { v: 5, t: 'Sí, tiene un proyecto definido y sabe qué necesita' },
+      { v: 3, t: 'Está evaluando opciones, pero tiene una necesidad probable' },
+      { v: 1, t: 'Solo está preguntando precios sin explicar contexto' },
+    ],
+  },
+  {
+    key: 'autoridad', label: '2. Autoridad de decisión',
+    question: '¿La persona con la que hablamos decide o participa en la decisión de compra?',
+    options: [
+      { v: 5, t: 'Sí, decide o participa directamente en la compra' },
+      { v: 3, t: 'Influye en la decisión, pero debe consultar con alguien más' },
+      { v: 1, t: 'Solo está recopilando información para otra persona' },
+    ],
+  },
+  {
+    key: 'informacion', label: '3. Información técnica disponible',
+    question: '¿El prospecto tiene información técnica suficiente para cotizar correctamente?',
+    options: [
+      { v: 5, t: 'Tiene medidas, pesos, layout, fotos o información clara' },
+      { v: 3, t: 'Tiene algunos datos, pero falta completar información' },
+      { v: 1, t: 'No tiene datos claros del proyecto' },
+    ],
+  },
+  {
+    key: 'urgencia', label: '4. Urgencia del proyecto',
+    question: '¿El prospecto tiene una fecha definida o urgencia para comprar?',
+    options: [
+      { v: 5, t: 'Compra inmediata o tiene fecha definida' },
+      { v: 3, t: 'Planea comprar en las próximas semanas o meses' },
+      { v: 1, t: 'No tiene fecha clara de compra' },
+    ],
+  },
+  {
+    key: 'presupuesto', label: '5. Presupuesto o avance del proyecto',
+    question: '¿El prospecto ya tiene presupuesto autorizado o avance real en el proyecto?',
+    options: [
+      { v: 5, t: 'Tiene presupuesto autorizado o proyecto aprobado' },
+      { v: 3, t: 'Está armando presupuesto o comparando para aprobación' },
+      { v: 1, t: 'Solo está comparando precios sin compromiso claro' },
+    ],
+  },
+]
+/** Puntaje total (5 a 25); null si no está evaluado. */
+const scoreOf = (e?: ProspectEvaluation): number | null =>
+  e ? EVAL_CRITERIOS.reduce((a, c) => a + (Number(e[c.key]) || 0), 0) : null
+/** Banda de calidad según el puntaje (tabla de resultado del documento). */
+const bandOf = (score: number): { label: string; color: string; hint: string } =>
+  score >= 20 ? { label: 'Caliente', color: 'var(--danger)', hint: 'Dar seguimiento prioritario' }
+    : score >= 15 ? { label: 'Bueno', color: 'var(--ok)', hint: 'Requiere seguimiento y asesoría' }
+      : score >= 10 ? { label: 'Tibio', color: 'var(--warn)', hint: 'Enviar propuesta básica y nutrir' }
+        : { label: 'Frío', color: 'var(--tx-3)', hint: 'No invertir demasiada ingeniería todavía' }
+/** Etiqueta de calidad del prospecto ('—' si aún no se evalúa). */
+const calidadOf = (p: Prospect): string | null => {
+  const s = scoreOf(p.evaluacion)
+  return s == null || s <= 0 ? null : bandOf(s).label
+}
+const CALIDADES = ['Caliente', 'Bueno', 'Tibio', 'Frío', 'Sin evaluar']
 
 /** Días transcurridos desde el último contacto (para el "Seguimiento"). */
 function seguimiento(p: Prospect): { label: string; color: string } {
@@ -170,6 +235,75 @@ function ProspectComments({ prospect, onClose }: { prospect: Prospect; onClose: 
 }
 
 /* ============================================================
+   Evaluación de calidad del prospecto
+   ============================================================ */
+function ProspectEval({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
+  const { state, dispatch } = useStore()
+  const me = state.currentUser
+  const readOnly = isDireccion(me?.role)
+  const p = state.prospects.find(x => x.id === prospect.id) || prospect
+  const [e, setE] = React.useState<ProspectEvaluation>(() => p.evaluacion
+    ? { ...p.evaluacion }
+    : { necesidad: 0, autoridad: 0, informacion: 0, urgencia: 0, presupuesto: 0 })
+  const total = EVAL_CRITERIOS.reduce((a, c) => a + (Number(e[c.key]) || 0), 0)
+  const completo = EVAL_CRITERIOS.every(c => Number(e[c.key]) > 0)
+  const band = bandOf(total)
+  const save = () => {
+    dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, evaluacion: { ...e, at: new Date().toISOString(), by: me?.id, byName: me?.name } } })
+    onClose()
+  }
+  return (
+    <Modal width={560} icon="star" title="Evaluación de calidad" sub={p.name} onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <div className="flex-1"></div>
+        {!readOnly && <button className={'btn btn-primary' + (!completo ? ' opacity-50' : '')} disabled={!completo} onClick={save}><Icon name="check" size={15} /> Guardar evaluación</button>}
+      </>}>
+      {/* Resultado en vivo */}
+      <div className="bg-bg-1 border border-line rounded-[8px] p-3.5 mb-4 flex items-center gap-4">
+        <div className="text-center shrink-0">
+          <div className="label-k">Puntaje</div>
+          <div className="font-display font-extrabold text-[24px] mt-0.5">
+            {completo ? total : '—'}<span className="text-tx-3 text-[13px]"> /25</span>
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          {completo ? (<>
+            <Badge color={band.color}>{band.label}</Badge>
+            <div className="meta mt-1">{band.hint}</div>
+          </>) : <div className="meta">Responde los 5 criterios para calcular la calidad del prospecto.</div>}
+        </div>
+      </div>
+
+      {EVAL_CRITERIOS.map(c => (
+        <div key={c.key} className="mb-4">
+          <div className="label-k">{c.label}</div>
+          <div className="text-[13px] font-semibold text-tx-0 mt-0.5 mb-2 leading-snug">{c.question}</div>
+          <div className="flex flex-col gap-1.5">
+            {c.options.map(o => {
+              const on = Number(e[c.key]) === o.v
+              return (
+                <button key={o.v} type="button" disabled={readOnly}
+                  onClick={() => setE(s => ({ ...s, [c.key]: o.v }))}
+                  className="flex items-center gap-2.5 text-left px-3 py-2 rounded-[8px] border text-[12.5px]"
+                  style={{ borderColor: on ? 'var(--acc)' : 'var(--line)', background: on ? 'var(--acc-ghost)' : 'transparent', transition: 'background .12s, border-color .12s' }}>
+                  <span className="mono font-bold w-4 shrink-0" style={{ color: on ? 'var(--acc)' : 'var(--tx-3)' }}>{o.v}</span>
+                  <span className={on ? 'text-tx-0' : 'text-tx-1'}>{o.t}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+
+      {p.evaluacion?.at && (
+        <div className="meta mt-1">Última evaluación: {fmtWhen(p.evaluacion.at)}{p.evaluacion.byName ? ` · ${p.evaluacion.byName}` : ''}</div>
+      )}
+    </Modal>
+  )
+}
+
+/* ============================================================
    Página de Prospectos
    ============================================================ */
 export function ProspectosPage() {
@@ -181,7 +315,8 @@ export function ProspectosPage() {
   const [convert, setConvert] = React.useState<Prospect | null>(null)
   const [del, setDel] = React.useState<Prospect | null>(null)
   const [comments, setComments] = React.useState<Prospect | null>(null)
-  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '' })
+  const [evalP, setEvalP] = React.useState<Prospect | null>(null)
+  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '' })
 
   // Nombre del vendedor tolerante a id de vendedor O id de usuario (ventas).
   const sellerName = (id: string) => {
@@ -193,6 +328,10 @@ export function ProspectosPage() {
     if (f.seller && p.seller !== f.seller) return false
     if (f.estado && p.estado !== f.estado) return false
     if (f.resultado && p.resultado !== f.resultado) return false
+    if (f.calidad) {
+      const c = calidadOf(p)
+      if (f.calidad === 'Sin evaluar' ? c !== null : c !== f.calidad) return false
+    }
     if (f.q) {
       const hay = `${p.name} ${p.empresa || ''} ${p.phone || ''} ${p.city || ''} ${p.sistema || ''}`.toLowerCase()
       if (!hay.includes(f.q.toLowerCase())) return false
@@ -209,7 +348,7 @@ export function ProspectosPage() {
   const vendidosPorConvertir = kpiBase.filter(p => p.resultado === 'Vendido' && !p.convertedProjectId).length
   const cotizados = kpiBase.filter(p => p.estado === 'Cotizado').length
   const totalCosto = kpiBase.reduce((a, p) => a + (p.costo || 0), 0)
-  const hasFilters = f.q || f.seller || f.estado || f.resultado
+  const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad
 
   const markSold = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'Vendido' } })
 
@@ -261,7 +400,11 @@ export function ProspectosPage() {
           <option value="">Todos los resultados</option>
           {RESULTADOS.map(s => <option key={s} value={s}>{s}</option>)}
         </Select>
-        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '' })}><Icon name="close" size={13} /> Limpiar</button>}
+        <Select value={f.calidad} onChange={e => setF({ ...f, calidad: e.target.value })} className="w-auto min-w-[140px]">
+          <option value="">Toda calidad</option>
+          {CALIDADES.map(s => <option key={s} value={s}>{s}</option>)}
+        </Select>
+        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '', calidad: '' })}><Icon name="close" size={13} /> Limpiar</button>}
         <span className="meta">{rows.length} de {state.prospects.length}</span>
       </div>
 
@@ -271,7 +414,7 @@ export function ProspectosPage() {
             <thead><tr>
               <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
               <th>Fecha asig.</th><th>Estado</th><th>Últ. contacto</th><th>Seguimiento</th>
-              <th className="num">Costo</th><th>Resultado</th><th>Sistema</th><th>Anuncio</th><th></th>
+              <th className="num">Costo</th><th>Resultado</th><th>Calidad</th><th>Sistema</th><th>Anuncio</th><th></th>
             </tr></thead>
             <tbody>
               {rows.map(p => {
@@ -289,6 +432,17 @@ export function ProspectosPage() {
                     <td><span className="text-[11.5px] font-semibold" style={{ color: sg.color }}>{sg.label}</span></td>
                     <td className="num">{p.costo != null ? fmtMoney(p.costo) : '—'}</td>
                     <td><Badge color={RESULTADO_COLOR[p.resultado]}>{p.resultado}</Badge></td>
+                    <td>
+                      {(() => {
+                        const s = scoreOf(p.evaluacion)
+                        if (s == null || s <= 0) return <span className="text-tx-3 text-[12px]">—</span>
+                        const b = bandOf(s)
+                        return <span className="inline-flex items-center gap-1.5" title={b.hint}>
+                          <Badge color={b.color}>{b.label}</Badge>
+                          <span className="mono text-[11px] text-tx-2">{s}/25</span>
+                        </span>
+                      })()}
+                    </td>
                     <td className="text-tx-2 text-[12px]">{p.sistema || '—'}</td>
                     <td className="text-tx-2 text-[12px]">{p.anuncio || '—'}</td>
                     <td onClick={e => e.stopPropagation()}>
@@ -306,6 +460,15 @@ export function ProspectosPage() {
                             <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => setDel(p)}><Icon name="trash" size={13} /></button>
                           </>
                         )}
+                        {(() => {
+                          const s = scoreOf(p.evaluacion)
+                          const b = s != null && s > 0 ? bandOf(s) : null
+                          return (
+                            <button className="icon-btn w-7 h-7" title={b ? `Calidad: ${b.label} (${s}/25)` : 'Evaluar calidad del prospecto'} onClick={() => setEvalP(p)}>
+                              <Icon name="star" size={13} style={b ? { color: b.color } : undefined} />
+                            </button>
+                          )
+                        })()}
                         <button className="icon-btn w-7 h-7 relative" title="Comentarios" onClick={() => setComments(p)}>
                           <Icon name="comment" size={13} />
                           {(p.comments?.length || 0) > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 grid place-items-center rounded-full text-white text-[9px] font-bold leading-none" style={{ background: 'var(--acc)' }}>{p.comments!.length}</span>}
@@ -326,6 +489,7 @@ export function ProspectosPage() {
         <ProjectForm prefill={prefillFrom(convert)} onClose={() => setConvert(null)} onSaved={(project) => onConverted(convert, project)} />
       )}
       {comments && <ProspectComments prospect={comments} onClose={() => setComments(null)} />}
+      {evalP && <ProspectEval prospect={evalP} onClose={() => setEvalP(null)} />}
       {del && (
         <Confirm title="Eliminar prospecto" danger
           message={`¿Seguro que quieres eliminar el prospecto "${del.name}"? Esta acción no se puede deshacer.`}

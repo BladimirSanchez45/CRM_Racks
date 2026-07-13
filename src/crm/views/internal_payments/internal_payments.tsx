@@ -5,9 +5,9 @@
 //         → (logística) Programado → Pagado
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, fmtDate, TODAY_ISO, isAdminRole, isDireccion } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, fmtDate, TODAY_ISO, payCutoff, isAdminRole, isDireccion } from '../../core/data'
 import { signedDocUrl } from '../../core/api'
-import { Modal, Field, Input, TextArea, Select, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, Seg, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { InternalPayment, InternalPaymentInput, InternalPaymentCategory, InternalPaymentStatus } from '../../core/types'
 
@@ -15,8 +15,19 @@ const CATEGORIES: InternalPaymentCategory[] = ['Flete', 'Instalación', 'Viátic
 const STATUS_COLOR: Record<InternalPaymentStatus, string> = {
   Pendiente: 'var(--warn)', Aprobado: 'var(--st-5)', Rechazado: 'var(--danger)',
   Programado: 'var(--st-6)', Pagado: 'var(--ok)', Cancelado: 'var(--tx-3)',
+  'En movimientos': 'var(--st-2)',
 }
 const statusBadge = (s: InternalPaymentStatus) => <Badge color={STATUS_COLOR[s]}>{s}</Badge>
+const facturaBadge = (sinFactura?: boolean) => sinFactura
+  ? <Badge color="var(--st-2)">Sin factura</Badge>
+  : <Badge color="var(--tx-2)">Con factura</Badge>
+
+/** Texto amigable del tiempo que falta para el corte. */
+const leftText = (ms: number) => {
+  const h = Math.max(0, Math.floor(ms / 3600000))
+  const d = Math.floor(h / 24)
+  return d > 0 ? `${d} día${d === 1 ? '' : 's'} y ${h % 24} h` : `${h} h`
+}
 
 /* ---- Formulario de solicitud (crear / editar mientras está Pendiente) ---- */
 type FormState = {
@@ -32,15 +43,17 @@ type FormState = {
   notes: string
   file: string
   filePath?: string
+  sinFactura: boolean
 }
 function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const [p, setP] = React.useState<FormState>(() => payment ? {
     ...payment, projectId: payment.projectId ?? '', supplierId: payment.supplierId ?? '', scheduledDate: payment.scheduledDate ?? '',
-    origen: payment.origen ?? '', destino: payment.destino ?? '',
+    origen: payment.origen ?? '', destino: payment.destino ?? '', sinFactura: !!payment.sinFactura,
   } : {
-    concept: '', category: 'Flete', projectId: '', supplierId: '', amount: '', origen: '', destino: '', scheduledDate: '', notes: '', file: '',
+    concept: '', category: 'Flete', projectId: '', supplierId: '', amount: '', origen: '', destino: '', scheduledDate: '', notes: '', file: '', sinFactura: false,
   })
+  const cutoff = payCutoff()
   const set = (k: keyof FormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   // Las ubicaciones de origen/destino solo aplican a servicios de Flete e Instalación.
   const usaUbicacion = p.category === 'Flete' || p.category === 'Instalación'
@@ -70,6 +83,7 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
       notes: p.notes,
       file: p.file,
       filePath: p.filePath,
+      sinFactura: p.sinFactura,
       // Un pago nuevo entra como Pendiente (requiere aprobación del admin).
       status: payment ? payment.status : 'Pendiente',
     }
@@ -102,6 +116,23 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
         </div>
       )}
       <div className="grid grid-cols-2 gap-3.5">
+        {/* Con factura = flujo normal (programar y pagar aquí).
+            Sin factura = al aprobarse entra a la lista de movimientos del jueves. */}
+        <Field label="¿El pago lleva factura?" span={2}>
+          <Seg value={p.sinFactura ? 'sin' : 'con'} onChange={(v) => set('sinFactura', v === 'sin')}
+            options={[{ value: 'con', label: 'Con factura' }, { value: 'sin', label: 'Sin factura' }]} />
+        </Field>
+        {p.sinFactura && (
+          <div className="col-span-2 flex items-start gap-3 p-3 rounded-[8px] border -mt-1"
+            style={{ borderColor: 'var(--st-2)', background: 'color-mix(in srgb, var(--st-2) 10%, transparent)' }}>
+            <Icon name="box" size={18} className="mt-0.5 flex-none" style={{ color: 'var(--st-2)' }} />
+            <div className="text-[12.5px] text-tx-2 leading-snug">
+              Al aprobarse, este pago <strong>no se programa aquí</strong>: entra como movimiento a la{' '}
+              <strong>lista del jueves {fmtDate(cutoff.thursday)}</strong>, que autoriza Dirección.
+              <div className="text-tx-3 mt-0.5">Corte: jueves {fmtDate(cutoff.thursday)} a las 2:00 pm · faltan {leftText(cutoff.msLeft)}</div>
+            </div>
+          </div>
+        )}
         <Field label="Concepto" span={2}><Input value={p.concept} onChange={e => set('concept', e.target.value)} placeholder="Ej. Flete Monterrey, viáticos cuadrilla…" /></Field>
         <Field label="Categoría">
           <Select value={p.category} onChange={e => set('category', e.target.value)}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</Select>
@@ -177,7 +208,11 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
         {/* Acciones del ADMIN: aprobar / rechazar mientras está pendiente */}
         {!readOnly && isAdmin && payment.status === 'Pendiente' && (<>
           <button className="btn btn-ghost" onClick={() => setReject(true)}><Icon name="close" size={14} /> Rechazar</button>
-          <button className="btn btn-primary" onClick={() => dispatch({ type: 'DECIDE_INTERNAL_PAYMENT', id: payment.id, approve: true })}><Icon name="check" size={15} /> Aprobar</button>
+          <button className="btn btn-primary"
+            title={payment.sinFactura ? `Sin factura: al aprobar entra a la lista de movimientos del jueves ${fmtDate(payCutoff().thursday)}` : undefined}
+            onClick={() => dispatch({ type: 'DECIDE_INTERNAL_PAYMENT', id: payment.id, approve: true })}>
+            <Icon name="check" size={15} /> {payment.sinFactura ? 'Aprobar y mandar a movimientos' : 'Aprobar'}
+          </button>
         </>)}
         {/* Acciones de LOGÍSTICA tras la aprobación */}
         {!readOnly && payment.status === 'Aprobado' && (
@@ -202,8 +237,27 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
           <div className="label-k">Monto</div>
           <div className="font-display font-extrabold text-[24px] mt-0.5">{fmtMoney2(payment.amount)}</div>
         </div>
-        <div className="text-right">{statusBadge(payment.status)}</div>
+        <div className="text-right flex flex-col items-end gap-1.5">
+          {statusBadge(payment.status)}
+          {facturaBadge(payment.sinFactura)}
+        </div>
       </div>
+
+      {/* SIN FACTURA aprobado: ya vive como movimiento en la lista semanal */}
+      {payment.status === 'En movimientos' && (() => {
+        const list = payment.movementListId ? state.movementLists.find(l => l.id === payment.movementListId) : undefined
+        return (
+          <div className="flex items-start gap-3 mb-3.5 p-3 rounded-[8px] border"
+            style={{ borderColor: 'var(--st-2)', background: 'color-mix(in srgb, var(--st-2) 10%, transparent)' }}>
+            <Icon name="box" size={18} className="mt-0.5 flex-none" style={{ color: 'var(--st-2)' }} />
+            <div className="text-[12.5px] text-tx-2 leading-snug">
+              Este pago es <strong>sin factura</strong>: ya entró como movimiento a la lista{' '}
+              <strong>{list ? list.name : '—'}</strong>{list ? ` (${fmtDate(list.date)})` : ''}.
+              <div className="text-tx-3 mt-0.5">Aquí ya no se programa ni se paga. Se liquida cuando Dirección autoriza la lista y se sube su comprobante.</div>
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="grid grid-cols-2 gap-x-5 gap-y-0 text-[13px]">
         <div className="flex justify-between gap-3 py-[9px] border-b border-line-soft"><span className="label-k">Categoría</span><span>{payment.category}</span></div>
@@ -289,6 +343,7 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
   const pendientes = state.internalPayments.filter(p => p.status === 'Pendiente')
   const aprobadoPorPagar = state.internalPayments.filter(p => p.status === 'Aprobado' || p.status === 'Programado').reduce((a, p) => a + p.amount, 0)
   const pagado = state.internalPayments.filter(p => p.status === 'Pagado').reduce((a, p) => a + p.amount, 0)
+  const cutoff = payCutoff()
 
   const editFromDetail = () => { if (detail) { setForm(detail); setDetail(null) } }
 
@@ -297,6 +352,17 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Pagos internos</h2><span className="sub">Solicitudes con aprobación del administrador</span></div>
         {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Solicitar pago</button>}
+      </div>
+
+      {/* Corte semanal de los pagos SIN FACTURA (van a la lista de movimientos del jueves) */}
+      <div className="flex items-center gap-3 mb-4 p-3 rounded-[8px] border"
+        style={{ borderColor: 'var(--st-2)', background: 'color-mix(in srgb, var(--st-2) 8%, transparent)' }}>
+        <Icon name="box" size={18} className="flex-none" style={{ color: 'var(--st-2)' }} />
+        <div className="text-[12.5px] text-tx-1 flex-1">
+          Pagos <strong>sin factura</strong>: los que apruebes entran a la lista de movimientos del{' '}
+          <strong>jueves {fmtDate(cutoff.thursday)}</strong>.
+          <span className="text-tx-3"> · Corte: jueves 2:00 pm (faltan {leftText(cutoff.msLeft)})</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">
@@ -317,7 +383,7 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            <thead><tr><th>Concepto</th><th>Categoría</th><th>Proyecto</th><th>Solicitó</th><th className="num">Monto</th><th>Fecha pago</th><th>Estatus</th></tr></thead>
+            <thead><tr><th>Concepto</th><th>Categoría</th><th>Factura</th><th>Proyecto</th><th>Solicitó</th><th className="num">Monto</th><th>Fecha pago</th><th>Estatus</th></tr></thead>
             <tbody>
               {rows.map(p => {
                 const proj = p.projectId ? state.projects.find(x => x.id === p.projectId) : undefined
@@ -325,6 +391,7 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
                 <tr key={p.id} onClick={() => setDetail(p)}>
                   <td className="text-[12.5px] font-semibold text-tx-1">{p.concept}</td>
                   <td className="text-[12px]">{p.category}</td>
+                  <td>{facturaBadge(p.sinFactura)}</td>
                   <td className="text-[12px]">{proj ? <span className="mono text-acc">{proj.code}</span> : <span className="text-tx-3">—</span>}</td>
                   <td className="text-[12px]">{sel.userName(state, p.requestedBy)}</td>
                   <td className="num font-semibold">{fmtMoney(p.amount)}</td>

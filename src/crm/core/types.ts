@@ -230,6 +230,9 @@ export type InternalPaymentStatus =
   | 'Programado'    // logística agendó la fecha de pago
   | 'Pagado'        // ya se ejecutó el pago
   | 'Cancelado'     // logística lo canceló
+  /** SIN FACTURA aprobado: se convirtió en un movimiento de la lista semanal.
+   *  Ya no se paga por aquí; el gasto descuenta utilidad cuando la LISTA se marca pagada. */
+  | 'En movimientos'
 
 /** Solicitud de pago interno (flete, instalación, viáticos…) que requiere
  *  aprobación del administrador antes de proceder. */
@@ -253,6 +256,11 @@ export interface InternalPayment {
   filePath?: string               // Ruta del adjunto en Supabase Storage
   comprobante?: string            // Comprobante de pago — nombre visible (requisito para liberar/pagar)
   comprobantePath?: string        // Ruta del comprobante en Supabase Storage
+  /** SIN FACTURA: al aprobarse NO sigue el flujo normal; se manda como movimiento a la
+   *  lista semanal (que autoriza Dirección). Sin marcar / false = con factura (flujo normal). */
+  sinFactura?: boolean
+  movementId?: string             // movimiento generado al aprobar (si es sin factura)
+  movementListId?: string         // lista de movimientos a la que entró
   createdAt: string               // ISO
 }
 
@@ -300,6 +308,8 @@ export interface Movement {
    *  'added' = lo agregó Dirección, 'edited' = lo modificó, 'removed' = lo eliminó (borrado suave,
    *  sigue visible tachado y no suma al total). Dirección es la autoridad final. */
   changedByDireccion?: 'added' | 'edited' | 'removed'
+  /** Si nació de un pago interno SIN FACTURA aprobado, guarda su id (trazabilidad). */
+  internalPaymentId?: string
   createdAt: string         // ISO
 }
 
@@ -451,6 +461,20 @@ export interface ProspectComment {
   at: string           // ISO
 }
 
+/** Evaluación rápida de calidad del prospecto. Cada criterio se califica 5, 3 o 1.
+ *  Puntaje = suma de los 5 criterios (5 a 25):
+ *  20-25 Caliente · 15-19 Bueno · 10-14 Tibio · <10 Frío. */
+export interface ProspectEvaluation {
+  necesidad: number      // A. Necesidad real
+  autoridad: number      // B. Autoridad de decisión
+  informacion: number    // C. Información técnica
+  urgencia: number       // D. Urgencia
+  presupuesto: number    // E. Presupuesto o avance
+  at?: string            // ISO de la evaluación
+  by?: string            // userId de quien evaluó
+  byName?: string        // nombre (snapshot)
+}
+
 /** Prospecto / lead que un vendedor gestiona ANTES de registrar la venta como Proyecto.
  *  Guarda datos sueltos del contacto; al marcarse como Vendido se puede convertir en
  *  Proyecto prellenando el formulario con estos datos. */
@@ -473,6 +497,7 @@ export interface Prospect {
   anuncio?: string             // Anuncio / origen del lead (→ project.origen)
   notas?: string
   comments?: ProspectComment[] // Hilo de comentarios de seguimiento
+  evaluacion?: ProspectEvaluation  // Evaluación rápida de calidad (5 criterios)
   convertedProjectId?: string  // id del Proyecto creado al registrar la venta (si ya se convirtió)
   createdAt: string            // ISO
   updated?: string             // ISO

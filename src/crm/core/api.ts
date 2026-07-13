@@ -405,6 +405,9 @@ function mapInternalPayment(r: any): InternalPayment {
     ...(r.file_path ? { filePath: r.file_path } : {}),
     ...(r.comprobante ? { comprobante: r.comprobante } : {}),
     ...(r.comprobante_path ? { comprobantePath: r.comprobante_path } : {}),
+    ...(r.sin_factura ? { sinFactura: true } : {}),
+    ...(r.movement_id ? { movementId: r.movement_id } : {}),
+    ...(r.movement_list_id ? { movementListId: r.movement_list_id } : {}),
   }
 }
 function internalPaymentRow(p: InternalPayment): Record<string, unknown> {
@@ -416,6 +419,7 @@ function internalPaymentRow(p: InternalPayment): Record<string, unknown> {
     decided_at: p.decidedAt ?? null, reject_reason: orNull(p.rejectReason), notes: p.notes,
     file: p.file, file_path: p.filePath ?? null,
     comprobante: p.comprobante ?? null, comprobante_path: p.comprobantePath ?? null,
+    sin_factura: !!p.sinFactura, movement_id: p.movementId ?? null, movement_list_id: p.movementListId ?? null,
     created_at: p.createdAt,
   }
 }
@@ -468,6 +472,7 @@ function mapMovement(r: any): Movement {
     ...(r.decided_at ? { decidedAt: r.decided_at } : {}),
     ...(r.reject_reason ? { rejectReason: r.reject_reason } : {}),
     ...(r.changed_by_direccion ? { changedByDireccion: r.changed_by_direccion } : {}),
+    ...(r.internal_payment_id ? { internalPaymentId: r.internal_payment_id } : {}),
   }
 }
 function movementRow(m: Movement): Record<string, unknown> {
@@ -477,6 +482,7 @@ function movementRow(m: Movement): Record<string, unknown> {
     created_by: m.createdBy || null, authorized_by: m.authorizedBy ?? null,
     decided_at: m.decidedAt ?? null, reject_reason: orNull(m.rejectReason),
     changed_by_direccion: m.changedByDireccion ?? null,
+    internal_payment_id: m.internalPaymentId ?? null,
     created_at: m.createdAt,
   }
 }
@@ -534,6 +540,16 @@ function mapProspect(r: any): Prospect {
       const raw = typeof r.comments === 'string' ? (() => { try { return JSON.parse(r.comments) } catch { return [] } })() : r.comments
       return Array.isArray(raw) && raw.length ? { comments: raw.map((c: any) => ({ id: String(c.id), author: c.author ?? '', authorName: c.authorName ?? '', text: c.text ?? '', at: c.at ?? '' })) } : {}
     })()),
+    ...((() => {
+      const raw = typeof r.evaluacion === 'string' ? (() => { try { return JSON.parse(r.evaluacion) } catch { return null } })() : r.evaluacion
+      if (!raw || typeof raw !== 'object') return {}
+      return { evaluacion: {
+        necesidad: Number(raw.necesidad ?? 0), autoridad: Number(raw.autoridad ?? 0),
+        informacion: Number(raw.informacion ?? 0), urgencia: Number(raw.urgencia ?? 0),
+        presupuesto: Number(raw.presupuesto ?? 0),
+        ...(raw.at ? { at: raw.at } : {}), ...(raw.by ? { by: raw.by } : {}), ...(raw.byName ? { byName: raw.byName } : {}),
+      } }
+    })()),
     ...(r.converted_project_id ? { convertedProjectId: r.converted_project_id } : {}),
     createdAt: r.created_at, ...(r.updated ? { updated: r.updated } : {}),
   }
@@ -545,7 +561,7 @@ function prospectRow(p: Prospect): Record<string, unknown> {
     fecha_asignacion: orNull(p.fechaAsignacion), ultimo_contacto: orNull(p.ultimoContacto),
     cotizacion: p.cotizacion ?? null, cotizacion_path: p.cotizacionPath ?? null,
     costo: p.costo ?? null, sistema: p.sistema ?? null, anuncio: p.anuncio ?? null, notas: p.notas ?? null,
-    comments: p.comments ?? [],
+    comments: p.comments ?? [], evaluacion: p.evaluacion ?? null,
     converted_project_id: p.convertedProjectId ?? null, created_at: p.createdAt, updated: p.updated ?? null,
   }
 }

@@ -280,7 +280,14 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
                   <td>
                     <div className={'text-[13px] font-semibold leading-tight ' + (removed ? 'line-through text-tx-3' : 'text-tx-1')}>{m.description}</div>
                     {proj && <div className="meta mt-0.5"><span className="mono text-acc">{proj.code}</span> · {sel.clientName(state, proj.client)}</div>}
-                    {m.changedByDireccion && <div className="mt-1"><DirChip kind={m.changedByDireccion} /></div>}
+                    <div className="flex items-center gap-1.5 mt-1">
+                      {m.internalPaymentId && (
+                        <span className="inline-block text-[10px] font-semibold px-1.5 py-px rounded-full"
+                          style={{ color: 'var(--st-2)', border: '1px solid var(--st-2)' }}
+                          title="Nació de un pago interno sin factura aprobado">Pago interno · sin factura</span>
+                      )}
+                      {m.changedByDireccion && <DirChip kind={m.changedByDireccion} />}
+                    </div>
                   </td>
                   <td>{removed ? <span className="text-[12px] text-tx-3">—</span> : movBadge(m.status)}</td>
                   <td className={'num font-display font-bold text-[14px] whitespace-nowrap ' + (removed ? 'line-through text-tx-3' : '')}>{fmtMoney2(m.amount)}</td>

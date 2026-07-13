@@ -676,15 +676,49 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       case 'DECIDE_INTERNAL_PAYMENT': {
         const ip = s.internalPayments.find(p => p.id === action.id); if (!ip) return
+        const thunks: (() => Promise<void>)[] = []
+
+        // ---- SIN FACTURA aprobado → se convierte en MOVIMIENTO de la lista del jueves ----
+        // No sigue el flujo de programar/pagar: el gasto se descuenta cuando Dirección
+        // autoriza la lista y se sube su comprobante (evita descontar doble).
+        let sinFacturaExtra: Partial<InternalPayment> = {}
+        if (action.approve && ip.sinFactura) {
+          const thursday = nextPayThursday()
+          // Lista en Borrador de ESE jueves; si no existe, se crea.
+          let list = s.movementLists.find(l => l.status === 'Borrador' && l.date === thursday)
+          if (!list) {
+            const last = [...s.movementLists].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0]
+            list = {
+              id: uid('ml'), name: payListName(thursday), date: thursday,
+              bankBalance: last?.bankBalance ?? s.settings.bankBalance ?? 0,
+              status: 'Borrador', createdBy: s.currentUser?.id ?? '', createdAt: nowISO(),
+            }
+            rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list })
+            const l = list
+            thunks.push(() => saveMovementList(l))
+          }
+          const mv: Movement = {
+            id: uid('mv'), listId: list.id, date: today(),
+            description: ip.concept, amount: ip.amount,
+            ...(ip.projectId ? { projectId: ip.projectId } : {}),
+            status: 'Pendiente', createdBy: s.currentUser?.id ?? '', createdAt: nowISO(),
+            internalPaymentId: ip.id,
+          }
+          rawDispatch({ type: 'UPSERT_MOVEMENT', movement: mv })
+          thunks.push(() => saveMovement(mv))
+          sinFacturaExtra = { movementId: mv.id, movementListId: list.id }
+        }
+
         const updated: InternalPayment = {
           ...ip,
-          status: action.approve ? 'Aprobado' : 'Rechazado',
+          status: action.approve ? (ip.sinFactura ? 'En movimientos' : 'Aprobado') : 'Rechazado',
           approvedBy: s.currentUser?.id ?? '',
           decidedAt: nowISO(),
+          ...sinFacturaExtra,
           ...(action.approve ? {} : { rejectReason: action.reason ?? '' }),
         }
         rawDispatch({ type: 'UPSERT_INTERNAL_PAYMENT', payment: updated })
-        const thunks: (() => Promise<void>)[] = [() => saveInternalPayment(updated)]
+        thunks.push(() => saveInternalPayment(updated))
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: action.approve ? 'check' : 'close', who: whoName(s), txt: `${action.approve ? 'aprobó' : 'rechazó'} el pago interno`, tgt: ip.concept, kind: action.approve ? 'done' : 'info' }
         rawDispatch({ type: 'PUSH_ACTIVITY', activity })
         thunks.push(() => saveActivity(activity))
@@ -694,7 +728,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             id: uid('nt'), userId: ip.requestedBy, kind: 'internal_payment_decided',
             title: `Pago interno ${action.approve ? 'aprobado' : 'rechazado'}: ${ip.concept}`,
             body: action.approve
-              ? `${whoName(s)} aprobó tu pago de ${fmtMoney(ip.amount)}. Ya puedes agendarlo.`
+              ? (ip.sinFactura
+                ? `${whoName(s)} aprobó tu pago SIN FACTURA de ${fmtMoney(ip.amount)}. Entró a la lista de movimientos del jueves ${fmtDate(nextPayThursday())}; se paga cuando Dirección autorice la lista.`
+                : `${whoName(s)} aprobó tu pago de ${fmtMoney(ip.amount)}. Ya puedes agendarlo.`)
               : `${whoName(s)} rechazó tu pago de ${fmtMoney(ip.amount)}.${action.reason ? ` Motivo: ${action.reason}` : ''}`,
             read: false, createdAt: nowISO(), internalPaymentId: ip.id, actorName: whoName(s),
           }
@@ -1186,7 +1222,9 @@ export const sel = {
    *  Es el ÚNICO lugar por el que un gasto operativo baja la utilidad (evita doble conteo con Asignación). */
   projectInternalPaymentsCost: (state: AppState, pid: string) =>
     state.internalPayments
-      .filter(p => p.projectId === pid && p.status === 'Pagado')
+      // Los SIN FACTURA que se fueron a una lista de movimientos NO cuentan aquí:
+      // su gasto se descuenta vía projectMovementsCost (evita descontar doble).
+      .filter(p => p.projectId === pid && p.status === 'Pagado' && !p.movementId)
       .reduce((a, p) => a + (p.amount || 0), 0),
   /** Gastos por movimientos "por fuera" ligados al proyecto. Solo cuentan los AUTORIZADOS,
    *  no eliminados, y cuya LISTA ya tiene comprobante de pago (lista pagada): hasta que se
@@ -1245,6 +1283,42 @@ export function nextFolio(items: { number: string }[], prefix: string, year = ne
    del cliente) y las de logística (coordinación, instalación, finalizado)— NO
    las decide esta función. La reconciliación del store solo avanza, nunca
    regresa, y respeta el candado manual registro→creación. */
+/* ============================================================
+   Corte semanal de pagos SIN FACTURA (van a la lista de Movimientos)
+   Los pagos se hacen los JUEVES; la ventana para entrar a la lista de ese
+   jueves va de lunes hasta el jueves a las 2:00 pm. Pasado el corte, el gasto
+   aprobado entra a la lista del jueves SIGUIENTE.
+   ============================================================ */
+export const CORTE_DIA = 4     // jueves (0 = domingo)
+export const CORTE_HORA = 14   // 2:00 pm
+
+const isoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+/** Jueves de pago al que entra un gasto aprobado AHORA (respeta el corte de las 2 pm). */
+export function nextPayThursday(now: Date = new Date()): string {
+  const dow = now.getDay()
+  let diff = (CORTE_DIA - dow + 7) % 7            // días hasta el próximo jueves (0 = hoy)
+  // Si hoy es jueves y ya pasaron las 2 pm, se pasa al jueves siguiente.
+  if (diff === 0 && now.getHours() >= CORTE_HORA) diff = 7
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diff)
+  return isoDate(d)
+}
+
+/** Nombre sugerido de la lista de ese jueves (ej. "Lista jue 16 jul"). */
+export function payListName(thursdayISO: string): string {
+  const [y, m, d] = thursdayISO.split('-').map(Number)
+  const f = new Date(y, m - 1, d).toLocaleDateString('es-MX', { weekday: 'short', day: '2-digit', month: 'short' }).replace(/\.|,/g, '')
+  return `Lista ${f}`
+}
+
+/** Info del corte para mostrar en la UI: jueves destino, fecha límite y tiempo restante. */
+export function payCutoff(now: Date = new Date()): { thursday: string; deadline: Date; msLeft: number } {
+  const thursday = nextPayThursday(now)
+  const [y, m, d] = thursday.split('-').map(Number)
+  const deadline = new Date(y, m - 1, d, CORTE_HORA, 0, 0)
+  return { thursday, deadline, msLeft: deadline.getTime() - now.getTime() }
+}
+
 /** Días antes de la fecha ETA en que el proyecto entra a "Por Vencer". */
 export const ENTREGA_EST_DIAS_PREVIOS = 5
 export function autoStageFor(state: AppState, p: Project): StageId | null {
