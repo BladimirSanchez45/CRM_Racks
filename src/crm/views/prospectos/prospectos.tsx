@@ -20,6 +20,11 @@ const RESULTADO_COLOR: Record<ProspectResultado, string> = {
   'En espera': 'var(--warn)', Vendido: 'var(--ok)', Perdido: 'var(--danger)',
 }
 const ANUNCIOS = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack', 'Referido', 'Otro']
+/** Catálogo de sistemas que se cotizan. */
+const SISTEMAS = [
+  'Mezzanine', 'Miniracks', 'Selectivo', 'Drive In', 'Entrepiso', 'Pushback',
+  'Dinámico', 'Cantilever', 'Cartón Flow', 'Autosoportado', 'Especial',
+]
 
 /* ---- Evaluación rápida de calidad del prospecto (5 criterios × 5/3/1) ---- */
 type EvalKey = 'necesidad' | 'autoridad' | 'informacion' | 'urgencia' | 'presupuesto'
@@ -175,7 +180,12 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
         <Field label="Resultado"><Select value={p.resultado} onChange={e => set('resultado', e.target.value)}>{RESULTADOS.map(s => <option key={s} value={s}>{s}</option>)}</Select></Field>
         <Field label="Fecha de asignación"><Input type="date" value={p.fechaAsignacion} onChange={e => set('fechaAsignacion', e.target.value)} /></Field>
         <Field label="Último contacto"><Input type="date" value={p.ultimoContacto} onChange={e => set('ultimoContacto', e.target.value)} /></Field>
-        <Field label="Sistema"><Input value={p.sistema} onChange={e => set('sistema', e.target.value)} placeholder="Ej. Miniracks, Mezzanine" /></Field>
+        <Field label="Sistema">
+          <Select value={p.sistema} onChange={e => set('sistema', e.target.value)}>
+            <option value="">Selecciona…</option>
+            {SISTEMAS.map(s => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </Field>
         <Field label="Anuncio / origen">
           <Select value={anuncioOtro ? 'Otro' : (p.anuncio || '')} onChange={e => {
             const v = e.target.value
