@@ -193,6 +193,12 @@ const fmtWhen = (iso: string) => {
   try { return new Date(iso).toLocaleString('es-MX', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }
   catch { return '' }
 }
+/** Fecha de HOY en local (yyyy-mm-dd). Se recalcula al vuelo (no como TODAY_ISO, que
+ *  se fija al cargar la app y se volvería obsoleta en una sesión que cruza la medianoche). */
+const hoyISO = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 function ProspectComments({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
@@ -203,7 +209,9 @@ function ProspectComments({ prospect, onClose }: { prospect: Prospect; onClose: 
   const add = () => {
     const t = text.trim(); if (!t || !me) return
     const c: ProspectComment = { id: uid('cm'), author: me.id, authorName: me.name, text: t, at: new Date().toISOString() }
-    dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, comments: [...comments, c] } })
+    // Comentar cuenta como contacto: refresca el "Último contacto" (y con eso el
+    // Seguimiento vuelve a "Al día").
+    dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, comments: [...comments, c], ultimoContacto: hoyISO() } })
     setText('')
   }
   return (
@@ -224,10 +232,13 @@ function ProspectComments({ prospect, onClose }: { prospect: Prospect; onClose: 
         ))}
       </div>
       {!readOnly && (
-        <div className="flex gap-2 items-end border-t border-line pt-3">
-          <div className="flex-1"><TextArea value={text} onChange={e => setText(e.target.value)} placeholder="Escribe un comentario…"
-            onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); add() } }} /></div>
-          <button className={'btn btn-primary' + (!text.trim() ? ' opacity-50' : '')} disabled={!text.trim()} onClick={add}><Icon name="comment" size={14} /> Comentar</button>
+        <div className="border-t border-line pt-3">
+          <div className="flex gap-2 items-end">
+            <div className="flex-1"><TextArea value={text} onChange={e => setText(e.target.value)} placeholder="Escribe un comentario…"
+              onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); add() } }} /></div>
+            <button className={'btn btn-primary' + (!text.trim() ? ' opacity-50' : '')} disabled={!text.trim()} onClick={add}><Icon name="comment" size={14} /> Comentar</button>
+          </div>
+          <div className="meta mt-1.5">Al comentar se actualiza el <b>último contacto</b> a hoy y el seguimiento vuelve a “Al día”.</div>
         </div>
       )}
     </Modal>
@@ -411,42 +422,28 @@ export function ProspectosPage() {
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tbl">
-            {/* Columnas consolidadas (dato principal + secundario debajo) para que la
-                tabla quepa sin scroll horizontal. */}
             <thead><tr>
-              <th>Prospecto</th><th>Vendedor</th><th>Contacto</th><th>Sistema</th>
-              <th>Estado</th><th>Seguimiento</th><th className="num">Costo</th>
-              <th>Resultado</th><th>Calidad</th><th></th>
+              <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
+              <th>Fecha asig.</th><th>Estado</th><th>Últ. contacto</th><th>Seguimiento</th>
+              <th className="num">Costo</th><th>Resultado</th><th>Calidad</th><th>Sistema</th><th>Anuncio</th><th></th>
             </tr></thead>
             <tbody>
               {rows.map(p => {
                 const sg = seguimiento(p)
                 return (
                   <tr key={p.id} onClick={() => !readOnly && setForm(p)} style={readOnly ? { cursor: 'default' } : undefined}>
-                    <td className="max-w-[190px]">
-                      <div className="font-semibold text-tx-1 text-[12.5px] truncate" title={p.name}>{p.name}</div>
-                      {p.empresa && <div className="meta truncate" title={p.empresa}>{p.empresa}</div>}
-                    </td>
+                    <td className="font-semibold text-tx-1 text-[12.5px]">{p.name}</td>
                     <td className="text-[12px]">{sellerName(p.seller)}</td>
-                    <td className="max-w-[150px]">
-                      <div className="mono text-[12px]">{p.phone || '—'}</div>
-                      {p.city && <div className="meta truncate" title={p.city}>{p.city}</div>}
-                    </td>
-                    <td className="max-w-[150px]">
-                      <div className="text-tx-1 text-[12px] truncate" title={p.sistema || ''}>{p.sistema || '—'}</div>
-                      {p.anuncio && <div className="meta truncate" title={p.anuncio}>{p.anuncio}</div>}
-                    </td>
-                    <td>
-                      <Badge color={ESTADO_COLOR[p.estado]}>{p.estado}</Badge>
-                      {p.fechaAsignacion && <div className="meta mt-0.5 whitespace-nowrap">Asig. {fmtDateShort(p.fechaAsignacion)}</div>}
-                    </td>
-                    <td className="whitespace-nowrap">
-                      <div className="text-tx-1 text-[12px]">{p.ultimoContacto ? fmtDateShort(p.ultimoContacto) : '—'}</div>
-                      <div className="text-[11px] font-semibold mt-0.5" style={{ color: sg.color }}>{sg.label}</div>
-                    </td>
-                    <td className="num whitespace-nowrap">{p.costo != null ? fmtMoney(p.costo) : '—'}</td>
+                    <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>
+                    <td className="mono text-[12px]">{p.phone || '—'}</td>
+                    <td className="text-tx-1 text-[12px]">{p.city || '—'}</td>
+                    <td className="num text-tx-2 text-[12px]">{p.fechaAsignacion ? fmtDateShort(p.fechaAsignacion) : '—'}</td>
+                    <td><Badge color={ESTADO_COLOR[p.estado]}>{p.estado}</Badge></td>
+                    <td className="num text-tx-2 text-[12px]">{p.ultimoContacto ? fmtDateShort(p.ultimoContacto) : '—'}</td>
+                    <td><span className="text-[11.5px] font-semibold" style={{ color: sg.color }}>{sg.label}</span></td>
+                    <td className="num">{p.costo != null ? fmtMoney(p.costo) : '—'}</td>
                     <td><Badge color={RESULTADO_COLOR[p.resultado]}>{p.resultado}</Badge></td>
-                    <td className="whitespace-nowrap">
+                    <td>
                       {(() => {
                         const s = scoreOf(p.evaluacion)
                         if (s == null || s <= 0) return <span className="text-tx-3 text-[12px]">—</span>
@@ -457,6 +454,8 @@ export function ProspectosPage() {
                         </span>
                       })()}
                     </td>
+                    <td className="text-tx-2 text-[12px]">{p.sistema || '—'}</td>
+                    <td className="text-tx-2 text-[12px]">{p.anuncio || '—'}</td>
                     <td onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1 justify-end items-center">
                         {!readOnly && (
@@ -464,9 +463,9 @@ export function ProspectosPage() {
                             {p.convertedProjectId ? (
                               <Badge color="var(--st-9)" icon="check">Convertido</Badge>
                             ) : p.resultado === 'Vendido' ? (
-                              <button className="btn btn-primary btn-sm whitespace-nowrap" title="Registrar la venta como proyecto" onClick={() => setConvert(p)}><Icon name="flag" size={13} /> Registrar</button>
+                              <button className="btn btn-primary btn-sm whitespace-nowrap" onClick={() => setConvert(p)}><Icon name="flag" size={13} /> Registrar venta</button>
                             ) : (
-                              <button className="icon-btn w-7 h-7" title="Marcar como vendido" onClick={() => markSold(p)}><Icon name="check" size={13} /></button>
+                              <button className="btn btn-ghost btn-sm whitespace-nowrap" title="Marcar como vendido" onClick={() => markSold(p)}><Icon name="check" size={13} />vendido</button>
                             )}
                             <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setForm(p)}><Icon name="edit" size={13} /></button>
                             <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => setDel(p)}><Icon name="trash" size={13} /></button>
