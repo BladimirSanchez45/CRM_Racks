@@ -6,7 +6,6 @@
 import * as React from 'react'
 import { useStore, sel, fmtMoney, isVentasRole } from '../../core/data'
 import { KPI, Empty } from '../../core/ui'
-import { Icon } from '../../core/icons'
 import { ProjectsTable } from '../projects/projects'
 import { ProjectDetail } from '../projects/project_views'
 import type { Project } from '../../core/types'

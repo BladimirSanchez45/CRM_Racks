@@ -2,7 +2,7 @@
 //  PROJECTS — Kanban board (drag + menu) + Table view
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion, isIngenieria } from '../../core/data'
+import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion, isIngenieria, isAdminRole } from '../../core/data'
 import type { AppState } from '../../core/types'
 import { StageBadge, Seg, Empty, Badge, Avatar, Select } from '../../core/ui'
 import { ProjectDetail, ProjectForm } from './project_views'
@@ -233,10 +233,12 @@ export function ProjectsPage() {
   const isVentas = me?.role === 'ventas'
   // dirección e ingeniería: solo lectura (sin registrar ni mover etapas).
   const isDir = isDireccion(me?.role) || isIngenieria(me?.role)
-  // Ventas solo ve SUS proyectos (donde es el vendedor). Además, los finalizados con
-  // comisiones ya pagadas se ARCHIVAN al Historial y no aparecen aquí (para no acumular).
+  // Ventas solo ve SUS proyectos (donde es el vendedor). Los finalizados con comisiones
+  // ya pagadas se ARCHIVAN al Historial (solo para el ADMIN, que es quien tiene esa vista):
+  // así el admin no los acumula aquí, pero ventas/logística siguen viendo sus finalizados.
+  const seesHistorial = isAdminRole(me?.role) || isDireccion(me?.role)
   const mine = (isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects)
-    .filter(p => !sel.isProjectArchived(state, p))
+    .filter(p => !seesHistorial || !sel.isProjectArchived(state, p))
   const [view, setView] = React.useState('kanban')
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [form, setForm] = React.useState<object | null>(null) // {} para nuevo
