@@ -122,8 +122,9 @@ export const STAGE_MAP = Object.fromEntries(STAGES.map(s => [s.id, s])) as Recor
 export const stageIndex = (id: StageId) => STAGES.findIndex(s => s.id === id)
 
 /* ---- Helpers ---- */
-const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 })
-const MXN2 = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 2 })
+// Todos los montos se muestran con 2 decimales (nada se redondea a entero).
+const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const MXN2 = MXN
 export const fmtMoney = (n?: number) => MXN.format(n || 0)
 export const fmtMoney2 = (n?: number) => MXN2.format(n || 0)
 export const fmtK = (n?: number | null) => {
