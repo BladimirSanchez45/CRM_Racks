@@ -482,7 +482,6 @@ function movementRow(m: Movement): Record<string, unknown> {
     created_by: m.createdBy || null, authorized_by: m.authorizedBy ?? null,
     decided_at: m.decidedAt ?? null, reject_reason: orNull(m.rejectReason),
     changed_by_direccion: m.changedByDireccion ?? null,
-    internal_payment_id: m.internalPaymentId ?? null,
     created_at: m.createdAt,
   }
 }

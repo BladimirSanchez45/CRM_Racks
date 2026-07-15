@@ -171,6 +171,15 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
   const [reason, setReason] = React.useState('')
   const [confirmDel, setConfirmDel] = React.useState(false)
   const [confirmRevert, setConfirmRevert] = React.useState(false)
+  const [confirmRevertMov, setConfirmRevertMov] = React.useState(false)
+
+  // Revierte un pago "En movimientos" a Pendiente: borra su movimiento de la lista y
+  // limpia el enlace, para poder re-aprobarlo o cambiarlo a "con factura".
+  const revertFromMovimientos = () => {
+    if (payment.movementId) dispatch({ type: 'DELETE_MOVEMENT', id: payment.movementId })
+    dispatch({ type: 'SAVE_INTERNAL_PAYMENT', payment: { ...payment, status: 'Pendiente', movementId: undefined, movementListId: undefined, approvedBy: undefined, decidedAt: undefined } })
+    setConfirmRevertMov(false)
+  }
 
   const proj = payment.projectId ? state.projects.find(x => x.id === payment.projectId) : undefined
   const supplier = payment.supplierId ? sel.supplier(state, payment.supplierId) : undefined
@@ -214,6 +223,11 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
             <Icon name="check" size={15} /> {payment.sinFactura ? 'Aprobar y mandar a movimientos' : 'Aprobar'}
           </button>
         </>)}
+        {/* SIN FACTURA ya enviado a movimientos: el admin puede revertirlo a Pendiente
+            (borra su movimiento de la lista) para corregirlo o re-aprobarlo. */}
+        {!readOnly && isAdmin && payment.status === 'En movimientos' && (
+          <button className="btn btn-ghost" onClick={() => setConfirmRevertMov(true)}><Icon name="alert" size={14} /> Revertir a pendiente</button>
+        )}
         {/* Acciones de LOGÍSTICA tras la aprobación */}
         {!readOnly && payment.status === 'Aprobado' && (
           <button className="btn btn-primary" onClick={() => setStatus('Programado', { scheduledDate: payment.scheduledDate || TODAY_ISO })}><Icon name="calendar" size={15} /> Programar pago</button>
@@ -316,6 +330,7 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
       )}
       {confirmDel && <Confirm title="Eliminar solicitud" message={`¿Eliminar el pago "${payment.concept}"?`} onConfirm={() => { dispatch({ type: 'DELETE_INTERNAL_PAYMENT', id: payment.id }); onClose() }} onClose={() => setConfirmDel(false)} />}
       {confirmRevert && <Confirm title="Revertir pago" message={`¿Revertir "${payment.concept}" a Pendiente? Dejará de descontar utilidad del proyecto y podrás editarlo o eliminarlo.`} onConfirm={() => { setStatus('Pendiente'); setConfirmRevert(false) }} onClose={() => setConfirmRevert(false)} />}
+      {confirmRevertMov && <Confirm title="Revertir a pendiente" message={`¿Sacar "${payment.concept}" de la lista de movimientos y regresarlo a Pendiente? Se eliminará su movimiento de la lista y podrás re-aprobarlo o cambiarlo a "con factura".`} onConfirm={revertFromMovimientos} onClose={() => setConfirmRevertMov(false)} />}
     </Modal>
   )
 }

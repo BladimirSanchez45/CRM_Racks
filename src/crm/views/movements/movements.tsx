@@ -281,7 +281,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
                     <div className={'text-[13px] font-semibold leading-tight ' + (removed ? 'line-through text-tx-3' : 'text-tx-1')}>{m.description}</div>
                     {proj && <div className="meta mt-0.5"><span className="mono text-acc">{proj.code}</span> · {sel.clientName(state, proj.client)}</div>}
                     <div className="flex items-center gap-1.5 mt-1">
-                      {m.internalPaymentId && (
+                      {state.internalPayments.some(ip => ip.movementId === m.id) && (
                         <span className="inline-block text-[10px] font-semibold px-1.5 py-px rounded-full"
                           style={{ color: 'var(--st-2)', border: '1px solid var(--st-2)' }}
                           title="Nació de un pago interno sin factura aprobado">Pago interno · sin factura</span>
