@@ -243,6 +243,7 @@ function mapProject(r: any): Project {
     created: r.created, updated: r.updated,
     ...(r.closed_on ? { closedOn: r.closed_on } : {}),
     ...(r.remision ? { remision: r.remision } : {}),
+    ...(r.restored ? { restored: true } : {}),
   }
 }
 function projectRow(p: Project): Record<string, unknown> {
@@ -259,6 +260,7 @@ function projectRow(p: Project): Record<string, unknown> {
     eta: orNull(p.eta), finiquito: p.finiquito,
     created: p.created, updated: p.updated,
     closed_on: p.closedOn ?? null, remision: p.remision ?? null,
+    restored: p.restored ?? false,
   }
 }
 export async function fetchProjects(): Promise<Project[]> {

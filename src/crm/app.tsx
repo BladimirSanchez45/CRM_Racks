@@ -11,6 +11,7 @@ import { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRa
 import { DashboardPage } from './views/dashboard/dashboard'
 import { ProjectsPage } from './views/projects/projects'
 import { ProspectosPage } from './views/prospectos/prospectos'
+import { HistorialPage } from './views/historial/historial'
 import { SuppliersPage } from './views/suppliers/suppliers'
 import { OrdersPage } from './views/orders/orders'
 import { PaymentsPage } from './views/payments/payments'
@@ -32,7 +33,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'prospectos' | 'projects' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
+type Route = 'dashboard' | 'prospectos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -46,6 +47,7 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'campaigns',   label: 'Campañas',     icon: 'layers', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
   { id: 'prospectos',  label: 'Prospectos',   icon: 'clients',     section: 'Comercial' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
+  { id: 'historial',   label: 'Historial',    icon: 'box',         section: 'Comercial' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions', section: 'Comercial' },
   { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers',   section: 'Compras' },
@@ -65,12 +67,12 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
 // NOTA: Dirección NO se lista aquí a propósito: ve todo como admin, pero cada vista
 // lo trata como SOLO LECTURA (isDireccion) — puede ver todo, sin crear/editar/eliminar.
 const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
-  ventas: ['dashboard', 'prospectos', 'projects', 'orders', 'settings'],
+  ventas: ['dashboard', 'prospectos', 'projects', 'historial', 'orders', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
-  logistica: ['dashboard', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
+  logistica: ['dashboard', 'projects', 'historial', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
-  ingenieria: ['dashboard', 'projects', 'settings'],
+  ingenieria: ['dashboard', 'projects', 'historial', 'settings'],
   // Marketing: módulos de Estadísticas por origen y Campañas (+ configuración personal).
   marketing: ['estadisticas', 'campaigns', 'settings'],
 }
@@ -84,7 +86,7 @@ const landingRoute = (role?: Role | null): Route => {
   return allowed[0] ?? 'dashboard'
 }
 const TITLES: Record<Route, string> = {
-  dashboard: 'Panel general', prospectos: 'Prospectos', projects: 'Proyectos', suppliers: 'Proveedores',
+  dashboard: 'Panel general', prospectos: 'Prospectos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   estadisticas: 'Estadísticas por origen', campaigns: 'Campañas',
@@ -210,6 +212,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'dashboard':   return <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'prospectos':  return <ProspectosPage />
       case 'projects':    return <ProjectsPage />
+      case 'historial':   return <HistorialPage />
       case 'suppliers':   return <SuppliersPage />
       case 'orders':      return <OrdersPage />
       case 'asignacion':  return <AsignacionPage />

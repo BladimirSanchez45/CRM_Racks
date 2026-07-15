@@ -1212,6 +1212,15 @@ export const sel = {
   projectsForClient: (state: AppState, cid: string) => state.projects.filter(p => p.client === cid),
   projectByCode: (state: AppState, code: string) => state.projects.find(p => p.code === code),
   budget: (p: Pick<Project, 'freight' | 'install'>) => (p.freight || 0) + (p.install || 0),
+  /** Comisiones de un proyecto. */
+  commissionsForProject: (state: AppState, pid: string) => state.commissions.filter(c => c.projectId === pid),
+  /** ¿El proyecto está ARCHIVADO (va al Historial)? = Finalizado + tiene comisiones y
+   *  TODAS están pagadas, salvo que el usuario lo haya "restaurado" a Proyectos. */
+  isProjectArchived: (state: AppState, p: Project): boolean => {
+    if (p.stage !== 'finalizado' || p.restored) return false
+    const cms = state.commissions.filter(c => c.projectId === p.id)
+    return cms.length > 0 && cms.every(c => c.status === 'paid')
+  },
 
   /* ---- Selectores de OC / Pagos (réplica de las fórmulas del Excel) ---- */
   order: (state: AppState, oid: string) => state.orders.find(o => o.id === oid),

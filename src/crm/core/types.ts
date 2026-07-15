@@ -368,6 +368,9 @@ export interface Project {
   updated: string
   closedOn?: string
   remision?: string
+  /** "Restaurado": el usuario lo regresó del Historial a Proyectos manualmente, así que
+   *  NO se vuelve a archivar aunque esté finalizado con comisiones pagadas. */
+  restored?: boolean
 }
 
 export type CommissionStatus = 'paid' | 'pending'

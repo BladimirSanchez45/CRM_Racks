@@ -215,11 +215,12 @@ export function ServiceRow({ label, supplierId, budget, cost, state, payments }:
 }
 
 /* ---------- Project detail drawer ---------- */
-export function ProjectDetail({ project, onClose, onEdit }: { project: Project; onClose: () => void; onEdit: () => void }) {
+export function ProjectDetail({ project, onClose, onEdit, historial = false }: { project: Project; onClose: () => void; onEdit: () => void; historial?: boolean }) {
   const { state, dispatch } = useStore()
   // Ventas, dirección e ingeniería: ver sin registrar/editar cobros ni mover etapa.
   // (Ventas registra la venta, pero la cobranza la maneja Administración/Finanzas.)
-  const readOnly = state.currentUser?.role === 'ventas' || isDireccion(state.currentUser?.role) || isIngenieria(state.currentUser?.role)
+  // En el HISTORIAL todo es solo lectura: la única acción es "Restaurar a Proyectos".
+  const readOnly = historial || state.currentUser?.role === 'ventas' || isDireccion(state.currentUser?.role) || isIngenieria(state.currentUser?.role)
   const p = state.projects.find(x => x.id === project.id) || project
   const client = sel.client(state, p.client)
   const seller = sel.seller(state, p.seller)
@@ -257,17 +258,26 @@ export function ProjectDetail({ project, onClose, onEdit }: { project: Project; 
     <Modal width={760} onClose={onClose}
       title={<span className="flex items-center gap-3">{p.code} <StageBadge stage={p.stage} withNum /></span>}
       sub={`${client ? client.name : ''} · ${p.city}`}
-      footer={<>
-        {canEditProject(state.currentUser, p) && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar datos</button>}
-        {/* Recalcular comisiones de un proyecto finalizado (admin): útil si cambió el vendedor u overrides. */}
-        {isAdminRole(state.currentUser?.role) && p.stage === 'finalizado' && (
-          <button className="btn btn-ghost" title="Vuelve a calcular las comisiones según el vendedor y overrides actuales"
-            onClick={() => dispatch({ type: 'RECALC_COMMISSIONS', id: p.id })}><Icon name="commissions" size={15} /> Recalcular comisiones</button>
-        )}
-        <div className="flex-1"></div>
-        {/* Avanzar de etapa (confirmar/mover) solo para roles con gestión, no para Ventas ni Dirección. */}
-        {state.currentUser?.role !== 'ventas' && !readOnly && <MoveStage project={p} />}
-      </>}>
+      footer={historial ? (
+        /* En el Historial la ÚNICA acción es restaurar: las modificaciones se hacen ya en Proyectos. */
+        <>
+          <div className="flex-1"></div>
+          <button className="btn btn-primary" title="Regresar este proyecto a la vista de Proyectos"
+            onClick={() => { dispatch({ type: 'SAVE_PROJECT', project: { ...p, restored: true } }); onClose() }}><Icon name="collapse" size={15} /> Restaurar a Proyectos</button>
+        </>
+      ) : (
+        <>
+          {canEditProject(state.currentUser, p) && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar datos</button>}
+          {/* Recalcular comisiones de un proyecto finalizado (admin): útil si cambió el vendedor u overrides. */}
+          {isAdminRole(state.currentUser?.role) && p.stage === 'finalizado' && (
+            <button className="btn btn-ghost" title="Vuelve a calcular las comisiones según el vendedor y overrides actuales"
+              onClick={() => dispatch({ type: 'RECALC_COMMISSIONS', id: p.id })}><Icon name="commissions" size={15} /> Recalcular comisiones</button>
+          )}
+          <div className="flex-1"></div>
+          {/* Avanzar de etapa (confirmar/mover) solo para roles con gestión, no para Ventas ni Dirección. */}
+          {state.currentUser?.role !== 'ventas' && !readOnly && <MoveStage project={p} />}
+        </>
+      )}>
 
       {/* stage stepper full */}
       <div className="flex gap-0.5 mb-5">

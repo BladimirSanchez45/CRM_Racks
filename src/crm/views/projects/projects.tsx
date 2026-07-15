@@ -121,9 +121,11 @@ export function Kanban({ projects, onOpen, canMove = true }: { projects: Project
 const provName = (state: AppState, p: Project) =>
   p.suppliers.map(id => sel.supplier(state, id)?.name).filter(Boolean).join(', ') || 'Sin asignar'
 
-function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: Project) => void }) {
+export function ProjectsTable({ projects, onOpen, historial = false }: { projects: Project[]; onOpen: (p: Project) => void; historial?: boolean }) {
   const { state } = useStore()
-  const [sort, setSort] = React.useState<{ key: string; dir: number }>({ key: 'updated', dir: -1 })
+  // En el Historial ordena por defecto por fecha de cierre (lo más reciente arriba).
+  const [sort, setSort] = React.useState<{ key: string; dir: number }>(() => historial ? { key: 'closedOn', dir: -1 } : { key: 'updated', dir: -1 })
+  const comTotal = (p: Project) => sel.commissionsForProject(state, p.id).reduce((a, c) => a + c.amount, 0)
   const [cf, setCf] = React.useState({ proyecto: '', cliente: '', sistema: '', ciudad: '', etapa: '', proveedor: '', liquidado: '' })
 
   const sortBtn = (key: string, label: string, cls?: string) => (
@@ -159,6 +161,8 @@ function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
       case 'sistema': va = a.sistemaVendido || ''; vb = b.sistemaVendido || ''; break
       case 'freight': va = a.freight; vb = b.freight; break
       case 'install': va = a.install; vb = b.install; break
+      case 'comision': va = comTotal(a); vb = comTotal(b); break
+      case 'closedOn': va = a.closedOn || a.updated || ''; vb = b.closedOn || b.updated || ''; break
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       default: va = (a as any)[sort.key] || ''; vb = (b as any)[sort.key] || ''
     }
@@ -183,10 +187,13 @@ function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
               <th>Liquidado</th>
               <th>Docs</th>
               {sortBtn('updated', 'Actualizado', 'num')}
+              {historial && sortBtn('closedOn', 'Cierre', 'num')}
+              {historial && sortBtn('comision', 'Comisión', 'num')}
             </tr>
             <tr>
               {fth('proyecto')}{fth('cliente')}{fth('sistema')}{fth('ciudad')}{fth('etapa')}{fth('proveedor')}
               {fth()}{fth()}{fth()}{fth('liquidado')}{fth()}{fth()}
+              {historial && fth()}{historial && fth()}
             </tr>
           </thead>
           <tbody>
@@ -206,6 +213,8 @@ function ProjectsTable({ projects, onOpen }: { projects: Project[]; onOpen: (p: 
                   <td>{p.finiquito === 'paid' ? <Badge color="var(--ok)">Liquidado</Badge> : <Badge color="var(--warn)">Pendiente</Badge>}</td>
                   <td><span className="mono text-[11px]" style={{ color: dc.done === dc.total ? 'var(--ok)' : 'var(--tx-2)' }}>{dc.done}/{dc.total}</span></td>
                   <td className="num text-tx-2 text-[12px]">{fmtDateShort(p.updated)}</td>
+                  {historial && <td className="num text-tx-1 text-[12px]">{fmtDateShort(p.closedOn || p.updated)}</td>}
+                  {historial && <td className="num"><span className="inline-flex items-center gap-1.5"><span className="mono">{fmtMoney(comTotal(p))}</span><Badge color="var(--ok)">Pagada</Badge></span></td>}
                 </tr>
               )
             })}
@@ -224,8 +233,10 @@ export function ProjectsPage() {
   const isVentas = me?.role === 'ventas'
   // dirección e ingeniería: solo lectura (sin registrar ni mover etapas).
   const isDir = isDireccion(me?.role) || isIngenieria(me?.role)
-  // Ventas solo ve SUS proyectos (donde es el vendedor).
-  const mine = isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects
+  // Ventas solo ve SUS proyectos (donde es el vendedor). Además, los finalizados con
+  // comisiones ya pagadas se ARCHIVAN al Historial y no aparecen aquí (para no acumular).
+  const mine = (isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects)
+    .filter(p => !sel.isProjectArchived(state, p))
   const [view, setView] = React.useState('kanban')
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [form, setForm] = React.useState<object | null>(null) // {} para nuevo
