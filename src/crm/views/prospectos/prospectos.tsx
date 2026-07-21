@@ -6,7 +6,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, canSeeAllProspects } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
 import type { AppState, Project, Prospect, ProspectComment, ProspectEstado, ProspectEvaluation, ProspectInput, ProspectResultado } from '../../core/types'
@@ -125,8 +125,11 @@ type ProspectFormState = {
   id?: string; name: string; seller: string; empresa: string; email: string; phone: string; city: string
   fechaAsignacion: string; estado: ProspectEstado; ultimoContacto: string; costo: number | string
   sistema: string; anuncio: string; resultado: ProspectResultado; notas: string
-  cotizacion?: string; cotizacionPath?: string; convertedProjectId?: string; createdAt?: string
+  cotizacion?: string; cotizacionPath?: string; cotizaciones: { name: string; path?: string }[]
+  convertedProjectId?: string; createdAt?: string
 }
+/** Máximo de cotizaciones que se pueden adjuntar a un prospecto. */
+const MAX_COTIZACIONES = 3
 function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
@@ -138,11 +141,20 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
     empresa: prospect.empresa || '', email: prospect.email || '', phone: prospect.phone || '', city: prospect.city || '',
     fechaAsignacion: prospect.fechaAsignacion || '', ultimoContacto: prospect.ultimoContacto || '',
     costo: prospect.costo ?? '', sistema: prospect.sistema || '', anuncio: prospect.anuncio || '', notas: prospect.notas || '',
+    // Compatibilidad: si aún no tiene lista, siembra la cotización única anterior.
+    cotizaciones: prospect.cotizaciones?.length
+      ? [...prospect.cotizaciones]
+      : (prospect.cotizacion ? [{ name: prospect.cotizacion, path: prospect.cotizacionPath }] : []),
   } : {
     name: '', seller: isVentas ? me!.id : '', empresa: '', email: '', phone: '', city: '',
     fechaAsignacion: TODAY_ISO, estado: 'Nuevo', ultimoContacto: TODAY_ISO, costo: '', sistema: '', anuncio: '',
-    resultado: 'En espera', notas: '',
+    resultado: 'En espera', notas: '', cotizaciones: [],
   })
+  const addCotizacion = (v: { name: string; path: string }) => {
+    if (!v.name) return
+    setP(s => s.cotizaciones.length >= MAX_COTIZACIONES ? s : { ...s, cotizaciones: [...s.cotizaciones, { name: v.name, path: v.path }] })
+  }
+  const removeCotizacion = (i: number) => setP(s => ({ ...s, cotizaciones: s.cotizaciones.filter((_, idx) => idx !== i) }))
   const set = (k: keyof ProspectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   // Anuncio: si el valor guardado no es uno de los presets, se considera "Otro" (texto libre).
   const presetAnuncios = ANUNCIOS.filter(a => a !== 'Otro')
@@ -156,7 +168,10 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
       empresa: p.empresa.trim() || undefined, email: p.email.trim() || undefined, phone: p.phone.trim() || undefined,
       city: p.city.trim() || undefined, fechaAsignacion: p.fechaAsignacion || undefined, ultimoContacto: p.ultimoContacto || undefined,
       costo: p.costo === '' ? undefined : +p.costo, sistema: p.sistema.trim() || undefined, anuncio: p.anuncio.trim() || undefined,
-      notas: p.notas.trim() || undefined, cotizacion: p.cotizacion, cotizacionPath: p.cotizacionPath,
+      notas: p.notas.trim() || undefined,
+      // La lista manda; los campos legado reflejan la PRIMERA cotización.
+      cotizaciones: p.cotizaciones,
+      cotizacion: p.cotizaciones[0]?.name, cotizacionPath: p.cotizaciones[0]?.path,
       convertedProjectId: p.convertedProjectId,
     }
     dispatch({ type: 'SAVE_PROSPECT', prospect: payload }); onClose()
@@ -204,9 +219,22 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
         </Field>
         {anuncioOtro && <Field label="Especificar origen"><Input value={p.anuncio} onChange={e => set('anuncio', e.target.value)} placeholder="Describe el origen" autoFocus /></Field>}
         <Field label="Costo / cotización (Sin IVA)"><MoneyInput value={p.costo} onChange={v => set('costo', v)} placeholder="0" /></Field>
-        <Field label="Cotización (archivo)" span={2}>
-          <FileField label="" value={p.cotizacion || ''} path={p.cotizacionPath} folder={`prospects/${prospect?.id || 'nuevos'}`}
-            onChange={v => setP(s => ({ ...s, cotizacion: v.name, cotizacionPath: v.path }))} accept=".pdf,.xlsx,.xls,.jpg,.png" />
+        {/* Hasta 3 cotizaciones: a veces se cotiza más de una opción al mismo prospecto. */}
+        <Field label={`Cotizaciones (${p.cotizaciones.length}/${MAX_COTIZACIONES})`} span={2}>
+          <div className="flex flex-col gap-2">
+            {p.cotizaciones.map((c, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="flex-1 min-w-0"><DocChip doc={{ name: c.name, ok: true, path: c.path }} label={c.name || `Cotización ${i + 1}`} /></div>
+                <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar cotización" onClick={() => removeCotizacion(i)}><Icon name="trash" size={13} /></button>
+              </div>
+            ))}
+            {p.cotizaciones.length < MAX_COTIZACIONES ? (
+              <FileField label="" value="" folder={`prospects/${prospect?.id || 'nuevos'}`}
+                onChange={addCotizacion} accept=".pdf,.xlsx,.xls,.jpg,.png" />
+            ) : (
+              <div className="meta">Máximo {MAX_COTIZACIONES} cotizaciones. Quita una para subir otra.</div>
+            )}
+          </div>
         </Field>
         <Field label="Notas" span={2}><Input value={p.notas} onChange={e => set('notas', e.target.value)} placeholder="Seguimiento, detalles…" /></Field>
       </div>

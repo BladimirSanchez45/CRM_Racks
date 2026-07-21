@@ -493,8 +493,11 @@ export interface Prospect {
   fechaAsignacion?: string     // Fecha de asignación (ISO date)
   estado: ProspectEstado
   ultimoContacto?: string      // Fecha del último contacto (ISO date); base del "Seguimiento"
+  /** Cotización principal (legado, se conserva = primera de `cotizaciones`). */
   cotizacion?: string          // Nombre del archivo de cotización
   cotizacionPath?: string      // Ruta del archivo en Storage
+  /** Cotizaciones del prospecto (hasta 3): a veces se cotiza más de una opción. */
+  cotizaciones?: { name: string; path?: string }[]
   costo?: number               // COSTO / monto cotizado (prellenaría el subtotal de la venta)
   resultado: ProspectResultado
   sistema?: string             // Sistema (→ project.sistemaVendido)

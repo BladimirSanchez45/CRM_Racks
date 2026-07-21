@@ -532,6 +532,12 @@ function mapProspect(r: any): Prospect {
     ...(r.ultimo_contacto ? { ultimoContacto: r.ultimo_contacto } : {}),
     ...(r.cotizacion ? { cotizacion: r.cotizacion } : {}),
     ...(r.cotizacion_path ? { cotizacionPath: r.cotizacion_path } : {}),
+    ...((() => {
+      const raw = typeof r.cotizaciones === 'string' ? (() => { try { return JSON.parse(r.cotizaciones) } catch { return [] } })() : r.cotizaciones
+      return Array.isArray(raw) && raw.length
+        ? { cotizaciones: raw.map((c: any) => ({ name: c.name ?? '', ...(c.path ? { path: c.path } : {}) })) }
+        : {}
+    })()),
     ...(r.costo != null ? { costo: Number(r.costo) } : {}),
     ...(r.sistema ? { sistema: r.sistema } : {}),
     ...(r.anuncio ? { anuncio: r.anuncio } : {}),
@@ -561,6 +567,7 @@ function prospectRow(p: Prospect): Record<string, unknown> {
     empresa: p.empresa ?? null, email: p.email ?? null, phone: p.phone ?? null, city: p.city ?? null,
     fecha_asignacion: orNull(p.fechaAsignacion), ultimo_contacto: orNull(p.ultimoContacto),
     cotizacion: p.cotizacion ?? null, cotizacion_path: p.cotizacionPath ?? null,
+    cotizaciones: p.cotizaciones ?? [],
     costo: p.costo ?? null, sistema: p.sistema ?? null, anuncio: p.anuncio ?? null, notas: p.notas ?? null,
     comments: p.comments ?? [], evaluacion: p.evaluacion ?? null,
     converted_project_id: p.convertedProjectId ?? null, created_at: p.createdAt, updated: p.updated ?? null,
