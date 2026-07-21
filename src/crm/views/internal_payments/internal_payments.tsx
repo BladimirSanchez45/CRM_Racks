@@ -36,7 +36,8 @@ type FormState = {
   category: InternalPaymentCategory
   projectId: string
   supplierId: string
-  amount: number | string
+  amount: number | string        // total a pagar (lo captura solo el SIN factura)
+  subtotal: number | string      // sin IVA (lo captura solo el CON factura)
   origen: string
   destino: string
   scheduledDate: string
@@ -45,15 +46,25 @@ type FormState = {
   filePath?: string
   sinFactura: boolean
 }
+/** IVA que se aplica a los pagos internos CON factura. */
+const IVA_PI = 0.16
+const round2 = (n: number) => Math.round(n * 100) / 100
 function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const [p, setP] = React.useState<FormState>(() => payment ? {
     ...payment, projectId: payment.projectId ?? '', supplierId: payment.supplierId ?? '', scheduledDate: payment.scheduledDate ?? '',
     origen: payment.origen ?? '', destino: payment.destino ?? '', sinFactura: !!payment.sinFactura,
+    // Pago viejo CON factura sin subtotal capturado: se deriva del total.
+    subtotal: payment.subtotal ?? (payment.sinFactura ? '' : round2((payment.amount || 0) / (1 + IVA_PI))),
   } : {
-    concept: '', category: 'Flete', projectId: '', supplierId: '', amount: '', origen: '', destino: '', scheduledDate: '', notes: '', file: '', sinFactura: false,
+    concept: '', category: 'Flete', projectId: '', supplierId: '', amount: '', subtotal: '', origen: '', destino: '', scheduledDate: '', notes: '', file: '', sinFactura: false,
   })
   const cutoff = payCutoff()
+  // CON factura: se captura el subtotal y de ahí salen el IVA y el total a pagar.
+  // SIN factura: se captura directo el total (no hay IVA).
+  const subNum = +p.subtotal || 0
+  const ivaMonto = p.sinFactura ? 0 : round2(subNum * IVA_PI)
+  const totalPagar = p.sinFactura ? (+p.amount || 0) : round2(subNum * (1 + IVA_PI))
   const set = (k: keyof FormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   // Las ubicaciones de origen/destino solo aplican a servicios de Flete e Instalación.
   const usaUbicacion = p.category === 'Flete' || p.category === 'Instalación'
@@ -65,7 +76,7 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
     .filter(ip => ip.id !== p.id && ip.projectId === p.projectId && ip.category === p.category && ip.status === 'Pagado')
     .reduce((a, ip) => a + ip.amount, 0)
   const saldoServicio = asignado - pagadoServicio
-  const valid = p.concept && p.amount
+  const valid = !!p.concept && totalPagar > 0
   const { requestClose, guard } = useUnsavedGuard(p, onClose)
 
   const save = () => {
@@ -75,7 +86,10 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
       category: p.category,
       projectId: p.projectId || undefined,
       supplierId: p.supplierId || undefined,
-      amount: +p.amount || 0,
+      // `amount` SIEMPRE es el total a pagar. Con factura sale de subtotal × 1.16;
+      // sin factura es el total que se capturó directo.
+      amount: totalPagar,
+      subtotal: p.sinFactura ? undefined : subNum,
       // Origen/destino solo se guardan para Flete e Instalación.
       origen: usaUbicacion ? (p.origen || undefined) : undefined,
       destino: usaUbicacion ? (p.destino || undefined) : undefined,
@@ -137,7 +151,20 @@ function InternalPaymentForm({ payment, onClose }: { payment?: InternalPayment; 
         <Field label="Categoría">
           <Select value={p.category} onChange={e => set('category', e.target.value)}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</Select>
         </Field>
-        <Field label="Monto (MXN)"><MoneyInput value={p.amount} onChange={v => set('amount', v)} placeholder="0" /></Field>
+        {/* CON factura: se captura el SUBTOTAL y la app calcula IVA y total a pagar.
+            SIN factura: no hay IVA, se captura directo el total. */}
+        {p.sinFactura ? (
+          <Field label="Monto total (MXN)"><MoneyInput value={p.amount} onChange={v => set('amount', v)} placeholder="0" /></Field>
+        ) : (
+          <Field label="Subtotal (sin IVA)"><MoneyInput value={p.subtotal} onChange={v => set('subtotal', v)} placeholder="0" /></Field>
+        )}
+        {!p.sinFactura && (
+          <div className="col-span-2 bg-bg-1 border border-line rounded-[8px] p-3 -mt-1 flex items-center justify-end gap-6 text-[12.5px]">
+            <div className="text-right"><div className="label-k">Subtotal</div><div className="mono mt-0.5">{fmtMoney2(subNum)}</div></div>
+            <div className="text-right"><div className="label-k">IVA 16%</div><div className="mono mt-0.5">{fmtMoney2(ivaMonto)}</div></div>
+            <div className="text-right"><div className="label-k">Total a pagar</div><div className="mono mt-0.5 font-bold text-[15px]">{fmtMoney2(totalPagar)}</div></div>
+          </div>
+        )}
         {usaUbicacion && <>
           <Field label="Ubicación de origen"><Input value={p.origen} onChange={e => set('origen', e.target.value)} placeholder="Desde dónde sale" /></Field>
           <Field label="Ubicación de destino"><Input value={p.destino} onChange={e => set('destino', e.target.value)} placeholder="Hacia dónde va" /></Field>
@@ -248,8 +275,13 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
       </>}>
       <div className="bg-bg-1 border border-line rounded-[8px] p-3.5 mb-3.5 flex items-center justify-between">
         <div>
-          <div className="label-k">Monto</div>
+          <div className="label-k">{payment.sinFactura ? 'Monto (sin factura)' : 'Total a pagar (con IVA)'}</div>
           <div className="font-display font-extrabold text-[24px] mt-0.5">{fmtMoney2(payment.amount)}</div>
+          {/* Con factura: se muestra de dónde sale el total (lo que resta de la utilidad es el subtotal). */}
+          {!payment.sinFactura && (() => {
+            const sub = payment.subtotal != null ? payment.subtotal : payment.amount / (1 + IVA_PI)
+            return <div className="meta mt-1">Subtotal {fmtMoney2(sub)} + IVA {fmtMoney2(payment.amount - sub)}</div>
+          })()}
         </div>
         <div className="text-right flex flex-col items-end gap-1.5">
           {statusBadge(payment.status)}

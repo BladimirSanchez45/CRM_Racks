@@ -407,6 +407,7 @@ function mapInternalPayment(r: any): InternalPayment {
     ...(r.file_path ? { filePath: r.file_path } : {}),
     ...(r.comprobante ? { comprobante: r.comprobante } : {}),
     ...(r.comprobante_path ? { comprobantePath: r.comprobante_path } : {}),
+    ...(r.subtotal != null ? { subtotal: Number(r.subtotal) } : {}),
     ...(r.sin_factura ? { sinFactura: true } : {}),
     ...(r.movement_id ? { movementId: r.movement_id } : {}),
     ...(r.movement_list_id ? { movementListId: r.movement_list_id } : {}),
@@ -421,6 +422,7 @@ function internalPaymentRow(p: InternalPayment): Record<string, unknown> {
     decided_at: p.decidedAt ?? null, reject_reason: orNull(p.rejectReason), notes: p.notes,
     file: p.file, file_path: p.filePath ?? null,
     comprobante: p.comprobante ?? null, comprobante_path: p.comprobantePath ?? null,
+    subtotal: p.subtotal ?? null,
     sin_factura: !!p.sinFactura, movement_id: p.movementId ?? null, movement_list_id: p.movementListId ?? null,
     created_at: p.createdAt,
   }

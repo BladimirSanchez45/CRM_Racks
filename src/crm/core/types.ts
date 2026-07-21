@@ -242,7 +242,10 @@ export interface InternalPayment {
   category: InternalPaymentCategory
   projectId?: string              // Proyecto relacionado (opcional)
   supplierId?: string             // Proveedor a pagar (opcional)
-  amount: number                  // Monto cotizado
+  amount: number                  // TOTAL a pagar (con IVA si lleva factura)
+  /** Solo para pagos CON FACTURA: monto sin IVA capturado por logística.
+   *  El `amount` = subtotal × 1.16. Es lo que resta de la utilidad SIN IVA. */
+  subtotal?: number
   origen?: string                 // Ubicación de origen (para Flete / Instalación)
   destino?: string                // Ubicación de destino (para Flete / Instalación)
   scheduledDate?: string          // Fecha en que se quiere agendar el pago

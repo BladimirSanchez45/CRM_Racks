@@ -1274,6 +1274,17 @@ export const sel = {
       // su gasto se descuenta vía projectMovementsCost (evita descontar doble).
       .filter(p => p.projectId === pid && p.status === 'Pagado' && !p.movementId)
       .reduce((a, p) => a + (p.amount || 0), 0),
+  /** Los MISMOS pagos internos pero a SUBTOTAL (sin IVA), para restarlos de la utilidad
+   *  sin IVA:
+   *   · SIN factura → no traen IVA: se restan tal cual.
+   *   · CON factura → se usa el `subtotal` capturado; si es un pago viejo que no lo tiene,
+   *     se deriva quitándole el IVA al total (amount / 1.16). */
+  projectInternalPaymentsSub: (state: AppState, pid: string) =>
+    state.internalPayments
+      .filter(p => p.projectId === pid && p.status === 'Pagado' && !p.movementId)
+      .reduce((a, p) => a + (p.sinFactura
+        ? (p.amount || 0)
+        : (p.subtotal != null ? p.subtotal : (p.amount || 0) / 1.16)), 0),
   /** Gastos por movimientos "por fuera" ligados al proyecto. Solo cuentan los AUTORIZADOS,
    *  no eliminados, y cuya LISTA ya tiene comprobante de pago (lista pagada): hasta que se
    *  sube el comprobante no se descuenta la utilidad. */
@@ -1283,10 +1294,11 @@ export const sel = {
       .filter(m => m.projectId === pid && m.status === 'Autorizado' && m.changedByDireccion !== 'removed' && paidLists.has(m.listId))
       .reduce((a, m) => a + (m.amount || 0), 0)
   },
-  /** Utilidad SIN IVA = subtotal de la venta − subtotal de compras (OC) − pagos internos pagados − movimientos autorizados. */
+  /** Utilidad SIN IVA = subtotal de la venta − subtotal de compras (OC) − pagos internos
+   *  (a subtotal: a los con factura se les quita el IVA) − movimientos (sin factura, tal cual). */
   projectUtilidadSub: (state: AppState, p: Project) =>
     (p.ventaSubtotal || 0) - sel.projectComprasConIva(state, p.id) / 1.16
-      - sel.projectInternalPaymentsCost(state, p.id)
+      - sel.projectInternalPaymentsSub(state, p.id)
       - sel.projectMovementsCost(state, p.id),
   /** Base para calcular comisiones = utilidad sin IVA (nunca negativa). */
   projectComisionBase: (state: AppState, p: Project) => Math.max(0, sel.projectUtilidadSub(state, p)),
