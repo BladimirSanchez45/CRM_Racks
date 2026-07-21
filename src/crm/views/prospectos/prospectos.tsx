@@ -9,7 +9,7 @@ import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isD
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
-import type { Project, Prospect, ProspectComment, ProspectEstado, ProspectEvaluation, ProspectInput, ProspectResultado } from '../../core/types'
+import type { AppState, Project, Prospect, ProspectComment, ProspectEstado, ProspectEvaluation, ProspectInput, ProspectResultado } from '../../core/types'
 
 const ESTADOS: ProspectEstado[] = ['Nuevo', 'Contactado', 'Cotizado', 'Negociación']
 const RESULTADOS: ProspectResultado[] = ['En espera', 'Vendido', 'Perdido']
@@ -100,6 +100,12 @@ const mesLabel = (key: string): string => {
   if (!y || !m) return key
   const t = new Date(y, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
   return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+/** Nombre del vendedor tolerante a id de vendedor O id de usuario (ventas). */
+const sellerNameOf = (state: AppState, id: string) => {
+  const s = sel.sellerName(state, id)
+  return s !== '—' ? s : (sel.userName(state, id) || '—')
 }
 
 /** Días transcurridos desde el último contacto (para el "Seguimiento"). */
@@ -348,20 +354,19 @@ export function ProspectosPage() {
   const [form, setForm] = React.useState<Prospect | {} | null>(null)
   const [convert, setConvert] = React.useState<Prospect | null>(null)
   const [del, setDel] = React.useState<Prospect | null>(null)
+  const [deconvert, setDeconvert] = React.useState<Prospect | null>(null)
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
   const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })
 
-  // Nombre del vendedor tolerante a id de vendedor O id de usuario (ventas).
-  const sellerName = (id: string) => {
-    const s = sel.sellerName(state, id)
-    return s !== '—' ? s : (sel.userName(state, id) || '—')
-  }
+  const sellerName = (id: string) => sellerNameOf(state, id)
 
   // Alcance: los de rol Ventas solo ven SUS prospectos, salvo que su PUESTO sea
   // Gerente General o Gerente de Ventas (esos ven los de todo el equipo, como el admin).
+  // Los PERDIDOS salen de esta vista y viven en la vista "Perdidos".
   const verTodo = canSeeAllProspects(me)
-  const visibles = verTodo ? state.prospects : state.prospects.filter(p => p.seller === me?.id)
+  const visibles = (verTodo ? state.prospects : state.prospects.filter(p => p.seller === me?.id))
+    .filter(p => p.resultado !== 'Perdido')
 
   const rows = visibles.filter(p => {
     if (f.seller && p.seller !== f.seller) return false
@@ -394,6 +399,17 @@ export function ProspectosPage() {
   const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad || f.mes
 
   const markSold = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'Vendido' } })
+  // Marcar "Perdido" (cliente ya no responde): sale de Prospectos y pasa a la vista Perdidos.
+  const markLost = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'Perdido' } })
+  // Deshacer "Vendido": regresa el resultado a "En espera".
+  const unmarkSold = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'En espera' } })
+  // Regresar un prospecto CONVERTIDO a prospecto: desvincula (y opcionalmente elimina) el
+  // proyecto que se había creado, y deja el prospecto activo de nuevo ("En espera").
+  const doDeconvert = (p: Prospect, deleteProject: boolean) => {
+    if (deleteProject && p.convertedProjectId) dispatch({ type: 'DELETE_PROJECT', id: p.convertedProjectId })
+    dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, convertedProjectId: undefined, resultado: 'En espera' } })
+    setDeconvert(null)
+  }
 
   // Prellenado del formulario de proyecto con los datos del prospecto (sin cliente:
   // ese se agrega en el propio formulario).
@@ -444,7 +460,8 @@ export function ProspectosPage() {
         </Select>
         <Select value={f.resultado} onChange={e => setF({ ...f, resultado: e.target.value })} className="w-auto min-w-[140px]">
           <option value="">Todos los resultados</option>
-          {RESULTADOS.map(s => <option key={s} value={s}>{s}</option>)}
+          {/* Los "Perdido" viven en la vista Perdidos, no en el filtro de esta. */}
+          {RESULTADOS.filter(r => r !== 'Perdido').map(s => <option key={s} value={s}>{s}</option>)}
         </Select>
         <Select value={f.calidad} onChange={e => setF({ ...f, calidad: e.target.value })} className="w-auto min-w-[140px]">
           <option value="">Toda calidad</option>
@@ -496,32 +513,41 @@ export function ProspectosPage() {
                     <td className="text-tx-2 text-[12px]">{p.sistema || '—'}</td>
                     <td className="text-tx-2 text-[12px]">{p.anuncio || '—'}</td>
                     <td onClick={e => e.stopPropagation()}>
-                      <div className="flex gap-1 justify-end items-center">
+                      <div className="flex gap-1.5 justify-end items-center flex-nowrap">
                         {!readOnly && (
                           <>
                             {p.convertedProjectId ? (
-                              <Badge color="var(--st-9)" icon="check">Convertido</Badge>
+                              <>
+                                <Badge color="var(--st-9)" icon="check">En Proyectos</Badge>
+                                <button className="icon-btn w-8 h-8" title="Regresar a prospecto (desvincular / eliminar el proyecto)" onClick={() => setDeconvert(p)}><Icon name="collapse" size={13} /></button>
+                              </>
                             ) : p.resultado === 'Vendido' ? (
-                              <button className="btn btn-primary btn-sm whitespace-nowrap" onClick={() => setConvert(p)}><Icon name="flag" size={13} /> Registrar venta</button>
+                              <>
+                                <button className="btn btn-primary btn-sm h-8 whitespace-nowrap" onClick={() => setConvert(p)}><Icon name="flag" size={13} /> Registrar venta</button>
+                                <button className="icon-btn w-8 h-8" title="Deshacer 'Vendido' (regresar a En espera)" onClick={() => unmarkSold(p)}><Icon name="collapse" size={13} /></button>
+                              </>
                             ) : (
-                              <button className="btn btn-ghost btn-sm whitespace-nowrap" title="Marcar como vendido" onClick={() => markSold(p)}><Icon name="check" size={13} />vendido</button>
+                              <>
+                                <button className="btn btn-ghost btn-sm h-8 whitespace-nowrap" title="Marcar como vendido" onClick={() => markSold(p)}><Icon name="check" size={13} /> Marcar vendido</button>
+                                <button className="icon-btn w-8 h-8" title="Marcar como perdido (el cliente ya no responde)" onClick={() => markLost(p)}><Icon name="eyeOff" size={13} /></button>
+                              </>
                             )}
-                            <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setForm(p)}><Icon name="edit" size={13} /></button>
-                            <button className="icon-btn w-7 h-7" title="Eliminar" onClick={() => setDel(p)}><Icon name="trash" size={13} /></button>
+                            <button className="icon-btn w-8 h-8" title="Editar" onClick={() => setForm(p)}><Icon name="edit" size={13} /></button>
+                            <button className="icon-btn w-8 h-8" title="Eliminar" onClick={() => setDel(p)}><Icon name="trash" size={13} /></button>
                           </>
                         )}
                         {(() => {
                           const s = scoreOf(p.evaluacion)
                           const b = s != null && s > 0 ? bandOf(s) : null
                           return (
-                            <button className="icon-btn w-7 h-7" title={b ? `Calidad: ${b.label} (${s}/25)` : 'Evaluar calidad del prospecto'} onClick={() => setEvalP(p)}>
+                            <button className="icon-btn w-8 h-8" title={b ? `Calidad: ${b.label} (${s}/25)` : 'Evaluar calidad del prospecto'} onClick={() => setEvalP(p)}>
                               <Icon name="star" size={13} style={b ? { color: b.color } : undefined} />
                             </button>
                           )
                         })()}
-                        <button className="icon-btn w-7 h-7 relative" title="Comentarios" onClick={() => setComments(p)}>
+                        <button className="icon-btn w-8 h-8 relative" title="Comentarios" onClick={() => setComments(p)}>
                           <Icon name="comment" size={13} />
-                          {(p.comments?.length || 0) > 0 && <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] px-1 grid place-items-center rounded-full text-white text-[9px] font-bold leading-none" style={{ background: 'var(--acc)' }}>{p.comments!.length}</span>}
+                          {(p.comments?.length || 0) > 0 && <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full text-white text-[9px] font-bold leading-none" style={{ background: 'var(--acc)' }}>{p.comments!.length}</span>}
                         </button>
                       </div>
                     </td>
@@ -543,6 +569,138 @@ export function ProspectosPage() {
       {del && (
         <Confirm title="Eliminar prospecto" danger
           message={`¿Seguro que quieres eliminar el prospecto "${del.name}"? Esta acción no se puede deshacer.`}
+          onConfirm={() => { dispatch({ type: 'DELETE_PROSPECT', id: del.id }); setDel(null) }}
+          onClose={() => setDel(null)} />
+      )}
+      {deconvert && (() => {
+        const proj = deconvert.convertedProjectId ? state.projects.find(x => x.id === deconvert.convertedProjectId) : undefined
+        return (
+          <Modal width={480} icon="collapse" title="Regresar a prospecto" sub={deconvert.name} onClose={() => setDeconvert(null)}
+            footer={<>
+              <button className="btn btn-ghost" onClick={() => setDeconvert(null)}>Cancelar</button>
+              <div className="flex-1"></div>
+              <button className="btn btn-ghost" onClick={() => doDeconvert(deconvert, false)}>Solo desvincular</button>
+              <button className="btn btn-danger" onClick={() => doDeconvert(deconvert, true)}><Icon name="trash" size={14} /> Eliminar proyecto</button>
+            </>}>
+            <p className="text-[13px] text-tx-1 mb-3">
+              El prospecto <b>{deconvert.name}</b> volverá a estar activo (resultado <b>En espera</b>) y podrás gestionarlo de nuevo.
+            </p>
+            <div className="bg-bg-1 border border-line rounded-[8px] p-3 text-[12.5px] text-tx-2">
+              {proj ? <>Proyecto vinculado: <span className="mono text-acc">{proj.code}</span> · {sel.clientName(state, proj.client)}</> : 'El proyecto vinculado ya no existe.'}
+              <ul className="mt-2 list-disc pl-4 space-y-1">
+                <li><b>Solo desvincular</b>: conserva el proyecto en Proyectos, pero el prospecto ya no lo apunta.</li>
+                <li><b>Eliminar proyecto</b>: borra el proyecto{proj ? ` ${proj.code}` : ''} y deja el prospecto en la lista.</li>
+              </ul>
+            </div>
+          </Modal>
+        )
+      })()}
+    </div>
+  )
+}
+
+/* ============================================================
+   Página de PERDIDOS — prospectos con resultado "Perdido" (el cliente ya no
+   responde). Salen de Prospectos pero quedan guardados aquí; se pueden Reactivar.
+   ============================================================ */
+export function PerdidosPage() {
+  const { state, dispatch } = useStore()
+  const me = state.currentUser
+  const readOnly = isDireccion(me?.role)
+  const verTodo = canSeeAllProspects(me)
+
+  const [q, setQ] = React.useState('')
+  const [fSeller, setFSeller] = React.useState('')
+  const [form, setForm] = React.useState<Prospect | null>(null)
+  const [comments, setComments] = React.useState<Prospect | null>(null)
+  const [del, setDel] = React.useState<Prospect | null>(null)
+
+  const base = (verTodo ? state.prospects : state.prospects.filter(p => p.seller === me?.id))
+    .filter(p => p.resultado === 'Perdido')
+  const rows = base.filter(p =>
+    (!fSeller || p.seller === fSeller) &&
+    (!q || `${p.name} ${p.empresa || ''} ${p.phone || ''} ${p.city || ''} ${p.sistema || ''}`.toLowerCase().includes(q.toLowerCase())),
+  ).sort((a, b) => ((a.updated || a.createdAt || '') < (b.updated || b.createdAt || '') ? 1 : -1))
+
+  const sellerOpts = [...new Set(base.map(p => p.seller).filter(Boolean))]
+  const costoPerdido = base.reduce((a, p) => a + (p.costo || 0), 0)
+  const reactivate = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'En espera' } })
+
+  return (
+    <div>
+      <div className="spread mb-[18px]">
+        <div className="sec-title m-0">
+          <h2>Perdidos</h2>
+          <span className="sub">Prospectos que ya no responden · {base.length} guardado{base.length === 1 ? '' : 's'}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3.5 mb-4">
+        <KPI label="Prospectos perdidos" value={base.length} icon="eyeOff" />
+        <KPI label="Costo cotizado perdido" value={costoPerdido} format={fmtMoney} icon="money" />
+      </div>
+
+      <div className="flex gap-2 mb-3.5 items-center flex-wrap">
+        <div className="relative flex-[1_1_220px] max-w-[300px]">
+          <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+          <input className="input pl-[34px]" placeholder="Buscar nombre, empresa, teléfono…" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+        {verTodo && (
+          <Select value={fSeller} onChange={e => setFSeller(e.target.value)} className="w-auto min-w-[160px]">
+            <option value="">Todos los vendedores</option>
+            {sellerOpts.map(id => <option key={id} value={id}>{sellerNameOf(state, id)}</option>)}
+          </Select>
+        )}
+        {(q || fSeller) && <button className="btn btn-ghost btn-sm" onClick={() => { setQ(''); setFSeller('') }}><Icon name="close" size={13} /> Limpiar</button>}
+        <span className="meta">{rows.length} de {base.length}</span>
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="tbl">
+            <thead><tr>
+              <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
+              <th>Sistema</th><th>Calidad</th><th>Últ. contacto</th><th></th>
+            </tr></thead>
+            <tbody>
+              {rows.map(p => (
+                <tr key={p.id} onClick={() => setForm(p)}>
+                  <td className="font-semibold text-tx-1 text-[12.5px]">{p.name}</td>
+                  <td className="text-[12px]">{sellerNameOf(state, p.seller)}</td>
+                  <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>
+                  <td className="mono text-[12px]">{p.phone || '—'}</td>
+                  <td className="text-tx-1 text-[12px]">{p.city || '—'}</td>
+                  <td className="text-tx-2 text-[12px]">{p.sistema || '—'}</td>
+                  <td>{(() => {
+                    const s = scoreOf(p.evaluacion)
+                    if (s == null || s <= 0) return <span className="text-tx-3 text-[12px]">—</span>
+                    const b = bandOf(s)
+                    return <Badge color={b.color}>{b.label}</Badge>
+                  })()}</td>
+                  <td className="num text-tx-2 text-[12px]">{p.ultimoContacto ? fmtDateShort(p.ultimoContacto) : '—'}</td>
+                  <td onClick={e => e.stopPropagation()}>
+                    <div className="flex gap-1.5 justify-end items-center flex-nowrap">
+                      {!readOnly && <button className="btn btn-ghost btn-sm h-8 whitespace-nowrap" title="Reactivar (regresar a Prospectos como 'En espera')" onClick={() => reactivate(p)}><Icon name="collapse" size={13} /> Reactivar</button>}
+                      <button className="icon-btn w-8 h-8 relative" title="Comentarios" onClick={() => setComments(p)}>
+                        <Icon name="comment" size={13} />
+                        {(p.comments?.length || 0) > 0 && <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full text-white text-[9px] font-bold leading-none" style={{ background: 'var(--acc)' }}>{p.comments!.length}</span>}
+                      </button>
+                      {!readOnly && <button className="icon-btn w-8 h-8" title="Eliminar" onClick={() => setDel(p)}><Icon name="trash" size={13} /></button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {rows.length === 0 && <Empty icon="eyeOff">Sin prospectos perdidos{q || fSeller ? ' que coincidan' : ''}</Empty>}
+      </div>
+
+      {form && <ProspectForm prospect={form} onClose={() => setForm(null)} />}
+      {comments && <ProspectComments prospect={comments} onClose={() => setComments(null)} />}
+      {del && (
+        <Confirm title="Eliminar prospecto" danger
+          message={`¿Eliminar definitivamente el prospecto perdido "${del.name}"? Esta acción no se puede deshacer.`}
           onConfirm={() => { dispatch({ type: 'DELETE_PROSPECT', id: del.id }); setDel(null) }}
           onClose={() => setDel(null)} />
       )}

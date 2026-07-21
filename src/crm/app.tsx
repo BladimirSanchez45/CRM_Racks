@@ -10,7 +10,7 @@ import { Icon, type IconName } from './core/icons'
 import { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakColor } from './core/tweaks-panel'
 import { DashboardPage } from './views/dashboard/dashboard'
 import { ProjectsPage } from './views/projects/projects'
-import { ProspectosPage } from './views/prospectos/prospectos'
+import { ProspectosPage, PerdidosPage } from './views/prospectos/prospectos'
 import { HistorialPage } from './views/historial/historial'
 import { SuppliersPage } from './views/suppliers/suppliers'
 import { OrdersPage } from './views/orders/orders'
@@ -33,7 +33,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'prospectos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
+type Route = 'dashboard' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -46,6 +46,7 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
   { id: 'campaigns',   label: 'Campañas',     icon: 'layers', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
   { id: 'prospectos',  label: 'Prospectos',   icon: 'clients',     section: 'Comercial' },
+  { id: 'perdidos',    label: 'Perdidos',     icon: 'eyeOff',      section: 'Comercial' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
   { id: 'historial',   label: 'Historial',    icon: 'box',  roles: ['admin', 'superadmin', 'direccion'], section: 'Comercial' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
@@ -67,7 +68,7 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
 // NOTA: Dirección NO se lista aquí a propósito: ve todo como admin, pero cada vista
 // lo trata como SOLO LECTURA (isDireccion) — puede ver todo, sin crear/editar/eliminar.
 const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
-  ventas: ['dashboard', 'prospectos', 'projects', 'orders', 'settings'],
+  ventas: ['dashboard', 'prospectos', 'perdidos', 'projects', 'orders', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
   logistica: ['dashboard', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
@@ -86,7 +87,7 @@ const landingRoute = (role?: Role | null): Route => {
   return allowed[0] ?? 'dashboard'
 }
 const TITLES: Record<Route, string> = {
-  dashboard: 'Panel general', prospectos: 'Prospectos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
+  dashboard: 'Panel general', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   estadisticas: 'Estadísticas por origen', campaigns: 'Campañas',
@@ -211,6 +212,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
     switch (r) {
       case 'dashboard':   return <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'prospectos':  return <ProspectosPage />
+      case 'perdidos':    return <PerdidosPage />
       case 'projects':    return <ProjectsPage />
       case 'historial':   return <HistorialPage />
       case 'suppliers':   return <SuppliersPage />
