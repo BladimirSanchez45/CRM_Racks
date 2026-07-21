@@ -61,13 +61,25 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   // Movimientos: solo admin/superadmin y dirección (gasto "por fuera" semanal).
   { id: 'movements',   label: 'Movimientos',  icon: 'box',         roles: ['admin', 'superadmin', 'direccion'], section: 'Finanzas' },
 ]
-// Rutas permitidas por rol RESTRINGIDO. Los roles NO listados aquí (admin,
-// superadmin y dirección) ven TODAS las vistas. Para acotar un rol nuevo —p. ej.
-// logística— agrega su entrada con las rutas que sí puede ver (incluidas las vistas
-// nuevas que se creen para él). `settings` (Configuración) conviene incluirla siempre.
+// Rutas permitidas por rol RESTRINGIDO. Los roles NO listados aquí (superadmin y
+// dirección) ven TODAS las vistas. Para acotar un rol nuevo —p. ej. logística— agrega
+// su entrada con las rutas que sí puede ver (incluidas las vistas nuevas que se creen
+// para él). `settings` (Configuración) conviene incluirla siempre.
+// OJO: esta lista también gobierna la NAVEGACIÓN (no solo el menú), así que debe incluir
+// TODAS las rutas del rol, incluidas las que tienen whitelist propia por `roles`
+// (estadisticas, campaigns, historial, movements) y la de Administración.
 // NOTA: Dirección NO se lista aquí a propósito: ve todo como admin, pero cada vista
 // lo trata como SOLO LECTURA (isDireccion) — puede ver todo, sin crear/editar/eliminar.
 const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
+  // Admin: todo MENOS Prospectos/Perdidos (comercial de ventas) y
+  // Asignación/Remisiones (operación de logística). El superadmin sí ve todo.
+  admin: [
+    'dashboard', 'estadisticas', 'campaigns',
+    'projects', 'historial', 'clients', 'commissions',
+    'suppliers', 'orders',
+    'payments', 'cobranza', 'internal_payments', 'movements',
+    'admin', 'settings',
+  ],
   ventas: ['dashboard', 'prospectos', 'perdidos', 'projects', 'orders', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)

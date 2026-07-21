@@ -1,9 +1,11 @@
 // ============================================================
-//  COBRANZA — estado de cobro por PROYECTO (una fila por proyecto)
+//  COBRANZA — dos vistas:
+//   · "Por proyecto": estado de cobro de cada proyecto (una fila por proyecto).
+//   · "Por día": qué clientes pagaron cada día (agrupado por FECHA DE PAGO).
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, isDireccion } from '../../core/data'
-import { Modal, Badge, Empty, KPI, Select } from '../../core/ui'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, addDays, TODAY_ISO, isDireccion } from '../../core/data'
+import { Modal, Badge, Empty, KPI, Select, Seg, DocChip } from '../../core/ui'
 import { CobroForm } from '../projects/project_views'
 import { Icon } from '../../core/icons'
 import type { Project, ClientPayment, ClientPaymentStatus } from '../../core/types'
@@ -69,11 +71,127 @@ function CobranzaDetail({ project, onClose }: { project: Project; onClose: () =>
   )
 }
 
+/* ============================================================
+   COBROS POR DÍA — qué clientes pagaron cada día.
+   Se agrupa por la FECHA DE PAGO del cobro (no por cuándo se capturó) y solo
+   cuenta los que están en estado "Cobrado" (dinero que realmente entró).
+   ============================================================ */
+const mesLabelDe = (key: string) => {
+  const [y, m] = key.split('-').map(Number)
+  if (!y || !m) return key
+  const t = new Date(y, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
+  return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+function CobrosPorDia() {
+  const { state } = useStore()
+  const [q, setQ] = React.useState('')
+  const [mes, setMes] = React.useState('')
+
+  // Cada cobro con su proyecto/cliente ya resueltos (para filtrar y mostrar).
+  const cobros = state.clientPayments
+    .filter(c => c.status === 'Cobrado' && c.date)
+    .map(c => {
+      const proj = state.projects.find(p => p.id === c.projectId)
+      return { c, proj, cliente: proj ? sel.clientName(state, proj.client) : '—' }
+    })
+
+  const mesOpts = [...new Set(cobros.map(x => x.c.date.slice(0, 7)))].sort((a, b) => (a < b ? 1 : -1))
+  const needle = q.trim().toLowerCase()
+  const filtered = cobros.filter(x =>
+    (!mes || x.c.date.slice(0, 7) === mes) &&
+    (!needle || `${x.cliente} ${x.proj?.code || ''} ${x.c.concept || ''} ${x.c.method || ''}`.toLowerCase().includes(needle)),
+  )
+
+  // Agrupado por día (más reciente primero).
+  const byDay = new Map<string, typeof filtered>()
+  for (const x of filtered) {
+    const arr = byDay.get(x.c.date)
+    if (arr) arr.push(x); else byDay.set(x.c.date, [x])
+  }
+  const days = [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1))
+
+  // KPIs sobre TODOS los cobrados (no sobre el filtro), para que sean estables.
+  const sumIf = (pred: (d: string) => boolean) => cobros.filter(x => pred(x.c.date)).reduce((a, x) => a + x.c.amount, 0)
+  const desde7 = addDays(-6, TODAY_ISO)
+  const hoy = sumIf(d => d === TODAY_ISO)
+  const semana = sumIf(d => d >= desde7 && d <= TODAY_ISO)
+  const delMes = sumIf(d => d.slice(0, 7) === TODAY_ISO.slice(0, 7))
+  const totalFiltrado = filtered.reduce((a, x) => a + x.c.amount, 0)
+
+  return (
+    <>
+      <div className="grid grid-cols-3 gap-3.5 mb-4">
+        <KPI label="Cobrado hoy" value={hoy} format={fmtMoney} icon="money" accent foot={fmtDate(TODAY_ISO)} />
+        <KPI label="Últimos 7 días" value={semana} format={fmtMoney} icon="calendar" />
+        <KPI label="Este mes" value={delMes} format={fmtMoney} icon="trendUp" foot={mesLabelDe(TODAY_ISO.slice(0, 7))} />
+      </div>
+
+      <div className="flex gap-2 mb-3.5 items-center flex-wrap">
+        <div className="relative flex-[1_1_240px] max-w-[320px]">
+          <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+          <input className="input pl-[34px]" placeholder="Buscar cliente, proyecto, concepto…" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
+        <Select value={mes} onChange={e => setMes(e.target.value)} className="w-auto min-w-[160px]">
+          <option value="">Todos los meses</option>
+          {mesOpts.map(m => <option key={m} value={m}>{mesLabelDe(m)}</option>)}
+        </Select>
+        {(q || mes) && <button className="btn btn-ghost btn-sm" onClick={() => { setQ(''); setMes('') }}><Icon name="close" size={13} /> Limpiar</button>}
+        <span className="flex-1"></span>
+        <span className="meta">{filtered.length} cobro{filtered.length === 1 ? '' : 's'} · <b className="text-tx-1">{fmtMoney(totalFiltrado)}</b></span>
+      </div>
+
+      {days.length === 0 ? (
+        <Empty icon="money">Sin cobros registrados{q || mes ? ' que coincidan con el filtro' : ''}</Empty>
+      ) : (
+        <div className="flex flex-col gap-3.5">
+          {days.map(([day, items]) => {
+            const totalDia = items.reduce((a, x) => a + x.c.amount, 0)
+            return (
+              <div key={day} className="card overflow-hidden">
+                <div className="card-h">
+                  <Icon name="calendar" size={16} className="text-acc" />
+                  <span className="ttl">{fmtDate(day)}</span>
+                  {day === TODAY_ISO && <Badge color="var(--acc)">Hoy</Badge>}
+                  <span className="flex-1"></span>
+                  <span className="meta">{items.length} cobro{items.length === 1 ? '' : 's'}</span>
+                  <span className="font-display font-extrabold text-[17px] ml-3">{fmtMoney(totalDia)}</span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="tbl">
+                    <thead><tr>
+                      <th>Cliente</th><th>Proyecto</th><th>Concepto</th><th>Forma de pago</th>
+                      <th className="num">Importe</th><th>Comprobante</th>
+                    </tr></thead>
+                    <tbody>
+                      {items.map(({ c, proj, cliente }) => (
+                        <tr key={c.id} style={{ cursor: 'default' }}>
+                          <td className="text-[12.5px] font-semibold text-tx-1">{cliente}</td>
+                          <td className="text-[12px]">{proj ? <span className="mono text-acc">{proj.code}</span> : <span className="text-tx-3">—</span>}</td>
+                          <td className="text-[12.5px]">{c.concept || '—'}{c.comments ? <div className="meta mt-px truncate max-w-[220px]" title={c.comments}>{c.comments}</div> : null}</td>
+                          <td className="text-tx-1 text-[12px]">{c.method || '—'}</td>
+                          <td className="num font-semibold">{fmtMoney2(c.amount)}</td>
+                          <td>{c.filePath ? <DocChip doc={{ name: c.file || 'Comprobante', ok: true, path: c.filePath }} label="Comprobante" /> : <span className="text-tx-3 text-[12px]">—</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
+}
+
 export function CobranzaPage() {
   const { state } = useStore()
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [q, setQ] = React.useState('')
   const [fSupplier, setFSupplier] = React.useState('')
+  const [view, setView] = React.useState('proyecto')   // 'proyecto' | 'dia'
 
   // ---- Marcador "Nuevo" (no abierto), por usuario y persistido en el navegador ----
   // Cada usuario lleva su propio set de proyectos ya abiertos. Las filas que NO estén
@@ -129,10 +247,23 @@ export function CobranzaPage() {
   // Proveedores que tienen al menos una OC ligada a un proyecto (para poblar el filtro).
   const supplierOpts = state.suppliers.filter(s => state.orders.some(o => o.supplierId === s.id && o.projectId))
 
+  if (view === 'dia') {
+    return (
+      <div>
+        <div className="spread mb-[18px]">
+          <div className="sec-title m-0"><h2>Cobranza</h2><span className="sub">Quién pagó cada día (por fecha de pago)</span></div>
+          <Seg value={view} onChange={setView} options={[{ value: 'proyecto', label: 'Por proyecto' }, { value: 'dia', label: 'Por día' }]} />
+        </div>
+        <CobrosPorDia />
+      </div>
+    )
+  }
+
   return (
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Cobranza</h2><span className="sub">Estado de cobro por proyecto</span></div>
+        <Seg value={view} onChange={setView} options={[{ value: 'proyecto', label: 'Por proyecto' }, { value: 'dia', label: 'Por día' }]} />
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">
