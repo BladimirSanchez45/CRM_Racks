@@ -23,7 +23,7 @@ const ANUNCIOS = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CT
 /** Catálogo de sistemas que se cotizan. */
 const SISTEMAS = [
   'Mezzanine', 'Miniracks', 'Selectivo', 'Drive In', 'Entrepiso', 'Pushback',
-  'Dinámico', 'Cantilever', 'Cartón Flow', 'Autosoportado', 'Especial',
+  'Dinámico', 'Cantilever', 'Cartón Flow', 'Autosoportado', 'Estantería', 'Especial',
 ]
 
 /* ---- Evaluación rápida de calidad del prospecto (5 criterios × 5/3/1) ---- */
