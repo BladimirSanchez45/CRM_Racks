@@ -9,6 +9,7 @@ import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isD
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
+import { exportProspectosExcel, type ProspectoRow } from '../../core/export_prospectos'
 import type { AppState, Project, Prospect, ProspectComment, ProspectEstado, ProspectEvaluation, ProspectInput, ProspectResultado } from '../../core/types'
 
 const ESTADOS: ProspectEstado[] = ['Nuevo', 'Contactado', 'Cotizado', 'Negociación']
@@ -100,6 +101,26 @@ const mesLabel = (key: string): string => {
   if (!y || !m) return key
   const t = new Date(y, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
   return t.charAt(0).toUpperCase() + t.slice(1)
+}
+
+/** Acota la altura de un contenedor (la tabla) al espacio visible hasta el fondo de la
+ *  pantalla, para que su barra de scroll horizontal quede SIEMPRE a la vista (fija) sin
+ *  tener que bajar la página; la tabla hace scroll vertical propio y el encabezado
+ *  queda pegado arriba (sticky). Se reajusta al cambiar el tamaño de la ventana. */
+function useFitTableHeight() {
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [maxH, setMaxH] = React.useState<number>()
+  React.useLayoutEffect(() => {
+    const el = ref.current; if (!el) return
+    const recalc = () => setMaxH(Math.max(260, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 24)))
+    recalc()
+    window.addEventListener('resize', recalc)
+    const scroller = el.closest('.content') as HTMLElement | null
+    const ro = scroller ? new ResizeObserver(recalc) : null
+    if (scroller && ro) ro.observe(scroller)
+    return () => { window.removeEventListener('resize', recalc); ro?.disconnect() }
+  }, [])
+  return { ref, maxH }
 }
 
 /** Nombre del vendedor tolerante a id de vendedor O id de usuario (ventas). */
@@ -386,6 +407,7 @@ export function ProspectosPage() {
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
   const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })
+  const tabla = useFitTableHeight()
 
   const sellerName = (id: string) => sellerNameOf(state, id)
 
@@ -416,15 +438,55 @@ export function ProspectosPage() {
   const sellerOpts = [...new Set(visibles.map(p => p.seller).filter(Boolean))]
   // Meses presentes en los prospectos (más reciente primero).
   const mesOpts = [...new Set(visibles.map(mesKey).filter(Boolean))].sort((a, b) => (a < b ? 1 : -1))
-  // KPIs — respetan los filtros de ALCANCE (vendedor y mes), no los de estado/resultado
-  // (esos vaciarían los conteos de cada categoría).
-  const kpiBase = visibles.filter(p =>
-    (!f.seller || p.seller === f.seller) && (!f.mes || mesKey(p) === f.mes))
-  const enEspera = kpiBase.filter(p => p.resultado === 'En espera').length
+  // KPIs — reflejan EXACTAMENTE lo que muestra la tabla (todos los filtros aplicados).
+  // Así, al filtrar por "Vendido" y no haber ninguno, los KPIs salen en 0.
+  const kpiBase = rows
   const vendidosPorConvertir = kpiBase.filter(p => p.resultado === 'Vendido' && !p.convertedProjectId).length
-  const cotizados = kpiBase.filter(p => p.estado === 'Cotizado').length
   const totalCosto = kpiBase.reduce((a, p) => a + (p.costo || 0), 0)
+  // Anuncio (origen) más usado dentro del conjunto filtrado.
+  const anuncioTop = (() => {
+    const conteo = new Map<string, number>()
+    for (const p of kpiBase) {
+      const a = (p.anuncio || '').trim()
+      if (a) conteo.set(a, (conteo.get(a) || 0) + 1)
+    }
+    let best: { name: string; n: number } | null = null
+    for (const [name, n] of conteo) if (!best || n > best.n) best = { name, n }
+    return best
+  })()
   const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad || f.mes
+
+  // Exporta a Excel lo que está en la tabla (rows ya respeta TODOS los filtros; si no hay
+  // filtros, es todo lo visible). Con detalle y formato.
+  const exportExcel = () => {
+    const partes: string[] = []
+    if (f.seller) partes.push(`Vendedor: ${sellerName(f.seller)}`)
+    if (f.mes) partes.push(`Mes: ${mesLabel(f.mes)}`)
+    if (f.estado) partes.push(`Estado: ${f.estado}`)
+    if (f.resultado) partes.push(`Resultado: ${f.resultado}`)
+    if (f.calidad) partes.push(`Calidad: ${f.calidad}`)
+    if (f.q) partes.push(`Búsqueda: "${f.q}"`)
+    const subtitulo = partes.length ? `Filtros — ${partes.join('  ·  ')}` : 'Todos los prospectos (sin filtro)'
+    const data: ProspectoRow[] = rows.map(p => {
+      const sg = seguimiento(p)
+      const s = scoreOf(p.evaluacion)
+      const proj = p.convertedProjectId ? state.projects.find(x => x.id === p.convertedProjectId) : undefined
+      return {
+        nombre: p.name, empresa: p.empresa || '', vendedor: sellerName(p.seller),
+        telefono: p.phone || '', correo: p.email || '', ciudad: p.city || '',
+        sistema: p.sistema || '', anuncio: p.anuncio || '',
+        fechaAsignacion: p.fechaAsignacion || '', estado: p.estado,
+        ultimoContacto: p.ultimoContacto || '', seguimiento: sg.label,
+        resultado: p.resultado, costo: p.costo ?? null,
+        calidad: (s != null && s > 0) ? bandOf(s).label : 'Sin evaluar',
+        puntaje: (s != null && s > 0) ? `${s}/25` : '',
+        convertido: proj ? proj.code : '', comentarios: p.comments?.length || 0,
+        notas: p.notas || '',
+      }
+    })
+    exportProspectosExcel(data, { subtitulo, hoy: TODAY_ISO })
+      .catch(err => { console.error('[export] fallo al generar el Excel', err); alert('No se pudo generar el Excel.') })
+  }
 
   const markSold = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'Vendido' } })
   // Marcar "Perdido" (cliente ya no responde): sale de Prospectos y pasa a la vista Perdidos.
@@ -459,14 +521,17 @@ export function ProspectosPage() {
     <div>
       <div className="spread mb-[18px] flex-wrap gap-3">
         <div className="sec-title m-0"><h2>Prospectos</h2><span className="sub">Seguimiento de leads antes de registrar la venta</span></div>
-        {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo prospecto</button>}
+        <div className="flex gap-2.5 items-center">
+          <button className="btn btn-ghost" title="Exportar a Excel lo que está filtrado (o todo)" onClick={exportExcel}><Icon name="download" size={15} /> Exportar Excel</button>
+          {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo prospecto</button>}
+        </div>
       </div>
 
-      <div className="grid grid-cols-5 gap-3.5 mb-4">
+      <div className="grid grid-cols-4 gap-3.5 mb-4">
         <KPI label={f.seller ? `Prospectos · ${sellerName(f.seller)}` : 'Total prospectos'} value={kpiBase.length} icon="clients" accent />
         <KPI label="Costo total" value={totalCosto} format={fmtMoney} icon="money" />
-        <KPI label="Cotizados" value={cotizados} icon="doc" />
-        <KPI label="En espera" value={enEspera} icon="calendar" />
+        <KPI label="Anuncio más usado" value={anuncioTop ? anuncioTop.name : '—'} icon="trendUp"
+          foot={anuncioTop ? `${anuncioTop.n} de ${kpiBase.length} prospecto${anuncioTop.n === 1 ? '' : 's'}` : 'Sin datos'} />
         <KPI label="Vendidos por registrar" value={vendidosPorConvertir} icon="flag" foot={vendidosPorConvertir ? 'Falta crear el proyecto' : 'Al corriente'} />
       </div>
 
@@ -504,7 +569,7 @@ export function ProspectosPage() {
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr>
               <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
@@ -642,6 +707,7 @@ export function PerdidosPage() {
   const [form, setForm] = React.useState<Prospect | null>(null)
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [del, setDel] = React.useState<Prospect | null>(null)
+  const tabla = useFitTableHeight()
 
   const base = (verTodo ? state.prospects : state.prospects.filter(p => p.seller === me?.id))
     .filter(p => p.resultado === 'Perdido')
@@ -684,7 +750,7 @@ export function PerdidosPage() {
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr>
               <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
