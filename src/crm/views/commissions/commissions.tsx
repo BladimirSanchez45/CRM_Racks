@@ -2,8 +2,8 @@
 //  COMMISSIONS — finalized projects this month, seller, paid/pending
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, MESES_L, TODAY_ISO, isDireccion } from '../../core/data'
-import { Badge, Avatar, Empty, Seg, Select } from '../../core/ui'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, splitTotal, MESES_L, TODAY_ISO, isDireccion, canEditCommissionAmount } from '../../core/data'
+import { Badge, Avatar, Empty, Seg, Select, Modal, Field, Input } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Commission, Project } from '../../core/types'
 
@@ -15,7 +15,10 @@ type Group = { key: string; earner?: EarnerLike; items: CommissionRow[]; total: 
 export function CommissionsPage() {
   const { state, dispatch } = useStore()
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin marcar pagos
+  // Dirección y Admin SÍ pueden ajustar el importe de las comisiones pendientes.
+  const canEdit = canEditCommissionAmount(state.currentUser?.role)
   const [view, setView] = React.useState('all') // all | pending | paid
+  const [editing, setEditing] = React.useState<string | null>(null)   // key (persona) en edición
   const [open, setOpen] = React.useState<Set<string>>(new Set())
   const [month, setMonth] = React.useState(TODAY_ISO.slice(0, 7)) // 'YYYY-MM' o 'all'
   const toggleOpen = (k: string) => setOpen(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n })
@@ -98,7 +101,11 @@ export function CommissionsPage() {
                       <td className="num font-display font-bold text-[14px]">{fmtMoney(g.total)}</td>
                       <td>{g.pending > 0 ? <Badge color="var(--warn)">{fmtMoney(g.pending)} pend.</Badge> : <Badge color="var(--ok)">Pagado</Badge>}</td>
                       <td onClick={e => e.stopPropagation()}>
-                        {!readOnly && g.pending > 0 && <button className="btn btn-sm btn-primary" onClick={() => markGroupPaid(g)}><Icon name="check" size={13} /> Pagar todo</button>}
+                        <span className="inline-flex items-center gap-1.5">
+                          {/* Ajustar el total a pagar: solo Dirección/Admin y solo si hay pendientes. */}
+                          {canEdit && g.pending > 0 && <button className="btn btn-sm btn-ghost" onClick={() => setEditing(g.key)}><Icon name="edit" size={13} /> Editar total</button>}
+                          {!readOnly && g.pending > 0 && <button className="btn btn-sm btn-primary" onClick={() => markGroupPaid(g)}><Icon name="check" size={13} /> Pagar todo</button>}
+                        </span>
                       </td>
                     </tr>
                     {/* desglose: comisiones propias + overrides */}
@@ -111,6 +118,7 @@ export function CommissionsPage() {
                             <span className="inline-flex items-center gap-2">
                               <span className="mono text-acc font-semibold">{r.project!.code}</span>
                               {r.isOverride ? <Badge color="var(--st-5)">override</Badge> : <span className="meta">comisión</span>}
+                              {r.manual && <Badge color="var(--warn)">ajustada</Badge>}
                             </span>
                             <div className="meta mt-0.5">{sel.clientName(state, r.project!.client)} · cerrado {r.project!.closedOn ? fmtDate(r.project!.closedOn) : '—'}</div>
                           </td>
@@ -132,6 +140,77 @@ export function CommissionsPage() {
           </table>
         )}
       </div>
+
+      {/* Ajuste manual del total (Dirección / Admin). Se calcula sobre TODAS las
+          comisiones del mes de esa persona, sin importar el filtro Todas/Pendientes/Pagadas. */}
+      {editing && <EditTotalModal
+        earner={monthRows.find(r => (r.seller || 'x') === editing)?.earner}
+        rows={monthRows.filter(r => (r.seller || 'x') === editing)}
+        onClose={() => setEditing(null)}
+      />}
     </div>
+  )
+}
+
+/** Fija el TOTAL a pagar de una persona: se prorratea entre sus comisiones PENDIENTES
+ *  (las ya pagadas no se tocan) y quedan marcadas como "ajustadas" para que el
+ *  recálculo automático no las sobrescriba. */
+function EditTotalModal({ earner, rows, onClose }: { earner?: EarnerLike; rows: CommissionRow[]; onClose: () => void }) {
+  const { state, dispatch } = useStore()
+  const pendientes = rows.filter(r => r.status === 'pending')
+  const pagado = rows.filter(r => r.status === 'paid').reduce((a, r) => a + r.amount, 0)
+  const actual = pendientes.reduce((a, r) => a + r.amount, 0)
+  const [val, setVal] = React.useState(String(Math.round(actual)))
+  const num = Number(val)
+  const valid = val.trim() !== '' && !isNaN(num) && num >= 0
+  const nuevo = valid ? Math.round(num) : 0
+  const reparto = valid ? splitTotal(pendientes, nuevo) : []
+  const ajustadas = pendientes.filter(r => r.manual)
+
+  const save = () => {
+    if (!valid || !pendientes.length) return
+    dispatch({ type: 'SET_COMMISSIONS_TOTAL', ids: pendientes.map(r => r.id), total: nuevo })
+    onClose()
+  }
+  const restore = () => {
+    dispatch({ type: 'CLEAR_COMMISSIONS_MANUAL', ids: ajustadas.map(r => r.id) })
+    onClose()
+  }
+
+  return (
+    <Modal
+      icon="commissions"
+      title={`Ajustar comisión — ${earner?.name || '—'}`}
+      sub={`${pendientes.length} comisión${pendientes.length !== 1 ? 'es' : ''} pendiente${pendientes.length !== 1 ? 's' : ''}${pagado > 0 ? ` · ${fmtMoney(pagado)} ya pagados (no se modifican)` : ''}`}
+      onClose={onClose}
+      width={560}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        {ajustadas.length > 0 && <button className="btn btn-ghost" onClick={restore}>Volver al cálculo automático</button>}
+        <div className="flex-1"></div>
+        <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
+      </>}>
+      <Field label="Total a pagar (comisiones pendientes)">
+        <Input value={val} onChange={e => setVal(e.target.value)} inputMode="decimal" autoFocus />
+      </Field>
+      <div className="meta mt-1">Calculado por fórmula: {fmtMoney(actual)}. El monto que captures se reparte proporcionalmente entre las comisiones pendientes y ya no se recalcula solo.</div>
+
+      <table className="tbl mt-4">
+        <thead><tr><th>Proyecto</th><th className="num">Actual</th><th className="num">Nuevo</th></tr></thead>
+        <tbody>
+          {pendientes.map((r, i) => (
+            <tr key={r.id}>
+              <td>
+                <span className="mono text-acc font-semibold">{r.project!.code}</span>
+                <span className="meta"> · {r.seller !== r.project!.seller ? 'override' : 'comisión'}</span>
+                <div className="meta mt-0.5">{sel.clientName(state, r.project!.client)}</div>
+              </td>
+              <td className="num text-tx-2">{fmtMoney2(r.amount)}</td>
+              <td className="num font-semibold">{valid ? fmtMoney2(reparto[i]) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Modal>
   )
 }

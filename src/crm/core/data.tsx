@@ -75,6 +75,9 @@ export const isDireccion = (role?: Role | null) => role === 'direccion'
 export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 /** Rol Marketing: por ahora SOLO ve el módulo de Estadísticas por origen (solo lectura). */
 export const isMarketing = (role?: Role | null) => role === 'marketing'
+/** ¿Puede EDITAR el importe de una comisión pendiente? Solo Dirección y Admin/Super Admin.
+ *  (Dirección no marca pagos, pero sí ajusta el total a pagar.) */
+export const canEditCommissionAmount = (role?: Role | null) => isAdminRole(role) || isDireccion(role)
 
 /** PUESTOS (no roles) de Ventas con visibilidad TOTAL: aunque su rol sea "ventas",
  *  Gerente General y Gerente de Ventas ven los prospectos de todo el equipo. */
@@ -246,29 +249,48 @@ const curMonth = () => new Date().toISOString().slice(0, 7)
 const whoName = (s: AppState) => s.currentUser?.name ?? 'Sistema'
 
 /** Construye las comisiones de un proyecto finalizado según el estado ACTUAL:
- *  - principal: el % del vendedor del proyecto sobre la base (flete + instalación).
+ *  - principal: el % del vendedor del proyecto sobre la base (utilidad sin IVA).
  *  - override: el % de cada persona con override > 0 que NO sea el vendedor.
- *  `paid` (ids de beneficiarios ya pagados) preserva ese estado al recalcular. */
-function buildCommissions(s: AppState, proj: Project, paid?: Set<string>): Commission[] {
+ *  `paid` (ids de beneficiarios ya pagados) preserva ese estado al recalcular.
+ *  `manual` (beneficiario → importe fijado por Dirección/Admin) gana sobre la fórmula. */
+function buildCommissions(s: AppState, proj: Project, paid?: Set<string>, manual?: Map<string, number>): Commission[] {
   // Base = utilidad sin IVA (subtotal de venta − subtotal de compras/gastos).
   const base = sel.projectComisionBase(s, proj)
   const month = curMonth()
   const seller = s.sellers.find(x => x.id === proj.seller)
+  // Importe = el ajustado a mano si existe; si no, la fórmula.
+  const amountFor = (id: string, calc: number) => (manual?.has(id) ? manual.get(id)! : calc)
   const list: Commission[] = [{
     id: uid('cm'), projectId: proj.id, seller: proj.seller,
-    amount: Math.round(base * (seller ? seller.rate : 0.04)),
+    amount: amountFor(proj.seller, Math.round(base * (seller ? seller.rate : 0.04))),
     status: paid?.has(proj.seller) ? 'paid' : 'pending', month,
+    ...(manual?.has(proj.seller) ? { manual: true } : {}),
   }]
   for (const v of s.sellers) {
     if (v.overrideRate && v.overrideRate > 0 && v.id !== proj.seller) {
       list.push({
         id: uid('cm'), projectId: proj.id, seller: v.id,
-        amount: Math.round(base * v.overrideRate),
+        amount: amountFor(v.id, Math.round(base * v.overrideRate)),
         status: paid?.has(v.id) ? 'paid' : 'pending', month,
+        ...(manual?.has(v.id) ? { manual: true } : {}),
       })
     }
   }
   return list
+}
+
+/** Reparte un TOTAL entre varias comisiones, proporcional a su importe actual.
+ *  El último renglón absorbe el redondeo para que la suma cuadre exacta. */
+export function splitTotal(items: Commission[], total: number): number[] {
+  const base = items.reduce((a, c) => a + c.amount, 0)
+  let asignado = 0
+  return items.map((c, i) => {
+    const amount = i === items.length - 1
+      ? total - asignado
+      : Math.round(base > 0 ? total * (c.amount / base) : total / items.length)
+    asignado += amount
+    return amount
+  })
 }
 
 /* Reducer PURO: solo aplica cambios al estado local. La persistencia en
@@ -433,16 +455,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const dispatch = React.useCallback((action: Action) => {
     const s = stateRef.current
     // Recalcula las comisiones de un proyecto: borra las viejas y crea nuevas según el
-    // estado actual (vendedor, utilidad, overrides), preservando "pagada" por beneficiario.
+    // estado actual (vendedor, utilidad, overrides), preservando "pagada" por beneficiario
+    // y los importes AJUSTADOS A MANO por Dirección/Admin.
     // `calcState` permite calcular con datos recién modificados (p. ej. la OC nueva).
-    const regenCommissions = (proj: Project, thunks: (() => Promise<void>)[], calcState: AppState = s) => {
+    // `clearManual` (ids) descarta esos ajustes manuales y devuelve la fórmula.
+    const regenCommissions = (proj: Project, thunks: (() => Promise<void>)[], calcState: AppState = s, clearManual?: Set<string>) => {
       const existing = s.commissions.filter(c => c.projectId === proj.id)
       const paid = new Set(existing.filter(c => c.status === 'paid').map(c => c.seller))
+      const manual = new Map(existing.filter(c => c.manual && !clearManual?.has(c.id)).map(c => [c.seller, c.amount]))
       for (const old of existing) {
         rawDispatch({ type: 'REMOVE_COMMISSION', id: old.id })
         thunks.push(() => deleteCommission(old.id))
       }
-      for (const cm of buildCommissions(calcState, proj, paid)) {
+      for (const cm of buildCommissions(calcState, proj, paid, manual)) {
         rawDispatch({ type: 'UPSERT_COMMISSION', commission: cm })
         thunks.push(() => saveCommission(cm))
       }
@@ -633,6 +658,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!proj || proj.stage !== 'finalizado') return
         const thunks: (() => Promise<void>)[] = []
         regenCommissions(proj, thunks)
+        persist(thunks); return
+      }
+      // Dirección/Admin fijan el total a pagar de las comisiones PENDIENTES de una persona.
+      case 'SET_COMMISSIONS_TOTAL': {
+        if (!canEditCommissionAmount(s.currentUser?.role)) return
+        const items = action.ids
+          .map(id => s.commissions.find(c => c.id === id))
+          .filter((c): c is Commission => !!c && c.status === 'pending')
+        if (!items.length) return
+        const total = Math.max(0, Math.round(action.total))
+        const thunks: (() => Promise<void>)[] = []
+        const montos = splitTotal(items, total)
+        items.forEach((c, i) => {
+          const updated: Commission = { ...c, amount: montos[i], manual: true }
+          rawDispatch({ type: 'UPSERT_COMMISSION', commission: updated })
+          thunks.push(() => saveCommission(updated))
+        })
+        const quien = sel.seller(s, items[0].seller)?.name || s.users.find(u => u.id === items[0].seller)?.name || '—'
+        const activity: Activity = {
+          id: uid('a'), t: nowISO(), icon: 'commissions', who: whoName(s),
+          txt: `ajustó la comisión de ${quien} a ${fmtMoney(total)}`, tgt: `${items.length} comisión${items.length !== 1 ? 'es' : ''}`, kind: 'money',
+        }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        persist(thunks); return
+      }
+      // Quita el ajuste manual: regenera por fórmula los proyectos involucrados.
+      case 'CLEAR_COMMISSIONS_MANUAL': {
+        if (!canEditCommissionAmount(s.currentUser?.role)) return
+        const items = s.commissions.filter(c => action.ids.includes(c.id) && c.manual)
+        if (!items.length) return
+        const ids = new Set(items.map(c => c.id))
+        const thunks: (() => Promise<void>)[] = []
+        for (const pid of new Set(items.map(c => c.projectId))) {
+          const proj = s.projects.find(p => p.id === pid)
+          if (proj) regenCommissions(proj, thunks, s, ids)
+        }
         persist(thunks); return
       }
 

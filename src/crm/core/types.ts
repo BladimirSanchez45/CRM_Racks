@@ -385,6 +385,9 @@ export interface Commission {
   amount: number
   status: CommissionStatus
   month: string
+  /** Monto AJUSTADO A MANO por Dirección/Admin: el recálculo (automático o manual)
+   *  respeta este importe en vez de volver a aplicar la fórmula. */
+  manual?: boolean
 }
 
 export interface Activity {
@@ -601,6 +604,11 @@ export type Action =
   | { type: 'DELETE_CLIENT'; id: string }
   | { type: 'TOGGLE_COMMISSION'; id: string }
   | { type: 'RECALC_COMMISSIONS'; id: string }   // recalcula las comisiones de un proyecto finalizado
+  // Dirección/Admin fijan el TOTAL a pagar de un grupo de comisiones PENDIENTES
+  // (se prorratea entre ellas y quedan marcadas como ajustadas a mano).
+  | { type: 'SET_COMMISSIONS_TOTAL'; ids: string[]; total: number }
+  // Quita el ajuste manual y devuelve esas comisiones a la fórmula.
+  | { type: 'CLEAR_COMMISSIONS_MANUAL'; ids: string[] }
   | { type: 'SAVE_SELLER'; seller: SellerInput }
   | { type: 'DELETE_SELLER'; id: string }
   | { type: 'SAVE_REMISION'; remision: RemisionInput }

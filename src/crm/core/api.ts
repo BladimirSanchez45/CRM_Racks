@@ -349,7 +349,7 @@ export const deleteClientPayment = (id: string) => removeRow('client_payments', 
 function mapCommission(r: any): Commission {
   return {
     id: r.id, projectId: r.project_id, seller: r.seller ?? '', amount: Number(r.amount ?? 0),
-    status: r.status, month: r.month,
+    status: r.status, month: r.month, manual: !!r.manual,
   }
 }
 export async function fetchCommissions(): Promise<Commission[]> {
@@ -358,7 +358,7 @@ export async function fetchCommissions(): Promise<Commission[]> {
   return (data ?? []).map(mapCommission)
 }
 export const saveCommission = (c: Commission) =>
-  upsert('commissions', { id: c.id, project_id: c.projectId, seller: c.seller, amount: c.amount, status: c.status, month: c.month })
+  upsert('commissions', { id: c.id, project_id: c.projectId, seller: c.seller, amount: c.amount, status: c.status, month: c.month, manual: !!c.manual })
 export const deleteCommission = (id: string) => removeRow('commissions', id)
 
 /* ---- Remisiones de salida ---- */
