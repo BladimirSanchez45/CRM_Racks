@@ -6,6 +6,7 @@ import { StoreProvider, useStore, isAdminRole, isSuperadmin, isDireccion, roleLa
 import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { DueSoonModal } from './views/projects/due_soon'
+import { AgendaPage, AgendaTodayModal } from './views/agenda/agenda'
 import { Icon, type IconName } from './core/icons'
 import { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakColor } from './core/tweaks-panel'
 import { DashboardPage } from './views/dashboard/dashboard'
@@ -33,7 +34,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
+type Route = 'dashboard' | 'agenda' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -42,6 +43,9 @@ const SECTIONS = ['General', 'Comercial', 'Marketing', 'Compras', 'Logística', 
 type Section = typeof SECTIONS[number]
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; section: Section }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
+  // OJO: 'agenda' NO va aquí a propósito: se entra desde el botón del topbar
+  // (junto al de modo oscuro). Sí sigue listada en ROLE_ROUTES porque esa lista
+  // gobierna la navegación permitida por rol, no solo el menú lateral.
   // Estadísticas por origen y Campañas: admin/superadmin, Marketing y Dirección (solo lectura).
   { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
   { id: 'campaigns',   label: 'Campañas',     icon: 'layers', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
@@ -74,20 +78,20 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // Admin: todo MENOS Prospectos/Perdidos (comercial de ventas) y
   // Asignación/Remisiones (operación de logística). El superadmin sí ve todo.
   admin: [
-    'dashboard', 'estadisticas', 'campaigns',
+    'dashboard', 'agenda', 'estadisticas', 'campaigns',
     'projects', 'historial', 'clients', 'commissions',
     'suppliers', 'orders',
     'payments', 'cobranza', 'internal_payments', 'movements',
     'admin', 'settings',
   ],
-  ventas: ['dashboard', 'prospectos', 'perdidos', 'projects', 'orders', 'settings'],
+  ventas: ['dashboard', 'agenda', 'prospectos', 'perdidos', 'projects', 'orders', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
-  logistica: ['dashboard', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
+  logistica: ['dashboard', 'agenda', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
-  ingenieria: ['dashboard', 'projects', 'settings'],
+  ingenieria: ['dashboard', 'agenda', 'projects', 'settings'],
   // Marketing: módulos de Estadísticas por origen y Campañas (+ configuración personal).
-  marketing: ['estadisticas', 'campaigns', 'settings'],
+  marketing: ['agenda', 'estadisticas', 'campaigns', 'settings'],
 }
 /** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
 const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
@@ -99,7 +103,7 @@ const landingRoute = (role?: Role | null): Route => {
   return allowed[0] ?? 'dashboard'
 }
 const TITLES: Record<Route, string> = {
-  dashboard: 'Panel general', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
+  dashboard: 'Panel general', agenda: 'Agenda', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   estadisticas: 'Estadísticas por origen', campaigns: 'Campañas',
@@ -223,6 +227,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
     const r: Route = (allowed && !allowed.includes(route)) ? landingRoute(me?.role) : route
     switch (r) {
       case 'dashboard':   return <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
+      case 'agenda':      return <AgendaPage onOpenProject={onOpenProject} />
       case 'prospectos':  return <ProspectosPage />
       case 'perdidos':    return <PerdidosPage />
       case 'projects':    return <ProjectsPage />
@@ -262,6 +267,9 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
               <Icon name="shield" size={17} />
             </button>
           )}
+          <button className={'icon-btn' + (route === 'agenda' ? ' active' : '')} onClick={() => setRoute('agenda')} title="Agenda">
+            <Icon name="calendar" size={17} />
+          </button>
           <button className="icon-btn" onClick={() => setTweak('light', !t.light)} title={t.light ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
             <Icon name={t.light ? 'sun' : 'moon'} size={17} />
           </button>
@@ -274,6 +282,9 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
 
       {/* recordatorio al iniciar sesión: proyectos por vencer (ventas/logística) */}
       <DueSoonModal onOpenProject={onOpenProject} />
+
+      {/* recordatorio al iniciar sesión: agenda del día (todos los roles) */}
+      <AgendaTodayModal onOpenAgenda={() => setRoute('agenda')} />
 
       {/* cross-module project overlay */}
       {openProj && !editProj && <ProjectDetail project={openProj} onClose={() => setOpenProj(null)} onEdit={() => setEditProj(openProj)} />}

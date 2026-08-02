@@ -28,6 +28,7 @@ import type {
   MovementList,
   Campaign,
   Prospect,
+  AgendaEvent,
 } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
@@ -42,6 +43,7 @@ import {
   saveMovementList, deleteMovementList as apiDeleteMovementList,
   saveMovement, deleteMovement as apiDeleteMovement,
   saveCampaign, deleteCampaign as apiDeleteCampaign,
+  saveAgendaEvent, deleteAgendaEvent as apiDeleteAgendaEvent,
   saveProspect, deleteProspect as apiDeleteProspect,
   saveActivity,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
@@ -237,7 +239,7 @@ export const regimenLabel = (code?: string) =>
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
-  movementLists: [], movements: [], campaigns: [], prospects: [], settings: { bankBalance: 0 },
+  movementLists: [], movements: [], campaigns: [], prospects: [], agendaEvents: [], settings: { bankBalance: 0 },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
@@ -334,6 +336,8 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_CAMPAIGN': return { ...state, campaigns: state.campaigns.filter(c => c.id !== a.id) }
     case 'UPSERT_PROSPECT': return { ...state, prospects: upsertBy(state.prospects, a.prospect) }
     case 'REMOVE_PROSPECT': return { ...state, prospects: state.prospects.filter(p => p.id !== a.id) }
+    case 'UPSERT_AGENDA_EVENT': return { ...state, agendaEvents: upsertBy(state.agendaEvents, a.event) }
+    case 'REMOVE_AGENDA_EVENT': return { ...state, agendaEvents: state.agendaEvents.filter(e => e.id !== a.id) }
     case 'SET_SETTINGS': return { ...state, settings: a.settings }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
@@ -1108,6 +1112,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => apiDeleteCampaign(action.id)]); return
       }
 
+      /* ---- Agenda personal ---- */
+      case 'SAVE_AGENDA_EVENT': {
+        const e = action.event
+        const full: AgendaEvent = {
+          ...(e as AgendaEvent),
+          id: e.id ?? uid('ag'),
+          // Por defecto la anotación es para uno mismo; admin/dirección pueden agendarle a otro.
+          userId: e.userId || s.currentUser?.id || '',
+          done: e.done ?? false,
+          createdBy: e.createdBy ?? s.currentUser?.id,
+          createdAt: e.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_AGENDA_EVENT', event: full })
+        persist([() => saveAgendaEvent(full)]); return
+      }
+      case 'DELETE_AGENDA_EVENT': {
+        rawDispatch({ type: 'REMOVE_AGENDA_EVENT', id: action.id })
+        persist([() => apiDeleteAgendaEvent(action.id)]); return
+      }
+      case 'TOGGLE_AGENDA_DONE': {
+        const ev = s.agendaEvents.find(x => x.id === action.id); if (!ev) return
+        const updated: AgendaEvent = { ...ev, done: !ev.done }
+        rawDispatch({ type: 'UPSERT_AGENDA_EVENT', event: updated })
+        persist([() => saveAgendaEvent(updated)]); return
+      }
+
       case 'SAVE_PROSPECT': {
         const full: Prospect = {
           ...(action.prospect as Prospect),
@@ -1223,6 +1253,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movements':       rawDispatch({ type: 'REMOVE_MOVEMENT', id: c.id }); break
           case 'campaigns':       rawDispatch({ type: 'REMOVE_CAMPAIGN', id: c.id }); break
           case 'prospects':       rawDispatch({ type: 'REMOVE_PROSPECT', id: c.id }); break
+          case 'agenda_events':   rawDispatch({ type: 'REMOVE_AGENDA_EVENT', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -1240,6 +1271,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movements':       rawDispatch({ type: 'UPSERT_MOVEMENT', movement: c.row }); break
           case 'campaigns':       rawDispatch({ type: 'UPSERT_CAMPAIGN', campaign: c.row }); break
           case 'prospects':       rawDispatch({ type: 'UPSERT_PROSPECT', prospect: c.row }); break
+          case 'agenda_events':   rawDispatch({ type: 'UPSERT_AGENDA_EVENT', event: c.row }); break
         }
       }
     })

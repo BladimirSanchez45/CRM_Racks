@@ -516,6 +516,37 @@ export interface Prospect {
   updated?: string             // ISO
 }
 
+/* ---- AGENDA personal (pendientes, recordatorios y citas) ---- */
+
+/** Tipo de anotación en la agenda:
+ *  - pendiente: algo por hacer a cierta hora (se puede marcar como hecho).
+ *  - recordatorio: un aviso puntual (llamar, dar seguimiento…).
+ *  - cita: reunión/visita con horario de inicio-fin y ubicación. */
+export type AgendaKind = 'pendiente' | 'recordatorio' | 'cita'
+
+/** Entidad del CRM a la que se puede ligar un evento (opcional). */
+export type AgendaLinkKind = 'project' | 'prospect' | 'client'
+
+/** Evento de la agenda. La agenda es PERSONAL: cada evento pertenece a un usuario
+ *  (`userId`) y solo él la ve, salvo admin/dirección que pueden consultar la de
+ *  cualquiera y agendarle cosas (queda registrado en `createdBy`). */
+export interface AgendaEvent {
+  id: string
+  userId: string          // dueño de la agenda
+  kind: AgendaKind
+  title: string
+  date: string            // 'YYYY-MM-DD'
+  start: string           // 'HH:MM' — hora de inicio / hora del aviso
+  end?: string            // 'HH:MM' — solo citas
+  location?: string       // solo citas (dirección, planta, oficina…)
+  notes?: string
+  done: boolean           // pendientes/recordatorios atendidos y citas realizadas
+  linkKind?: AgendaLinkKind   // vínculo opcional con el CRM
+  linkId?: string
+  createdBy?: string      // quién lo registró (≠ userId si un admin lo agendó)
+  createdAt: string       // ISO
+}
+
 /** Estado global de la aplicación. */
 export interface AppState {
   prospects: Prospect[]
@@ -532,6 +563,7 @@ export interface AppState {
   movementLists: MovementList[]
   movements: Movement[]
   campaigns: Campaign[]
+  agendaEvents: AgendaEvent[]
   settings: AppSettings
   activity: Activity[]
   notifications: Notification[]
@@ -572,6 +604,13 @@ export type MovementInput = Omit<Movement, 'id' | 'createdBy' | 'createdAt'> & {
 }
 export type MovementListInput = Omit<MovementList, 'id' | 'createdBy' | 'createdAt'> & {
   id?: string
+  createdBy?: string
+  createdAt?: string
+}
+export type AgendaEventInput = Omit<AgendaEvent, 'id' | 'userId' | 'done' | 'createdBy' | 'createdAt'> & {
+  id?: string
+  userId?: string       // por defecto, el usuario en sesión
+  done?: boolean
   createdBy?: string
   createdAt?: string
 }
@@ -631,6 +670,9 @@ export type Action =
   | { type: 'DECIDE_MOVEMENT'; id: string; approve: boolean; reason?: string }
   | { type: 'SAVE_CAMPAIGN'; campaign: CampaignInput }
   | { type: 'DELETE_CAMPAIGN'; id: string }
+  | { type: 'SAVE_AGENDA_EVENT'; event: AgendaEventInput }
+  | { type: 'DELETE_AGENDA_EVENT'; id: string }
+  | { type: 'TOGGLE_AGENDA_DONE'; id: string }
   | { type: 'SAVE_PROSPECT'; prospect: ProspectInput }
   | { type: 'DELETE_PROSPECT'; id: string }
   | { type: 'MARK_NOTIFICATION_READ'; id: string }
@@ -670,6 +712,8 @@ export type StateAction =
   | { type: 'REMOVE_MOVEMENT'; id: string }
   | { type: 'UPSERT_CAMPAIGN'; campaign: Campaign }
   | { type: 'REMOVE_CAMPAIGN'; id: string }
+  | { type: 'UPSERT_AGENDA_EVENT'; event: AgendaEvent }
+  | { type: 'REMOVE_AGENDA_EVENT'; id: string }
   | { type: 'UPSERT_PROSPECT'; prospect: Prospect }
   | { type: 'REMOVE_PROSPECT'; id: string }
   | { type: 'SET_SETTINGS'; settings: AppSettings }

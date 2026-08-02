@@ -8,6 +8,7 @@ import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
   Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
+  AgendaEvent,
 } from './types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -520,6 +521,38 @@ export async function fetchCampaigns(): Promise<Campaign[]> {
 export const saveCampaign = (c: Campaign) => upsert('campaigns', campaignRow(c))
 export const deleteCampaign = (id: string) => removeRow('campaigns', id)
 
+/* ---- Agenda personal (pendientes, recordatorios y citas) ----
+   Las horas se guardan como texto 'HH:MM' (no TIME) para que el front no tenga
+   que lidiar con zonas horarias ni con el formato 'HH:MM:SS' de Postgres. */
+function mapAgendaEvent(r: any): AgendaEvent {
+  return {
+    id: r.id, userId: r.user_id ?? '', kind: r.kind ?? 'pendiente', title: r.title ?? '',
+    date: r.date ?? '', start: r.start_time ?? '09:00', done: !!r.done,
+    createdAt: r.created_at ?? new Date().toISOString(),
+    ...(r.end_time ? { end: r.end_time } : {}),
+    ...(r.location ? { location: r.location } : {}),
+    ...(r.notes ? { notes: r.notes } : {}),
+    ...(r.link_kind ? { linkKind: r.link_kind } : {}),
+    ...(r.link_id ? { linkId: r.link_id } : {}),
+    ...(r.created_by ? { createdBy: r.created_by } : {}),
+  }
+}
+function agendaEventRow(e: AgendaEvent): Record<string, unknown> {
+  return {
+    id: e.id, user_id: e.userId, kind: e.kind, title: e.title, date: e.date,
+    start_time: e.start, end_time: e.end ?? null, location: e.location ?? null,
+    notes: e.notes ?? null, done: e.done, link_kind: e.linkKind ?? null,
+    link_id: e.linkId ?? null, created_by: e.createdBy ?? null, created_at: e.createdAt,
+  }
+}
+export async function fetchAgendaEvents(): Promise<AgendaEvent[]> {
+  const { data, error } = await supabase.from('agenda_events').select('*').order('date', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapAgendaEvent)
+}
+export const saveAgendaEvent = (e: AgendaEvent) => upsert('agenda_events', agendaEventRow(e))
+export const deleteAgendaEvent = (id: string) => removeRow('agenda_events', id)
+
 /* ---- Prospectos / leads (CRM previo a Proyectos) ---- */
 function mapProspect(r: any): Prospect {
   return {
@@ -696,6 +729,7 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   movements: mapMovement,
   campaigns: mapCampaign,
   prospects: mapProspect,
+  agenda_events: mapAgendaEvent,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -768,11 +802,11 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchSettings(), fetchActivity(), fetchNotifications(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchAgendaEvents(), fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, settings, activity, notifications }
 }
