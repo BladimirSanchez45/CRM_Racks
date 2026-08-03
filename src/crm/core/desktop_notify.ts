@@ -11,7 +11,9 @@
 //   · El permiso y la preferencia son POR NAVEGADOR Y EQUIPO (localStorage),
 //     no viajan con la cuenta.
 // ============================================================
-import cclogo from '../../assets/logos/CCLOGO.png'
+// Ícono del aviso: Windows lo recorta a un CUADRADO, así que se usa el logo
+// cuadrado de /public (225×225) y no el apaisado de 1600×900, que salía cortado.
+const ICON = `${import.meta.env.BASE_URL}ccracks_logo.png`
 
 const KEY = 'crm_desktop_notif'
 const prefKey = (userId?: string) => `${KEY}_${userId ?? ''}`
@@ -44,7 +46,7 @@ export async function requestDesktopPermission(): Promise<NotificationPermission
 export function desktopNotify(opts: { title: string; body?: string; tag?: string }) {
   if (!desktopSupported() || Notification.permission !== 'granted') return
   try {
-    const n = new Notification(opts.title, { body: opts.body, tag: opts.tag, icon: cclogo })
+    const n = new Notification(opts.title, { body: opts.body, tag: opts.tag, icon: ICON })
     // Al hacer clic, trae al frente la ventana del CRM.
     n.onclick = () => { window.focus(); n.close() }
   } catch { /* ignore */ }
