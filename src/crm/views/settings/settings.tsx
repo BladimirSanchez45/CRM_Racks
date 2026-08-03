@@ -8,6 +8,7 @@ import { useStore, roleLabel } from '../../core/data'
 import { changeMyPassword } from '../../core/api'
 import { Field, Input, Avatar } from '../../core/ui'
 import { Icon } from '../../core/icons'
+import { desktopSupported, desktopPermission, desktopEnabled, setDesktopEnabled, requestDesktopPermission, desktopNotify } from '../../core/desktop_notify'
 
 const MIN_LEN = 6
 
@@ -108,6 +109,75 @@ function SecurityControls() {
   )
 }
 
+/** Notificaciones del sistema para los avisos de la agenda.
+ *  El permiso lo da el NAVEGADOR y la preferencia se guarda por equipo:
+ *  si entras desde otra computadora, hay que activarlas de nuevo ahí. */
+function DesktopNotifControls() {
+  const { state } = useStore()
+  const myId = state.currentUser?.id
+  const [perm, setPerm] = React.useState(desktopPermission())
+  const [on, setOn] = React.useState(() => desktopEnabled(myId))
+  const [probado, setProbado] = React.useState(false)
+
+  if (!desktopSupported()) {
+    return <div className="login-error"><Icon name="alert" size={15} /> <span>Este navegador no soporta notificaciones de escritorio.</span></div>
+  }
+
+  if (perm === 'denied') {
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="login-error"><Icon name="alert" size={15} /> <span>El navegador tiene bloqueadas las notificaciones de este sitio.</span></div>
+        <p className="meta leading-relaxed">
+          Para permitirlas, haz clic en el candado 🔒 de la barra de direcciones → <b>Notificaciones</b> → <b>Permitir</b>, y vuelve a cargar la página.
+        </p>
+      </div>
+    )
+  }
+
+  // Activar: primero el permiso del navegador (requiere este clic), luego la preferencia.
+  const activar = async () => {
+    const p = perm === 'granted' ? 'granted' : await requestDesktopPermission()
+    setPerm(p)
+    if (p !== 'granted') return
+    setDesktopEnabled(myId, true); setOn(true)
+    desktopNotify({ title: 'Notificaciones activadas', body: 'Así se verán los avisos de tu agenda.', tag: 'crm-test' })
+  }
+  const desactivar = () => { setDesktopEnabled(myId, false); setOn(false); setProbado(false) }
+  const probar = () => {
+    desktopNotify({ title: 'Recordatorio · ' + new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' }), body: 'Esto es una prueba desde el CRM.', tag: 'crm-test' })
+    setProbado(true)
+  }
+
+  return (
+    <div className="flex flex-col gap-3.5">
+      <div className="flex items-center justify-between gap-3 rounded-[8px] border border-line p-3 bg-bg-1">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <span className={on ? 'text-ok' : 'text-tx-3'}><Icon name={on ? 'check' : 'bell'} size={17} /></span>
+          <div className="min-w-0">
+            <div className="text-[13px] font-semibold">{on ? 'Activadas en este equipo' : 'Desactivadas'}</div>
+            <div className="meta mt-0.5">{on ? 'Recibirás el aviso aunque la pestaña esté de fondo.' : 'Solo verás el aviso dentro de la app.'}</div>
+          </div>
+        </div>
+        {on
+          ? <button className="btn btn-ghost shrink-0" onClick={desactivar}>Desactivar</button>
+          : <button className="btn btn-primary shrink-0" onClick={activar}><Icon name="bell" size={15} /> Activar</button>}
+      </div>
+
+      {on && (
+        <div className="flex items-center justify-between gap-3">
+          <span className="meta">{probado ? 'Enviada: revisa la esquina de tu pantalla.' : '¿Quieres ver cómo se ve?'}</span>
+          <button className="btn btn-ghost" onClick={probar}>Enviar una de prueba</button>
+        </div>
+      )}
+
+      <p className="meta leading-relaxed">
+        Solo funcionan con el CRM <b>abierto</b> en el navegador (la pestaña puede estar de fondo o el navegador minimizado).
+        Si cierras el navegador no llega nada.
+      </p>
+    </div>
+  )
+}
+
 export function SettingsPage() {
   return (
     <div>
@@ -117,6 +187,9 @@ export function SettingsPage() {
       <ProfileHero />
       <Section title="Mi cuenta" desc="Información de tu perfil. Para cambiar estos datos contacta a un administrador.">
         <AccountControls />
+      </Section>
+      <Section title="Notificaciones de escritorio" desc="Recibe los avisos de tu agenda (pendientes, recordatorios y citas) en el centro de notificaciones de Windows, no solo dentro del CRM. Se configura por equipo.">
+        <DesktopNotifControls />
       </Section>
       <Section title="Seguridad" desc="Cambia la contraseña con la que inicias sesión. Solo afecta tu propia cuenta.">
         <SecurityControls />

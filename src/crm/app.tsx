@@ -6,7 +6,7 @@ import { StoreProvider, useStore, isAdminRole, isSuperadmin, isDireccion, roleLa
 import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { DueSoonModal } from './views/projects/due_soon'
-import { AgendaPage, AgendaTodayModal } from './views/agenda/agenda'
+import { AgendaPage, AgendaTodayModal, AgendaAlerts } from './views/agenda/agenda'
 import { Icon, type IconName } from './core/icons'
 import { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakColor } from './core/tweaks-panel'
 import { DashboardPage } from './views/dashboard/dashboard'
@@ -285,6 +285,9 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
 
       {/* recordatorio al iniciar sesión: agenda del día (todos los roles) */}
       <AgendaTodayModal onOpenAgenda={() => setRoute('agenda')} />
+
+      {/* aviso en el momento exacto: toast al llegar la hora de una anotación */}
+      <AgendaAlerts onOpenAgenda={() => setRoute('agenda')} />
 
       {/* cross-module project overlay */}
       {openProj && !editProj && <ProjectDetail project={openProj} onClose={() => setOpenProj(null)} onEdit={() => setEditProj(openProj)} />}

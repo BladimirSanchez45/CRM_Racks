@@ -4,12 +4,15 @@
 //  Dirección pueden además consultar la de cualquier persona (selector)
 //  y agendarle cosas.
 //  Vistas: DÍA (rejilla de 9:00 a 19:00) y SEMANA (lunes a domingo).
-//  El aviso al iniciar sesión vive en <AgendaTodayModal> (abajo).
+//  Avisos: <AgendaTodayModal> al iniciar sesión y <AgendaAlerts> (toast)
+//  cuando llega la hora de una anotación con la app abierta.
 // ============================================================
 import * as React from 'react'
+import { createPortal } from 'react-dom'
 import { useStore, sel, addDays, fmtDate, TODAY_ISO, MESES_L, isAdminRole, isDireccion } from '../../core/data'
 import { Modal, Field, Input, Select, TextArea, Combobox, Confirm, Badge, Seg, Avatar, useUnsavedGuard } from '../../core/ui'
 import { Icon, type IconName } from '../../core/icons'
+import { desktopEnabled, desktopNotify } from '../../core/desktop_notify'
 import type { AgendaEvent, AgendaEventInput, AgendaKind, AgendaLinkKind, Project } from '../../core/types'
 
 /* ---- Horario visible de la rejilla del día ---- */
@@ -26,6 +29,16 @@ const DIAS_S = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom']
 
 /** Hora ('HH:MM') → número de hora (9:30 → 9). */
 const hourOf = (hhmm: string) => Number((hhmm || '').slice(0, 2)) || 0
+/** Hora actual como 'HH:MM' (comparable con `AgendaEvent.start` por texto). */
+const nowHHMM = () => {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+/** Fecha de HOY recalculada al vuelo (TODAY_ISO se congela al cargar la app). */
+const todayISO = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 /** Lunes de la semana de una fecha ISO. */
 const weekStart = (iso: string) => {
   const dow = (new Date(iso + 'T00:00:00').getDay() + 6) % 7   // 0 = lunes
@@ -404,6 +417,107 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
           onClose={() => setDetail(null)} />
       )}
     </div>
+  )
+}
+
+/* ============================================================
+   Aviso EN EL MOMENTO: toast al llegar la hora de una anotación.
+   Solo funciona con la app abierta (no son notificaciones del sistema).
+   Regla: se avisa de las anotaciones propias, de HOY, sin marcar como
+   hechas, cuya hora ya llegó Y que no habían pasado cuando se abrió la
+   app — así al entrar no salta un montón de avisos viejos (de eso se
+   encarga <AgendaTodayModal>).
+   ============================================================ */
+const TICK_MS = 15_000   // cada cuánto se revisa el reloj
+
+export function AgendaAlerts({ onOpenAgenda }: { onOpenAgenda: () => void }) {
+  const { state, dispatch } = useStore()
+  const me = state.currentUser
+
+  // Refs para que el temporizador lea siempre lo último sin re-suscribirse.
+  // Se refrescan DESPUÉS de cada render (no durante), como pide React.
+  const eventsRef = React.useRef(state.agendaEvents)
+  const meRef = React.useRef(me?.id)
+  React.useEffect(() => { eventsRef.current = state.agendaEvents; meRef.current = me?.id })
+  // Hora en la que arrancó la vigilancia: nada anterior a esto dispara aviso.
+  const sinceRef = React.useRef(nowHHMM())
+  const dayRef = React.useRef(todayISO())
+  const alerted = React.useRef<Set<string>>(new Set())
+  const [shown, setShown] = React.useState<string[]>([])
+
+  React.useEffect(() => {
+    const check = () => {
+      const hoy = todayISO()
+      // Si la app quedó abierta y cambió el día, se reinicia la ventana de vigilancia.
+      if (hoy !== dayRef.current) { dayRef.current = hoy; sinceRef.current = '00:00' }
+      const now = nowHHMM()
+      const due = eventsRef.current.filter(e =>
+        e.userId === meRef.current && !e.done && e.date === hoy &&
+        e.start <= now && e.start >= sinceRef.current && !alerted.current.has(e.id))
+      if (!due.length) return
+      due.forEach(e => alerted.current.add(e.id))
+      // Además del aviso dentro de la app, notificación del sistema si el
+      // usuario las activó en Configuración (útil con la pestaña de fondo).
+      if (desktopEnabled(meRef.current)) {
+        due.forEach(e => desktopNotify({
+          title: `${KIND_META[e.kind].label} · ${e.start}`,
+          body: e.location ? `${e.title}\n📍 ${e.location}` : e.title,
+          tag: e.id,
+        }))
+      }
+      setShown(s => [...s, ...due.map(e => e.id)])
+    }
+    const iv = window.setInterval(check, TICK_MS)
+    return () => clearInterval(iv)
+  }, [])
+
+  const dismiss = (id: string) => setShown(s => s.filter(x => x !== id))
+  // Se resuelven contra el estado vivo: si se borra o se cierra en otro lado, el toast se va.
+  const toasts = shown
+    .map(id => state.agendaEvents.find(e => e.id === id))
+    .filter((e): e is AgendaEvent => !!e && !e.done)
+
+  if (toasts.length === 0) return null
+
+  // Al centro y sobre un velo oscuro: el aviso interrumpe a propósito, para que
+  // no se pase de largo. Solo se cierra con un botón (el velo no lo descarta).
+  return createPortal(
+    <div className="fixed inset-0 flex items-center justify-center p-5 overflow-y-auto"
+      style={{ zIndex: 1200, background: 'rgba(20,28,42,0.45)', backdropFilter: 'blur(4px)' }}>
+      <div className="flex flex-col gap-3 w-full max-w-[440px]">
+        {toasts.map(e => {
+          const meta = KIND_META[e.kind]
+          return (
+            <div key={e.id} className="modal" style={{ borderLeft: `4px solid ${meta.color}` }}>
+              <div className="flex items-start gap-3.5 px-5 pt-5 pb-4">
+                <span className="shrink-0 grid place-items-center rounded-full w-10 h-10"
+                  style={{ color: meta.color, background: `color-mix(in srgb, ${meta.color} 16%, transparent)` }}>
+                  <Icon name={meta.icon} size={20} />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="label-k">{meta.label} · {e.start}{e.end ? `–${e.end}` : ''}</div>
+                  <div className="font-display font-bold text-[16px] text-tx-0 mt-0.5">{e.title}</div>
+                  {e.location && (
+                    <div className="meta mt-1.5 flex items-center gap-1"><Icon name="pin" size={12} /> {e.location}</div>
+                  )}
+                  {e.notes && <div className="text-[12.5px] text-tx-1 mt-2 whitespace-pre-wrap">{e.notes}</div>}
+                </div>
+                <button className="icon-btn shrink-0 bg-transparent border-none" title="Cerrar" onClick={() => dismiss(e.id)}>
+                  <Icon name="close" size={16} />
+                </button>
+              </div>
+              <div className="flex gap-2.5 px-5 pb-5">
+                <button className="btn btn-ghost flex-1" onClick={() => { onOpenAgenda(); dismiss(e.id) }}>Ver agenda</button>
+                <button className="btn btn-primary flex-1" onClick={() => { dispatch({ type: 'TOGGLE_AGENDA_DONE', id: e.id }); dismiss(e.id) }}>
+                  <Icon name="check" size={15} /> Hecho
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>,
+    document.body,
   )
 }
 
