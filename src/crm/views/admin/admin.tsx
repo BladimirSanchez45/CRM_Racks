@@ -6,7 +6,7 @@ import { useStore, sel, roleLabel, isAdminRole, isSuperadmin, ROLE_LABELS } from
 import { createUser, updateUser, toggleUser, removeUser, fetchUsers, saveSeller, deleteSeller, fetchSellers, impersonateUser } from '../../core/api'
 import { Modal, Field, Input, Select, Empty, Confirm } from '../../core/ui'
 import { Icon } from '../../core/icons'
-import type { User, Role, Seller } from '../../core/types'
+import type { User, Role, Seller, WarehouseSize } from '../../core/types'
 
 // Roles asignables. 'superadmin' solo lo puede otorgar otro superadmin (se filtra abajo).
 const ROLES: { id: Role; label: string }[] = [
@@ -182,6 +182,48 @@ function SellerForm({ seller, onClose }: { seller?: Seller; onClose: () => void 
   )
 }
 
+/** Días de trabajo por talla de almacén. Solo cuantifican la carga de la cola:
+ *  no calculan fechas ni tocan el ETA de ningún proyecto. */
+function WarehouseDaysCard() {
+  const { state, dispatch } = useStore()
+  const days = state.settings.whDays
+  const [d, setD] = React.useState<Record<WarehouseSize, string>>({ S: String(days.S), M: String(days.M), L: String(days.L) })
+  const [ok, setOk] = React.useState(false)
+
+  const labels: Record<WarehouseSize, string> = { S: 'Chico', M: 'Mediano', L: 'Grande' }
+  const num = (v: string) => Math.max(0, Number(v) || 0)
+  const valid = (['S', 'M', 'L'] as WarehouseSize[]).every(k => d[k].trim() !== '' && !isNaN(Number(d[k])))
+  const dirty = (['S', 'M', 'L'] as WarehouseSize[]).some(k => num(d[k]) !== days[k])
+
+  const save = () => {
+    dispatch({ type: 'SAVE_WAREHOUSE_DAYS', days: { S: num(d.S), M: num(d.M), L: num(d.L) } })
+    setOk(true)
+  }
+
+  return (
+    <div className="card">
+      <div className="card-b">
+        <div className="grid grid-cols-3 gap-3.5">
+          {(['S', 'M', 'L'] as WarehouseSize[]).map(k => (
+            <Field key={k} label={labels[k]}>
+              <Input value={d[k]} inputMode="numeric"
+                onChange={e => { setD(s => ({ ...s, [k]: e.target.value })); setOk(false) }} />
+            </Field>
+          ))}
+        </div>
+        <div className="flex items-center justify-between gap-3 mt-3.5">
+          <span className="meta">
+            {ok && !dirty ? 'Guardado. La carga de la cola ya se recalculó.' : 'Al cambiarlos se recalcula la carga de toda la cola.'}
+          </span>
+          <button className={'btn btn-primary' + (!valid || !dirty ? ' opacity-50' : '')} disabled={!valid || !dirty} onClick={save}>
+            <Icon name="check" size={15} /> Guardar días
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function AdminPage() {
   const { state, dispatch } = useStore()
   const [form, setForm] = React.useState<User | {} | null>(null)
@@ -308,6 +350,12 @@ export function AdminPage() {
         </div>
         {sel.vendedores(state).length === 0 && <Empty icon="clients">Sin vendedores</Empty>}
       </div>
+
+      {/* ---- Almacén: días por talla ---- */}
+      <div className="spread mb-[18px] mt-[28px]">
+        <div className="sec-title m-0"><h2>Almacén</h2><span className="sub">Días de trabajo que vale cada talla en la cola</span></div>
+      </div>
+      <WarehouseDaysCard />
 
       {form && <UserForm user={'id' in form ? form : undefined} onClose={() => setForm(null)} />}
       {del && <Confirm title="Eliminar usuario" message={`¿Eliminar a ${del.name}? Perderá el acceso al sistema.`}

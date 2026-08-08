@@ -24,6 +24,8 @@ const KIND_ICON: Record<NotificationKind, IconName> = {
   movement_changed: 'box',
   client_pending: 'clients',
   project_stage_moved: 'kanban',
+  warehouse_queued: 'pkg',
+  warehouse_done: 'pkg',
 }
 
 /** Fecha relativa amigable ("hace 5 min"). */

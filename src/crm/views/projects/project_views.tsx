@@ -7,6 +7,7 @@ import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileF
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
 import { ClientForm } from '../clients/clients'
+import { WarehouseProjectLine, WarehouseLoadStrip } from '../warehouse/warehouse'
 import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, InternalPayment, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
 /* ---- badge de estado de cobro + formulario de cobro del cliente ---- */
@@ -295,6 +296,9 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
           )
         })}
       </div>
+
+      {/* Estado en la cola de almacén (informativo: no altera fechas del proyecto). */}
+      <div className="mb-4"><WarehouseProjectLine project={p} /></div>
 
       <div className="grid grid-cols-2 gap-6">
         <div>
@@ -654,6 +658,10 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
         <Field label={<>ETA proveedor <span className="meta font-normal">(auto)</span></>}><Input type="date" value={p.eta} onChange={e => set('eta', e.target.value)} /></Field>
         <Field label="Fecha de registro"><Input type="date" value={(p.created || '').slice(0, 10)} onChange={e => set('created', e.target.value)} /></Field>
       </div>
+
+      {/* Carga de almacén al momento de comprometer las semanas de entrega.
+          Es informativa: no valida ni ajusta la ETA, la decisión sigue siendo del vendedor. */}
+      <WarehouseLoadStrip />
 
       {/* venta: subtotal (ya incluye flete e instalación) → IVA → total */}
       <div className="mt-4 bg-bg-1 border border-line rounded-[8px] p-3.5">

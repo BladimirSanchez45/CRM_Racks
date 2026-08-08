@@ -93,6 +93,11 @@ export interface Supplier {
   diasCredito?: number       // Días Crédito
   cuentaBanco?: string       // Cuenta / Banco
   prefijo?: string           // Prefijo de Factura (p.ej. "IR")
+  /** ¿Las OC de este proveedor las TRABAJA ALMACÉN? Solo esas entran a la cola.
+   *  OJO: no es "interno vs externo". Hay proveedores con los que sí se trabaja
+   *  (un herrero, por ejemplo) cuyo material no pasa por almacén: esos van en false.
+   *  El nombre de la columna es `interno` por historia; lo que decide es esto. */
+  interno?: boolean
 }
 
 /* ============================================================
@@ -319,6 +324,8 @@ export interface Movement {
 /** Configuración global de la app (valores escalares persistidos). */
 export interface AppSettings {
   bankBalance: number       // saldo de la cuenta bancaria (manual) — en desuso (cada lista guarda el suyo)
+  /** Días de trabajo por talla de almacén (Chico / Mediano / Grande). */
+  whDays: WarehouseDays
 }
 
 /** Referencia a un documento adjunto. `path` = ruta en Supabase Storage. */
@@ -420,6 +427,8 @@ export type NotificationKind =
   | 'movement_changed'           // dirección modificó (agregó/editó/eliminó) la lista → se avisa al creador
   | 'client_pending'             // un vendedor propuso un cliente nuevo → se avisa a los administradores
   | 'project_stage_moved'        // el proyecto cambió de etapa → se avisa a SU vendedor
+  | 'warehouse_queued'           // entró un proyecto a la cola de almacén → se avisa a Almacén
+  | 'warehouse_done'             // almacén terminó un proyecto → se avisa a logística y al vendedor
 
 /** Notificación dirigida a un usuario concreto (a diferencia del feed de
  *  actividad, que es global). Se entrega por id de usuario destinatario. */
@@ -516,6 +525,44 @@ export interface Prospect {
   updated?: string             // ISO
 }
 
+/* ---- ALMACÉN: cola de trabajo ---- */
+
+/** Talla de trabajo. Solo sirve para CUANTIFICAR la carga (días por talla,
+ *  configurables en Administración); no calcula fechas de nada. */
+export type WarehouseSize = 'S' | 'M' | 'L'
+/** Estado dentro de la cola, que almacén cambia a mano. Puede haber VARIOS
+ *  en 'proceso' a la vez. 'pausado' = ya se había arrancado y se detuvo (por
+ *  ejemplo, para darle prioridad a otro): se distingue de 'pendiente', que
+ *  nunca se ha tocado. Todo lo que no es 'listo' sigue contando como carga. */
+export type WarehouseStatus = 'pendiente' | 'proceso' | 'pausado' | 'listo'
+
+/** Renglón de la cola de almacén: uno por ORDEN DE COMPRA.
+ *  La unidad de trabajo de almacén es la OC (el material que llega de un
+ *  proveedor), no el proyecto: un proyecto con tres OC son tres trabajos. */
+export interface WarehouseItem {
+  id: string
+  orderId: string
+  /** Orden manual. Es fraccionado a propósito: mover un proyecto escribe UNA sola fila. */
+  position: number
+  /** Talla: atajo para llenar los días. Sin talla NI días = "sin clasificar". */
+  size?: WarehouseSize
+  /** Días capturados A MANO para este trabajo. Si existe, GANA sobre los días de
+   *  la talla: sirve para lo que no cabe en el molde (1 día, 20 días).
+   *  SIEMPRE entero y mínimo 1: lo que sale el mismo día cuenta como 1 día. */
+  days?: number
+  status: WarehouseStatus
+  /** Fecha en que ALMACÉN estima terminar. Informativa y exclusiva de este módulo:
+   *  NO toca el ETA ni ninguna otra fecha del proyecto. */
+  estimatedDone?: string   // 'YYYY-MM-DD'
+  notes?: string
+  enteredAt: string        // ISO — cuándo cayó a la cola
+  startedAt?: string       // ISO — al pasar a 'proceso'
+  doneAt?: string          // ISO — al pasar a 'listo'
+}
+/** Días de trabajo que vale cada talla (configurable en Administración). */
+export type WarehouseDays = Record<WarehouseSize, number>
+export const WAREHOUSE_DAYS_DEFAULT: WarehouseDays = { S: 2, M: 4, L: 8 }
+
 /* ---- AGENDA personal (pendientes, recordatorios y citas) ---- */
 
 /** Tipo de anotación en la agenda:
@@ -564,6 +611,7 @@ export interface AppState {
   movements: Movement[]
   campaigns: Campaign[]
   agendaEvents: AgendaEvent[]
+  warehouse: WarehouseItem[]
   settings: AppSettings
   activity: Activity[]
   notifications: Notification[]
@@ -670,6 +718,17 @@ export type Action =
   | { type: 'DECIDE_MOVEMENT'; id: string; approve: boolean; reason?: string }
   | { type: 'SAVE_CAMPAIGN'; campaign: CampaignInput }
   | { type: 'DELETE_CAMPAIGN'; id: string }
+  /* ---- Almacén ---- */
+  // Edita talla, fecha estimada o notas de un renglón de la cola.
+  | { type: 'SAVE_WAREHOUSE_ITEM'; item: Partial<WarehouseItem> & { id: string } }
+  // Reordena: mueve el renglón a la posición `toIndex` de la cola activa.
+  | { type: 'MOVE_WAREHOUSE_ITEM'; id: string; toIndex: number }
+  // Cambia el estado (sella startedAt / doneAt y avisa al marcar "listo").
+  | { type: 'SET_WAREHOUSE_STATUS'; id: string; status: WarehouseStatus }
+  // Saca una OC de la cola (entró por error: proveedor externo, OC cancelada…).
+  | { type: 'REMOVE_FROM_WAREHOUSE'; id: string }
+  // Días de trabajo por talla (Administración).
+  | { type: 'SAVE_WAREHOUSE_DAYS'; days: WarehouseDays }
   | { type: 'SAVE_AGENDA_EVENT'; event: AgendaEventInput }
   | { type: 'DELETE_AGENDA_EVENT'; id: string }
   | { type: 'TOGGLE_AGENDA_DONE'; id: string }
@@ -714,6 +773,8 @@ export type StateAction =
   | { type: 'REMOVE_CAMPAIGN'; id: string }
   | { type: 'UPSERT_AGENDA_EVENT'; event: AgendaEvent }
   | { type: 'REMOVE_AGENDA_EVENT'; id: string }
+  | { type: 'UPSERT_WAREHOUSE_ITEM'; item: WarehouseItem }
+  | { type: 'REMOVE_WAREHOUSE_ITEM'; id: string }
   | { type: 'UPSERT_PROSPECT'; prospect: Prospect }
   | { type: 'REMOVE_PROSPECT'; id: string }
   | { type: 'SET_SETTINGS'; settings: AppSettings }

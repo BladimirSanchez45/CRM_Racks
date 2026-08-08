@@ -8,8 +8,9 @@ import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
   Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
-  AgendaEvent,
+  AgendaEvent, WarehouseItem,
 } from './types'
+import { WAREHOUSE_DAYS_DEFAULT } from './types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -64,6 +65,7 @@ function mapSupplier(r: any): Supplier {
     ...(r.dias_credito != null ? { diasCredito: r.dias_credito } : {}),
     ...(r.cuenta_banco ? { cuentaBanco: r.cuenta_banco } : {}),
     ...(r.prefijo ? { prefijo: r.prefijo } : {}),
+    ...(r.interno ? { interno: true } : {}),
   }
 }
 
@@ -553,6 +555,34 @@ export async function fetchAgendaEvents(): Promise<AgendaEvent[]> {
 export const saveAgendaEvent = (e: AgendaEvent) => upsert('agenda_events', agendaEventRow(e))
 export const deleteAgendaEvent = (id: string) => removeRow('agenda_events', id)
 
+/* ---- Almacén: cola de trabajo ---- */
+function mapWarehouseItem(r: any): WarehouseItem {
+  return {
+    id: r.id, orderId: r.order_id ?? '', position: Number(r.position ?? 0),
+    status: r.status ?? 'pendiente', enteredAt: r.entered_at ?? new Date().toISOString(),
+    ...(r.size ? { size: r.size } : {}),
+    ...(r.days != null ? { days: Number(r.days) } : {}),
+    ...(r.estimated_done ? { estimatedDone: r.estimated_done } : {}),
+    ...(r.notes ? { notes: r.notes } : {}),
+    ...(r.started_at ? { startedAt: r.started_at } : {}),
+    ...(r.done_at ? { doneAt: r.done_at } : {}),
+  }
+}
+function warehouseItemRow(w: WarehouseItem): Record<string, unknown> {
+  return {
+    id: w.id, order_id: w.orderId, position: w.position, size: w.size ?? null, days: w.days ?? null,
+    status: w.status, estimated_done: orNull(w.estimatedDone), notes: w.notes ?? null,
+    entered_at: w.enteredAt, started_at: w.startedAt ?? null, done_at: w.doneAt ?? null,
+  }
+}
+export async function fetchWarehouse(): Promise<WarehouseItem[]> {
+  const { data, error } = await supabase.from('warehouse_queue').select('*').order('position', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map(mapWarehouseItem)
+}
+export const saveWarehouseItem = (w: WarehouseItem) => upsert('warehouse_queue', warehouseItemRow(w))
+export const deleteWarehouseItem = (id: string) => removeRow('warehouse_queue', id)
+
 /* ---- Prospectos / leads (CRM previo a Proyectos) ---- */
 function mapProspect(r: any): Prospect {
   return {
@@ -621,7 +651,15 @@ export async function fetchSettings(): Promise<AppSettings> {
   const { data, error } = await supabase.from('app_settings').select('*')
   if (error) throw error
   const map = Object.fromEntries((data ?? []).map((r: any) => [r.key, r.value]))
-  return { bankBalance: Number(map['bank_balance'] ?? 0) }
+  const wh = map['wh_days'] as Partial<Record<'S' | 'M' | 'L', unknown>> | undefined
+  return {
+    bankBalance: Number(map['bank_balance'] ?? 0),
+    whDays: {
+      S: Number(wh?.S ?? WAREHOUSE_DAYS_DEFAULT.S),
+      M: Number(wh?.M ?? WAREHOUSE_DAYS_DEFAULT.M),
+      L: Number(wh?.L ?? WAREHOUSE_DAYS_DEFAULT.L),
+    },
+  }
 }
 export const saveSetting = (key: string, value: unknown) =>
   upsert('app_settings', { key, value, updated_at: new Date().toISOString() })
@@ -730,6 +768,7 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   campaigns: mapCampaign,
   prospects: mapProspect,
   agenda_events: mapAgendaEvent,
+  warehouse_queue: mapWarehouseItem,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -770,6 +809,7 @@ export const saveSupplierRow = (s: Supplier) => upsert('suppliers', {
   id: s.id, name: s.name, cat: s.cat, contact: s.contact, phone: s.phone, email: s.email, city: s.city,
   rating: s.rating, active: s.active, notes: s.notes, direccion: s.direccion ?? null,
   dias_credito: s.diasCredito ?? null, cuenta_banco: s.cuentaBanco ?? null, prefijo: s.prefijo ?? null,
+  interno: s.interno ?? false,
 })
 export const deleteSupplier = (id: string) => removeRow('suppliers', id)
 
@@ -802,11 +842,11 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchAgendaEvents(), fetchSettings(), fetchActivity(), fetchNotifications(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(), fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, settings, activity, notifications }
 }

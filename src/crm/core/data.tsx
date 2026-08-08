@@ -29,7 +29,10 @@ import type {
   Campaign,
   Prospect,
   AgendaEvent,
+  WarehouseItem,
+  WarehouseSize,
 } from './types'
+import { WAREHOUSE_DAYS_DEFAULT } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
   touchActivity, clearActivity, inactivityExpired,
@@ -44,8 +47,9 @@ import {
   saveMovement, deleteMovement as apiDeleteMovement,
   saveCampaign, deleteCampaign as apiDeleteCampaign,
   saveAgendaEvent, deleteAgendaEvent as apiDeleteAgendaEvent,
+  saveWarehouseItem, deleteWarehouseItem as apiDeleteWarehouseItem,
   saveProspect, deleteProspect as apiDeleteProspect,
-  saveActivity,
+  saveActivity, saveSetting,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
   subscribeToData,
 } from './api'
@@ -239,7 +243,8 @@ export const regimenLabel = (code?: string) =>
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
-  movementLists: [], movements: [], campaigns: [], prospects: [], agendaEvents: [], settings: { bankBalance: 0 },
+  movementLists: [], movements: [], campaigns: [], prospects: [], agendaEvents: [], warehouse: [],
+  settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
@@ -279,6 +284,26 @@ function buildCommissions(s: AppState, proj: Project, paid?: Set<string>, manual
     }
   }
   return list
+}
+
+/* ---- Orden de la cola de almacén ----------------------------------
+   La posición es un número FRACCIONADO: para mover un proyecto se calcula
+   el punto medio entre sus nuevos vecinos, así el cambio escribe UNA sola
+   fila en vez de renumerar toda la cola. */
+export const byWhPosition = (a: WarehouseItem, b: WarehouseItem) => a.position - b.position
+/** Posición para encolar al final. */
+const nextWhPosition = (s: AppState) =>
+  s.warehouse.reduce((max, w) => Math.max(max, w.position), 0) + 1000
+/** Posición que debe tener un renglón para quedar en el índice `idx` de `rest`
+ *  (la lista ordenada SIN ese renglón). */
+function positionAt(rest: WarehouseItem[], idx: number): number {
+  const i = Math.max(0, Math.min(idx, rest.length))
+  const prev = rest[i - 1]?.position
+  const next = rest[i]?.position
+  if (prev == null && next == null) return 1000
+  if (prev == null) return next! - 1000
+  if (next == null) return prev + 1000
+  return (prev + next) / 2
 }
 
 /** Reparte un TOTAL entre varias comisiones, proporcional a su importe actual.
@@ -338,6 +363,8 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_PROSPECT': return { ...state, prospects: state.prospects.filter(p => p.id !== a.id) }
     case 'UPSERT_AGENDA_EVENT': return { ...state, agendaEvents: upsertBy(state.agendaEvents, a.event) }
     case 'REMOVE_AGENDA_EVENT': return { ...state, agendaEvents: state.agendaEvents.filter(e => e.id !== a.id) }
+    case 'UPSERT_WAREHOUSE_ITEM': return { ...state, warehouse: upsertBy(state.warehouse, a.item) }
+    case 'REMOVE_WAREHOUSE_ITEM': return { ...state, warehouse: state.warehouse.filter(w => w.id !== a.id) }
     case 'SET_SETTINGS': return { ...state, settings: a.settings }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
@@ -574,6 +601,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const proj = full.projectId ? s.projects.find(p => p.id === full.projectId) : undefined
         if (proj && proj.stage === 'finalizado') {
           regenCommissions(proj, thunks, { ...s, orders: upsertBy(s.orders, full) })
+        }
+        // Cada OC nueva entra a la COLA DE ALMACÉN (sin talla): la unidad de trabajo
+        // de almacén es la orden de compra, así que un proyecto con varias OC genera
+        // varios renglones. Se avisa a los usuarios con rol Almacén.
+        // OJO: solo si el PROVEEDOR está marcado como "sus OC las trabaja almacén"
+        // (Proveedores → editar). Hay proveedores con los que sí se trabaja pero cuyo
+        // material no pasa por almacén: esos no encolan nada.
+        if (sel.supplier(s, full.supplierId)?.interno && !s.warehouse.some(w => w.orderId === full.id)) {
+          const item: WarehouseItem = {
+            id: uid('wh'), orderId: full.id, position: nextWhPosition(s),
+            status: 'pendiente', enteredAt: nowISO(),
+          }
+          rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item })
+          thunks.push(() => saveWarehouseItem(item))
+          const alm = s.users.filter(u => u.role === 'almacen' && u.active && u.id !== s.currentUser?.id)
+          const prov = sel.supplier(s, full.supplierId)?.name
+          notify(alm, {
+            kind: 'warehouse_queued',
+            title: `Nueva OC en la cola: ${full.number}`,
+            body: `${prov ? `${prov} · ` : ''}${proj ? `${proj.code} · ${sel.clientName(s, proj.client)}` : 'Sin proyecto'}. Clasifícala y ponla en su prioridad.`,
+            ...(proj ? { projectId: proj.id } : {}),
+            ...(s.currentUser?.name ? { actorName: s.currentUser.name } : {}),
+          })
         }
         persist(thunks); return
       }
@@ -1112,6 +1162,68 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => apiDeleteCampaign(action.id)]); return
       }
 
+      /* ---- Almacén: cola de trabajo ---- */
+      case 'SAVE_WAREHOUSE_ITEM': {
+        const prev = s.warehouse.find(w => w.id === action.item.id); if (!prev) return
+        const updated: WarehouseItem = { ...prev, ...action.item }
+        rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item: updated })
+        persist([() => saveWarehouseItem(updated)]); return
+      }
+      case 'MOVE_WAREHOUSE_ITEM': {
+        const item = s.warehouse.find(w => w.id === action.id); if (!item) return
+        // Solo se reordena la cola ACTIVA (lo terminado ya no compite por prioridad).
+        const activos = s.warehouse.filter(w => w.status !== 'listo').sort(byWhPosition)
+        const position = positionAt(activos.filter(w => w.id !== action.id), action.toIndex)
+        if (position === item.position) return
+        const updated: WarehouseItem = { ...item, position }
+        rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item: updated })
+        persist([() => saveWarehouseItem(updated)]); return
+      }
+      case 'SET_WAREHOUSE_STATUS': {
+        const item = s.warehouse.find(w => w.id === action.id); if (!item) return
+        const updated: WarehouseItem = {
+          ...item,
+          status: action.status,
+          // Sella la primera vez que arranca y cuándo se terminó (o lo limpia al reabrir).
+          ...(action.status === 'proceso' && !item.startedAt ? { startedAt: nowISO() } : {}),
+          ...(action.status === 'listo' ? { doneAt: nowISO() } : { doneAt: undefined }),
+        }
+        rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item: updated })
+        const thunks: (() => Promise<void>)[] = [() => saveWarehouseItem(updated)]
+        const ord = s.orders.find(o => o.id === item.orderId)
+        const proj = ord?.projectId ? s.projects.find(p => p.id === ord.projectId) : undefined
+        if (action.status === 'listo' && item.status !== 'listo' && ord) {
+          // Al terminar se avisa a LOGÍSTICA (coordina el envío) y al VENDEDOR del proyecto.
+          const logi = s.users.filter(u => u.role === 'logistica' && u.active && u.id !== s.currentUser?.id)
+          const vendedor = proj ? s.users.filter(u => u.id === proj.seller && u.active && u.id !== s.currentUser?.id) : []
+          notify([...logi, ...vendedor], {
+            kind: 'warehouse_done',
+            title: `Almacén terminó la OC ${ord.number}`,
+            body: proj
+              ? `${proj.code} · ${sel.clientName(s, proj.client)} ya está listo en almacén.`
+              : 'La orden de compra ya está lista en almacén.',
+            ...(proj ? { projectId: proj.id } : {}),
+            ...(s.currentUser?.name ? { actorName: s.currentUser.name } : {}),
+          })
+          const activity: Activity = {
+            id: uid('a'), t: nowISO(), icon: 'pkg', who: whoName(s),
+            txt: `marcó listo en almacén${proj ? ` (${proj.code})` : ''}`, tgt: ord.number, kind: 'done',
+          }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        persist(thunks); return
+      }
+      case 'REMOVE_FROM_WAREHOUSE': {
+        rawDispatch({ type: 'REMOVE_WAREHOUSE_ITEM', id: action.id })
+        persist([() => apiDeleteWarehouseItem(action.id)]); return
+      }
+      case 'SAVE_WAREHOUSE_DAYS': {
+        const settings = { ...s.settings, whDays: action.days }
+        rawDispatch({ type: 'SET_SETTINGS', settings })
+        persist([() => saveSetting('wh_days', action.days)]); return
+      }
+
       /* ---- Agenda personal ---- */
       case 'SAVE_AGENDA_EVENT': {
         const e = action.event
@@ -1254,6 +1366,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'campaigns':       rawDispatch({ type: 'REMOVE_CAMPAIGN', id: c.id }); break
           case 'prospects':       rawDispatch({ type: 'REMOVE_PROSPECT', id: c.id }); break
           case 'agenda_events':   rawDispatch({ type: 'REMOVE_AGENDA_EVENT', id: c.id }); break
+          case 'warehouse_queue': rawDispatch({ type: 'REMOVE_WAREHOUSE_ITEM', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -1272,6 +1385,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'campaigns':       rawDispatch({ type: 'UPSERT_CAMPAIGN', campaign: c.row }); break
           case 'prospects':       rawDispatch({ type: 'UPSERT_PROSPECT', prospect: c.row }); break
           case 'agenda_events':   rawDispatch({ type: 'UPSERT_AGENDA_EVENT', event: c.row }); break
+          case 'warehouse_queue': rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item: c.row }); break
         }
       }
     })
@@ -1306,6 +1420,44 @@ export const sel = {
   projectsForClient: (state: AppState, cid: string) => state.projects.filter(p => p.client === cid),
   projectByCode: (state: AppState, code: string) => state.projects.find(p => p.code === code),
   budget: (p: Pick<Project, 'freight' | 'install'>) => (p.freight || 0) + (p.install || 0),
+  /* ---- Almacén ---- */
+  /** Cola ACTIVA (por iniciar + en proceso), en el orden que definió almacén. */
+  warehouseQueue: (state: AppState) => state.warehouse.filter(w => w.status !== 'listo').sort(byWhPosition),
+  /** Terminados, del más reciente al más viejo. */
+  warehouseDone: (state: AppState) =>
+    state.warehouse.filter(w => w.status === 'listo').sort((a, b) => (b.doneAt || '').localeCompare(a.doneAt || '')),
+  /** Renglón de la cola de una OC (si entró). */
+  warehouseForOrder: (state: AppState, oid: string) => state.warehouse.find(w => w.orderId === oid),
+  /** Renglones de la cola de un PROYECTO: uno por cada OC suya que entró. */
+  warehouseForProject: (state: AppState, pid: string) => {
+    const ocs = new Set(state.orders.filter(o => o.projectId === pid).map(o => o.id))
+    return state.warehouse.filter(w => ocs.has(w.orderId)).sort(byWhPosition)
+  },
+  /** Días de trabajo de un renglón (enteros): mandan los capturados a mano y, si
+   *  no hay, los de la talla. 0 = sin clasificar (no suma a la carga). */
+  warehouseDays: (state: AppState, w?: { size?: WarehouseSize; days?: number }) =>
+    Math.round(w?.days != null ? w.days : (w?.size ? state.settings.whDays[w.size] ?? 0 : 0)),
+  /** ¿El renglón ya tiene carga definida (por talla o a mano)? */
+  warehouseClasificado: (w: { size?: WarehouseSize; days?: number }) => w.days != null || !!w.size,
+  /** Resumen de carga para ventas: cuántos hay y cuántos días suman.
+   *  Los proyectos SIN talla no suman días (se reportan aparte como "sin clasificar"). */
+  warehouseLoad: (state: AppState) => {
+    const q = sel.warehouseQueue(state)
+    const proceso = q.filter(w => w.status === 'proceso')
+    const pendiente = q.filter(w => w.status === 'pendiente')
+    const pausado = q.filter(w => w.status === 'pausado')
+    return {
+      proceso: proceso.length,
+      pendiente: pendiente.length,
+      pausado: pausado.length,
+      total: q.length,
+      sinClasificar: q.filter(w => !sel.warehouseClasificado(w)).length,
+      // Los días son enteros (lo que sale el mismo día cuenta como 1).
+      dias: q.reduce((a, w) => a + sel.warehouseDays(state, w), 0),
+      diasProceso: proceso.reduce((a, w) => a + sel.warehouseDays(state, w), 0),
+    }
+  },
+
   /** Comisiones de un proyecto. */
   commissionsForProject: (state: AppState, pid: string) => state.commissions.filter(c => c.projectId === pid),
   /** ¿El proyecto está ARCHIVADO (va al Historial)? = Finalizado + tiene comisiones y

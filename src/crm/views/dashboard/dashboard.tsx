@@ -3,6 +3,7 @@
 // ============================================================
 import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtK, fmtDate, daysBetween, ago, docCount } from '../../core/data'
 import { KPI, StageBadge, Badge, SecTitle, Empty } from '../../core/ui'
+import { WarehouseLoadCard, WarehouseDashboard } from '../warehouse/warehouse'
 import { Icon, type IconName } from '../../core/icons'
 import type { Activity, AppState, Project, StageId } from '../../core/types'
 
@@ -84,6 +85,9 @@ export function DashboardPage({ onNavigate, onOpenProject }: { onNavigate: (rout
   const { state } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
+  // ALMACÉN tiene su propio panel: el general le mostraría el pipeline con
+  // montos, alertas de cobranza y actividad de pagos, que no le competen.
+  const isAlmacen = me?.role === 'almacen'
   // Ventas: el panel se limita a SUS proyectos (y a la actividad sobre ellos).
   const myProjects = isVentas ? state.projects.filter(p => p.seller === me!.id) : state.projects
   const active = myProjects.filter(p => p.stage !== 'finalizado')
@@ -94,17 +98,21 @@ export function DashboardPage({ onNavigate, onOpenProject }: { onNavigate: (rout
   const myCodes = new Set(myProjects.map(p => p.code))
   const myActivity = isVentas ? state.activity.filter(a => myCodes.has(a.tgt)) : state.activity
 
+  if (isAlmacen) return <WarehouseDashboard onNavigate={onNavigate} />
+
   return (
     <div>
       <SecTitle title="Panel general"  />
 
-      {/* KPIs */}
       <div className="grid grid-cols-4 gap-3.5 mb-5">
         <KPI label="Proyectos activos" value={active.length} icon="projects" accent foot={`${fmtK(pipelineValue)} en pipeline`} delay={0} />
         <KPI label="Ingresos cerrados" value={revenue} format={fmtMoney} icon="money" foot="Acumulado finalizados" delay={60} />
         <KPI label="Pagos pendientes" value={pendingPay} format={fmtMoney} icon="alert" foot={`${active.filter(p => p.finiquito === 'pending' && stageIndex(p.stage) >= 4).length} finiquitos por cobrar`} footTrend="dn" delay={120} />
         <KPI label="Entregas este mes" value={finishingThisMonth.length} icon="calendar" foot="Con ETA en junio" delay={180} />
       </div>
+
+      {/* Carga de almacén: es lo que ventas usa para calcular fechas realistas. */}
+      <div className="mb-4"><WarehouseLoadCard /></div>
 
       <div className="grid grid-cols-[1.4fr_1fr] gap-4 mb-4">
         {/* pipeline */}

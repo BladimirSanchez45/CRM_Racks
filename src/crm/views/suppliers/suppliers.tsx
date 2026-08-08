@@ -50,6 +50,20 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
             {s.active ? 'Activo' : 'Inactivo'}
           </button>
         </Field>
+        {/* Define si sus OC le generan trabajo a almacén. No es "interno vs externo":
+            hay proveedores con los que sí se trabaja pero cuyo material no pasa por almacén. */}
+        <Field label="¿Sus órdenes de compra las trabaja almacén?" span={2}>
+          <button type="button" className="btn h-[38px] w-full justify-start gap-2.5" onClick={() => set('interno', !s.interno)}
+            style={{ background: s.interno ? 'var(--acc-ghost-2)' : 'var(--bg-1)', borderColor: s.interno ? 'var(--acc)' : 'var(--line)', color: s.interno ? 'var(--acc-bright)' : 'var(--tx-2)' }}>
+            <Icon name={s.interno ? 'check' : 'close'} size={15} />
+            {s.interno ? 'Sí · sus OC entran a la cola de almacén' : 'No · sus OC no le llegan a almacén'}
+          </button>
+          <div className="meta mt-1.5">
+            {s.interno
+              ? 'Cada OC que le emitas se le encola a almacén para que prepare el material.'
+              : 'Almacén no verá sus OC. Úsalo para proveedores cuyo material no pasa por almacén, aunque sí trabajen con ustedes.'}
+          </div>
+        </Field>
         <Field label="Notas" span={2}><TextArea value={s.notes} onChange={e => set('notes', e.target.value)} /></Field>
       </div>
       {guard}
@@ -83,7 +97,7 @@ function SupplierDetail({ supplier, onClose, onEdit, onDelete, readOnly }: { sup
           {supplier.direccion && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="pin" size={15} className="text-tx-2" /> {supplier.direccion}</div>}
           {supplier.prefijo && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="doc" size={15} className="text-tx-2" /> Prefijo de factura: <span className="mono">{supplier.prefijo}</span></div>}
           {(supplier.diasCredito != null || supplier.cuentaBanco) && <div className="flex items-center gap-[9px] text-[13px]"><Icon name="money" size={15} className="text-tx-2" /> {supplier.diasCredito != null ? `${supplier.diasCredito} días de crédito` : ''}{supplier.cuentaBanco ? `${supplier.diasCredito != null ? ' · ' : ''}${supplier.cuentaBanco}` : ''}</div>}
-          <div className="flex items-center gap-[9px] text-[13px]"><Rating value={supplier.rating} /> {supplier.active ? <Badge color="var(--ok)">Activo</Badge> : <Badge color="var(--tx-2)">Inactivo</Badge>}</div>
+          <div className="flex items-center gap-[9px] text-[13px]"><Rating value={supplier.rating} /> {supplier.active ? <Badge color="var(--ok)">Activo</Badge> : <Badge color="var(--tx-2)">Inactivo</Badge>}{supplier.interno && <Badge color="var(--acc)">Trabaja almacén</Badge>}</div>
         </div>
         <div className="grid grid-cols-2 gap-2.5">
           <div className="bg-bg-1 border border-line p-3">
