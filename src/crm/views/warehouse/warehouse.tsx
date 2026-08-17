@@ -171,7 +171,8 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
       ].filter(Boolean).join(' · ')}
       onClose={onClose}
       footer={<><div className="flex-1"></div><button className="btn btn-primary" onClick={onClose}>Cerrar</button></>}>
-      <div className="grid grid-cols-2 gap-x-6 text-[12.5px] mb-5">
+      <div className="label-k mb-1.5">Orden de compra</div>
+      <div className="grid grid-cols-2 gap-x-6 text-[12.5px] mb-4">
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Fecha OC</span><span>{order.date ? fmtDate(order.date) : '—'}</span></div>
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Entrega estimada</span><span>{order.deliveryDate ? fmtDate(order.deliveryDate) : '—'}</span></div>
         <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Descripción</span><span className="text-right max-w-[60%]">{order.description || '—'}</span></div>
@@ -180,6 +181,24 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
           <span>{order.filePath ? <DocChip doc={{ name: order.file || 'OC firmada', ok: true, path: order.filePath }} label="OC firmada" /> : (order.file || '—')}</span>
         </div>
       </div>
+
+      {/* Datos del proyecto: a quién le pertenece, a dónde va y cuándo se prometió. */}
+      {project && (
+        <>
+          <div className="label-k mb-1.5">Proyecto {project.code}</div>
+          <div className="grid grid-cols-2 gap-x-6 text-[12.5px] mb-5">
+            <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Vendedor</span><span>{sel.sellerName(state, project.seller)}</span></div>
+            <div className="flex justify-between border-b border-line-soft py-[7px]">
+              <span className="label-k">Destino</span>
+              <span className="text-right max-w-[60%]">
+                {project.city ? <><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {project.city}</> : '—'}
+              </span>
+            </div>
+            <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Entrega estimada</span><span>{project.eta ? fmtDate(project.eta) : '—'}</span></div>
+            <div className="flex justify-between border-b border-line-soft py-[7px]"><span className="label-k">Semanas de entrega</span><span className="mono">{project.weeks ? `${project.weeks} sem` : '—'}</span></div>
+          </div>
+        </>
+      )}
 
       {items.length === 0 ? (
         <Empty icon="box">Esta OC no tiene materiales capturados. Revisa el PDF de la OC firmada.</Empty>
