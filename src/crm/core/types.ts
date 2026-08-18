@@ -576,10 +576,14 @@ export type AgendaLinkKind = 'project' | 'prospect' | 'client'
 
 /** Evento de la agenda. La agenda es PERSONAL: cada evento pertenece a un usuario
  *  (`userId`) y solo él la ve, salvo admin/dirección que pueden consultar la de
- *  cualquiera y agendarle cosas (queda registrado en `createdBy`). */
+ *  cualquiera y agendarle cosas (queda registrado en `createdBy`).
+ *  Una anotación COMPARTIDA (`participants`) además aparece en la agenda de cada
+ *  invitado; ahí el "hecho" es individual y se lleva en `doneBy`. */
 export interface AgendaEvent {
   id: string
-  userId: string          // dueño de la agenda
+  userId: string          // dueño / organizador de la anotación
+  participants?: string[] // invitados: la ven en su propia agenda (no incluye al dueño)
+  doneBy?: string[]       // solo compartidas: quiénes ya la atendieron
   kind: AgendaKind
   title: string
   date: string            // 'YYYY-MM-DD'
@@ -587,7 +591,7 @@ export interface AgendaEvent {
   end?: string            // 'HH:MM' — solo citas
   location?: string       // solo citas (dirección, planta, oficina…)
   notes?: string
-  done: boolean           // pendientes/recordatorios atendidos y citas realizadas
+  done: boolean           // atendida; en las compartidas, cuando YA la atendieron todos
   linkKind?: AgendaLinkKind   // vínculo opcional con el CRM
   linkId?: string
   createdBy?: string      // quién lo registró (≠ userId si un admin lo agendó)
@@ -731,7 +735,7 @@ export type Action =
   | { type: 'SAVE_WAREHOUSE_DAYS'; days: WarehouseDays }
   | { type: 'SAVE_AGENDA_EVENT'; event: AgendaEventInput }
   | { type: 'DELETE_AGENDA_EVENT'; id: string }
-  | { type: 'TOGGLE_AGENDA_DONE'; id: string }
+  | { type: 'TOGGLE_AGENDA_DONE'; id: string; userId?: string }   // userId: en qué agenda se marca (compartidas); por defecto, la propia
   | { type: 'SAVE_PROSPECT'; prospect: ProspectInput }
   | { type: 'DELETE_PROSPECT'; id: string }
   | { type: 'MARK_NOTIFICATION_READ'; id: string }

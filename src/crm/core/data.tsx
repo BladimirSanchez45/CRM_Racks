@@ -81,6 +81,20 @@ export const isDireccion = (role?: Role | null) => role === 'direccion'
 export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 /** Rol Marketing: por ahora SOLO ve el módulo de Estadísticas por origen (solo lectura). */
 export const isMarketing = (role?: Role | null) => role === 'marketing'
+
+/* ---- Agenda compartida ----
+   Una anotación con `participants` aparece en la agenda de todos ellos. El
+   "hecho" es INDIVIDUAL: cada quien la cierra en su agenda (`doneBy`) y el
+   `done` del registro solo se enciende cuando ya la atendieron todos. */
+/** Todas las agendas en las que aparece la anotación: dueño + invitados. */
+export const agendaViewers = (e: Pick<AgendaEvent, 'userId' | 'participants'>): string[] =>
+  [e.userId, ...(e.participants ?? [])].filter(Boolean)
+/** ¿La anotación le aparece a esta persona (como dueño o como invitado)? */
+export const agendaIsFor = (e: Pick<AgendaEvent, 'userId' | 'participants'>, userId?: string) =>
+  !!userId && agendaViewers(e).includes(userId)
+/** ¿Ya está atendida PARA esta persona? En las personales es el `done` de siempre. */
+export const agendaDoneFor = (e: Pick<AgendaEvent, 'userId' | 'participants' | 'done' | 'doneBy'>, userId?: string) =>
+  e.participants?.length ? (e.doneBy ?? []).includes(userId ?? '') : e.done
 /** ¿Puede EDITAR el importe de una comisión pendiente? Solo Dirección y Admin/Super Admin.
  *  (Dirección no marca pagos, pero sí ajusta el total a pagar.) */
 export const canEditCommissionAmount = (role?: Role | null) => isAdminRole(role) || isDireccion(role)
@@ -1227,12 +1241,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       /* ---- Agenda personal ---- */
       case 'SAVE_AGENDA_EVENT': {
         const e = action.event
+        // Por defecto la anotación es para uno mismo; admin/dirección pueden agendarle a otro.
+        const owner = e.userId || s.currentUser?.id || ''
+        // El dueño nunca va repetido en la lista de invitados.
+        const participants = Array.from(new Set(e.participants ?? [])).filter(id => id && id !== owner)
+        const viewers = [owner, ...participants]
+        // Al compartir una anotación que ya estaba hecha, se respeta que el dueño ya la
+        // atendió; y si alguien deja de estar invitado, se cae de `doneBy`.
+        const doneBy = participants.length
+          ? (e.doneBy ?? (e.done ? [owner] : [])).filter(id => viewers.includes(id))
+          : []
         const full: AgendaEvent = {
           ...(e as AgendaEvent),
           id: e.id ?? uid('ag'),
-          // Por defecto la anotación es para uno mismo; admin/dirección pueden agendarle a otro.
-          userId: e.userId || s.currentUser?.id || '',
-          done: e.done ?? false,
+          userId: owner,
+          participants,
+          doneBy,
+          // En las compartidas, `done` = ya la atendieron TODOS.
+          done: participants.length ? viewers.every(id => doneBy.includes(id)) : (e.done ?? false),
           createdBy: e.createdBy ?? s.currentUser?.id,
           createdAt: e.createdAt ?? nowISO(),
         }
@@ -1245,7 +1271,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       case 'TOGGLE_AGENDA_DONE': {
         const ev = s.agendaEvents.find(x => x.id === action.id); if (!ev) return
-        const updated: AgendaEvent = { ...ev, done: !ev.done }
+        // En una compartida se cierra la agenda que se está viendo (normalmente la propia;
+        // un admin consultando la de otro la marca para ESE usuario, no para él).
+        const who = action.userId || s.currentUser?.id || ''
+        let updated: AgendaEvent
+        if (ev.participants?.length) {
+          const viewers = [ev.userId, ...ev.participants]
+          if (!viewers.includes(who)) return   // ajeno a la anotación: no toca su estado
+          const prev = ev.doneBy ?? []
+          const doneBy = prev.includes(who) ? prev.filter(x => x !== who) : [...prev, who]
+          updated = { ...ev, doneBy, done: viewers.every(id => doneBy.includes(id)) }
+        } else {
+          updated = { ...ev, done: !ev.done }
+        }
         rawDispatch({ type: 'UPSERT_AGENDA_EVENT', event: updated })
         persist([() => saveAgendaEvent(updated)]); return
       }

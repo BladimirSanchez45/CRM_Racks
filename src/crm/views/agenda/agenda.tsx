@@ -3,13 +3,16 @@
 //  La agenda es PERSONAL: cada quien ve la suya. Admin/Super Admin y
 //  Dirección pueden además consultar la de cualquier persona (selector)
 //  y agendarle cosas.
+//  COMPARTIDAS: cualquiera puede invitar compañeros a una anotación; les
+//  aparece en SU agenda (y les avisa) y cada quien la marca hecha por su
+//  cuenta. Editarla o eliminarla es solo del organizador.
 //  Vistas: DÍA (rejilla de 9:00 a 19:00) y SEMANA (lunes a domingo).
 //  Avisos: <AgendaTodayModal> al iniciar sesión y <AgendaAlerts> (toast)
 //  cuando llega la hora de una anotación con la app abierta.
 // ============================================================
 import * as React from 'react'
 import { createPortal } from 'react-dom'
-import { useStore, sel, addDays, fmtDate, TODAY_ISO, MESES_L, isAdminRole, isDireccion } from '../../core/data'
+import { useStore, sel, addDays, fmtDate, TODAY_ISO, MESES_L, isAdminRole, isDireccion, agendaIsFor, agendaDoneFor } from '../../core/data'
 import { Modal, Field, Input, Select, TextArea, Combobox, Confirm, Badge, Seg, Avatar, useUnsavedGuard } from '../../core/ui'
 import { Icon, type IconName } from '../../core/icons'
 import { desktopEnabled, desktopNotify } from '../../core/desktop_notify'
@@ -74,6 +77,7 @@ type FormState = {
   linkKind: '' | AgendaLinkKind
   linkId: string
   userId: string
+  participants: string[]
 }
 
 function AgendaForm({ event, kind, date, ownerId, onClose }: {
@@ -92,10 +96,18 @@ function AgendaForm({ event, kind, date, ownerId, onClose }: {
       id: event.id, kind: event.kind, title: event.title, date: event.date, start: event.start,
       end: event.end ?? '', location: event.location ?? '', notes: event.notes ?? '',
       linkKind: event.linkKind ?? '', linkId: event.linkId ?? '', userId: event.userId,
+      participants: event.participants ?? [],
     }
-    : { kind, title: '', date, start: '09:00', end: '', location: '', notes: '', linkKind: '', linkId: '', userId: ownerId })
+    : { kind, title: '', date, start: '09:00', end: '', location: '', notes: '', linkKind: '', linkId: '', userId: ownerId, participants: [] })
 
   const set = (k: keyof FormState, v: string) => setF(s => ({ ...s, [k]: v }))
+  // Invitar / quitar a un compañero de la anotación.
+  const toggleGuest = (id: string) => setF(s => ({
+    ...s,
+    participants: s.participants.includes(id) ? s.participants.filter(x => x !== id) : [...s.participants, id],
+  }))
+  // Compañeros a los que se puede invitar: activos y que no sean ya el dueño.
+  const invitables = state.users.filter(u => u.active && u.id !== f.userId)
   const isCita = f.kind === 'cita'
   const { requestClose, guard } = useUnsavedGuard(f, onClose)
 
@@ -117,6 +129,8 @@ function AgendaForm({ event, kind, date, ownerId, onClose }: {
       ...(event ?? {}),
       id: f.id,
       userId: f.userId,
+      // El dueño puede haber cambiado (admin reasignando): que no quede invitado a lo suyo.
+      participants: f.participants.filter(id => id !== f.userId),
       kind: f.kind,
       title: f.title.trim(),
       date: f.date,
@@ -187,12 +201,43 @@ function AgendaForm({ event, kind, date, ownerId, onClose }: {
 
         {canAssign && (
           <Field label="Agendar para" span={2}>
-            <Select value={f.userId} onChange={e => set('userId', e.target.value)}>
+            <Select value={f.userId} onChange={e => setF(s => ({ ...s, userId: e.target.value, participants: s.participants.filter(id => id !== e.target.value) }))}>
               {me && <option value={me.id}>Mi agenda ({me.name})</option>}
               {state.users.filter(u => u.active && u.id !== me?.id).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
             </Select>
           </Field>
         )}
+
+        {/* Participantes: a quien invites le aparece en SU agenda y le avisa a la hora. */}
+        <Field label={`Con quién${f.participants.length ? ` · ${f.participants.length}` : ''}`} span={2}>
+          <div className="border border-line rounded-[8px] bg-bg-1 p-1.5 max-h-[152px] overflow-y-auto flex flex-col gap-1">
+            {invitables.length === 0
+              ? <div className="meta px-1.5 py-1">No hay otros usuarios activos.</div>
+              : invitables.map(u => {
+                const on = f.participants.includes(u.id)
+                return (
+                  <button key={u.id} type="button" onClick={() => toggleGuest(u.id)}
+                    className="flex items-center gap-2 w-full text-left rounded-[6px] px-2 py-1.5 border transition-colors hover:bg-bg-3 cursor-pointer"
+                    style={{
+                      borderColor: on ? 'var(--acc)' : 'transparent',
+                      background: on ? 'color-mix(in srgb, var(--acc) 12%, transparent)' : 'transparent',
+                    }}>
+                    <Avatar name={u.name} size={24} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[12.5px] font-semibold text-tx-0 truncate">{u.name}</span>
+                      {u.title && <span className="block meta truncate">{u.title}</span>}
+                    </span>
+                    <span className="shrink-0" style={{ color: on ? 'var(--acc)' : 'var(--tx-3)' }}>
+                      <Icon name={on ? 'check' : 'plus'} size={15} />
+                    </span>
+                  </button>
+                )
+              })}
+          </div>
+          {f.participants.length > 0 && (
+            <div className="meta mt-1.5">Les aparecerá en su agenda y cada quien la marca como hecha por su cuenta.</div>
+          )}
+        </Field>
 
         <Field label="Notas" span={2}>
           <TextArea rows={3} value={f.notes} onChange={e => set('notes', e.target.value)} placeholder="Detalles, qué llevar, con quién…" />
@@ -208,8 +253,9 @@ function AgendaForm({ event, kind, date, ownerId, onClose }: {
 /* ============================================================
    Detalle de una anotación
    ============================================================ */
-function AgendaDetail({ event, onEdit, onClose, onOpenProject }: {
+function AgendaDetail({ event, viewerId, onEdit, onClose, onOpenProject }: {
   event: AgendaEvent
+  viewerId?: string        // agenda desde la que se abrió (la propia, o la de otro si es un admin consultando)
   onEdit: () => void
   onClose: () => void
   onOpenProject?: (p: Project) => void
@@ -222,14 +268,25 @@ function AgendaDetail({ event, onEdit, onClose, onOpenProject }: {
   const owner = state.users.find(u => u.id === event.userId)
   const creator = event.createdBy && event.createdBy !== event.userId ? state.users.find(u => u.id === event.createdBy) : undefined
 
+  const me = state.currentUser
+  const viewer = viewerId || me?.id || ''
+  const guests = (event.participants ?? []).map(id => state.users.find(u => u.id === id)).filter((u): u is NonNullable<typeof u> => !!u)
+  const shared = guests.length > 0
+  // Hecho INDIVIDUAL: el botón cierra la anotación en la agenda que se está viendo.
+  const doneForViewer = agendaDoneFor(event, viewer)
+  const doneCount = shared ? (event.doneBy ?? []).length : 0
+  // Editar y eliminar es del organizador (o de quien la registró / un admin):
+  // un invitado no le borra la cita a los demás.
+  const canManage = !shared || event.userId === me?.id || event.createdBy === me?.id || isAdminRole(me?.role) || isDireccion(me?.role)
+
   return (
     <Modal width={480} icon={meta.icon} title={event.title} sub={`${meta.label} · ${fmtDate(event.date)}`} onClose={onClose}
       footer={<>
-        <button className="btn btn-ghost" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /> Eliminar</button>
+        {canManage && <button className="btn btn-ghost" onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /> Eliminar</button>}
         <div className="flex-1"></div>
-        <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={14} /> Editar</button>
-        <button className="btn btn-primary" onClick={() => { dispatch({ type: 'TOGGLE_AGENDA_DONE', id: event.id }); onClose() }}>
-          <Icon name="check" size={15} /> {event.done ? 'Reabrir' : 'Marcar hecho'}
+        {canManage && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={14} /> Editar</button>}
+        <button className="btn btn-primary" onClick={() => { dispatch({ type: 'TOGGLE_AGENDA_DONE', id: event.id, userId: viewer }); onClose() }}>
+          <Icon name="check" size={15} /> {doneForViewer ? 'Reabrir' : 'Marcar hecho'}
         </button>
       </>}>
       <div className="rounded-[8px] border border-line p-3 bg-bg-1 flex flex-col gap-2 text-[12.5px]">
@@ -240,10 +297,37 @@ function AgendaDetail({ event, onEdit, onClose, onOpenProject }: {
         {event.location && <div className="spread"><span className="text-tx-2">Ubicación</span><span className="text-right max-w-[62%]">{event.location}</span></div>}
         {linkLabel && <div className="spread"><span className="text-tx-2">Relacionado</span><span className="font-semibold text-right max-w-[62%]">{linkLabel}</span></div>}
         <div className="spread"><span className="text-tx-2">Estado</span>
-          {event.done ? <Badge color="var(--ok)">Hecho</Badge> : <Badge color="var(--warn)">Abierto</Badge>}
+          <span className="flex items-center gap-1.5">
+            {doneForViewer ? <Badge color="var(--ok)">Hecho</Badge> : <Badge color="var(--warn)">Abierto</Badge>}
+            {shared && <span className="meta">{doneCount} de {guests.length + 1} atendida</span>}
+          </span>
         </div>
-        {owner && <div className="spread"><span className="text-tx-2">Agenda de</span><span>{owner.name}</span></div>}
+        {owner && <div className="spread"><span className="text-tx-2">{shared ? 'Organiza' : 'Agenda de'}</span><span>{owner.name}</span></div>}
       </div>
+
+      {shared && (
+        <div className="mt-3">
+          <div className="label-k mb-1.5">Participantes</div>
+          <div className="flex flex-col gap-1.5">
+            {[owner, ...guests].filter((u): u is NonNullable<typeof u> => !!u).map(u => {
+              const listo = (event.doneBy ?? []).includes(u.id)
+              return (
+                <div key={u.id} className="flex items-center gap-2 rounded-[7px] border border-line bg-bg-1 px-2.5 py-1.5">
+                  <Avatar name={u.name} size={24} />
+                  <span className="flex-1 min-w-0 text-[12.5px] truncate">
+                    {u.name}
+                    {u.id === event.userId && <span className="meta"> · organiza</span>}
+                    {u.id === viewer && <span className="meta"> · tú</span>}
+                  </span>
+                  {listo
+                    ? <Badge color="var(--ok)" icon="check">Hecho</Badge>
+                    : <span className="meta">Pendiente</span>}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {event.notes && <div className="mt-3 text-[12.5px] text-tx-1 whitespace-pre-wrap">{event.notes}</div>}
       {creator && <div className="meta mt-3 flex items-center gap-2"><Avatar name={creator.name} size={22} /> Agendado por {creator.name}</div>}
@@ -264,16 +348,20 @@ function AgendaDetail({ event, onEdit, onClose, onOpenProject }: {
 /* ============================================================
    Tarjeta compacta de un evento
    ============================================================ */
-function EventCard({ event, onClick, compact }: { event: AgendaEvent; onClick: () => void; compact?: boolean }) {
+function EventCard({ event, viewerId, onClick, compact }: { event: AgendaEvent; viewerId?: string; onClick: () => void; compact?: boolean }) {
   const meta = KIND_META[event.kind]
   const linkLabel = useLinkLabel()(event)
+  // En las compartidas, "hecho" es de cada quien: se pinta según la agenda que se ve.
+  const done = agendaDoneFor(event, viewerId)
+  const shared = !!event.participants?.length
   return (
     <button onClick={onClick}
       className="w-full text-left rounded-[7px] border px-2.5 py-1.5 transition-colors hover:bg-bg-3 bg-bg-2"
-      style={{ borderColor: 'var(--line)', borderLeft: `3px solid ${meta.color}`, opacity: event.done ? 0.55 : 1 }}>
+      style={{ borderColor: 'var(--line)', borderLeft: `3px solid ${meta.color}`, opacity: done ? 0.55 : 1 }}>
       <div className="flex items-center gap-1.5 min-w-0">
         <span className="mono text-[11px] text-tx-2 shrink-0">{event.start}{event.end ? `–${event.end}` : ''}</span>
-        <span className={'text-[12.5px] truncate ' + (event.done ? 'line-through text-tx-2' : 'font-semibold text-tx-0')}>{event.title}</span>
+        <span className={'text-[12.5px] truncate ' + (done ? 'line-through text-tx-2' : 'font-semibold text-tx-0')}>{event.title}</span>
+        {shared && <span className="shrink-0 text-tx-3" title={`Compartida con ${event.participants!.length} persona(s)`}><Icon name="clients" size={12} /></span>}
       </div>
       {!compact && (event.location || linkLabel) && (
         <div className="meta mt-0.5 truncate flex items-center gap-1">
@@ -300,9 +388,10 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
   const [form, setForm] = React.useState<{ event?: AgendaEvent; kind: AgendaKind } | null>(null)
   const [detail, setDetail] = React.useState<AgendaEvent | null>(null)
 
-  // Eventos de la agenda que se está viendo.
+  // Eventos de la agenda que se está viendo: los propios MÁS aquellos a los que
+  // esa persona fue invitada por alguien más.
   const mine = React.useMemo(
-    () => state.agendaEvents.filter(e => e.userId === owner),
+    () => state.agendaEvents.filter(e => agendaIsFor(e, owner)),
     [state.agendaEvents, owner],
   )
   const forDay = React.useCallback((d: string) => mine.filter(e => e.date === d).sort(sortByTime), [mine])
@@ -316,7 +405,7 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
   const titulo = view === 'dia'
     ? fmtDate(date)
     : `${fmtDate(semana[0])} – ${fmtDate(semana[6])}`
-  const abiertos = dayEvents.filter(e => !e.done).length
+  const abiertos = dayEvents.filter(e => !agendaDoneFor(e, owner)).length
 
   return (
     <div>
@@ -364,7 +453,7 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
                   {String(h).padStart(2, '0')}:00
                 </div>
                 <div className="flex-1 min-w-0 p-1.5 min-h-[46px] flex flex-col gap-1.5">
-                  {items.map(e => <EventCard key={e.id} event={e} onClick={() => setDetail(e)} />)}
+                  {items.map(e => <EventCard key={e.id} event={e} viewerId={owner} onClick={() => setDetail(e)} />)}
                 </div>
               </div>
             )
@@ -373,7 +462,7 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
             <div className="border-t border-line bg-bg-1 p-2.5">
               <div className="label-k mb-1.5">Fuera del horario (9:00 – 20:00)</div>
               <div className="flex flex-col gap-1.5">
-                {offGrid.map(e => <EventCard key={e.id} event={e} onClick={() => setDetail(e)} />)}
+                {offGrid.map(e => <EventCard key={e.id} event={e} viewerId={owner} onClick={() => setDetail(e)} />)}
               </div>
             </div>
           )}
@@ -398,7 +487,7 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
                 <div className="p-1.5 flex flex-col gap-1.5 min-h-[160px]">
                   {items.length === 0
                     ? <div className="meta text-center mt-3">—</div>
-                    : items.map(e => <EventCard key={e.id} event={e} onClick={() => setDetail(e)} compact />)}
+                    : items.map(e => <EventCard key={e.id} event={e} viewerId={owner} onClick={() => setDetail(e)} compact />)}
                 </div>
               </div>
             )
@@ -412,7 +501,7 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
 
       {form && <AgendaForm event={form.event} kind={form.kind} date={date} ownerId={owner} onClose={() => setForm(null)} />}
       {detail && !form && (
-        <AgendaDetail event={detail} onOpenProject={onOpenProject}
+        <AgendaDetail event={detail} viewerId={owner} onOpenProject={onOpenProject}
           onEdit={() => { setForm({ event: detail, kind: detail.kind }); setDetail(null) }}
           onClose={() => setDetail(null)} />
       )}
@@ -423,10 +512,10 @@ export function AgendaPage({ onOpenProject }: { onOpenProject?: (p: Project) => 
 /* ============================================================
    Aviso EN EL MOMENTO: toast al llegar la hora de una anotación.
    Solo funciona con la app abierta (no son notificaciones del sistema).
-   Regla: se avisa de las anotaciones propias, de HOY, sin marcar como
-   hechas, cuya hora ya llegó Y que no habían pasado cuando se abrió la
-   app — así al entrar no salta un montón de avisos viejos (de eso se
-   encarga <AgendaTodayModal>).
+   Regla: se avisa de las anotaciones propias (o en las que uno está
+   invitado), de HOY, que uno no ha marcado como hechas, cuya hora ya llegó
+   Y que no habían pasado cuando se abrió la app — así al entrar no salta un
+   montón de avisos viejos (de eso se encarga <AgendaTodayModal>).
    ============================================================ */
 const TICK_MS = 15_000   // cada cuánto se revisa el reloj
 
@@ -452,7 +541,7 @@ export function AgendaAlerts({ onOpenAgenda }: { onOpenAgenda: () => void }) {
       if (hoy !== dayRef.current) { dayRef.current = hoy; sinceRef.current = '00:00' }
       const now = nowHHMM()
       const due = eventsRef.current.filter(e =>
-        e.userId === meRef.current && !e.done && e.date === hoy &&
+        agendaIsFor(e, meRef.current) && !agendaDoneFor(e, meRef.current) && e.date === hoy &&
         e.start <= now && e.start >= sinceRef.current && !alerted.current.has(e.id))
       if (!due.length) return
       due.forEach(e => alerted.current.add(e.id))
@@ -475,7 +564,7 @@ export function AgendaAlerts({ onOpenAgenda }: { onOpenAgenda: () => void }) {
   // Se resuelven contra el estado vivo: si se borra o se cierra en otro lado, el toast se va.
   const toasts = shown
     .map(id => state.agendaEvents.find(e => e.id === id))
-    .filter((e): e is AgendaEvent => !!e && !e.done)
+    .filter((e): e is AgendaEvent => !!e && !agendaDoneFor(e, me?.id))
 
   if (toasts.length === 0) return null
 
@@ -508,7 +597,7 @@ export function AgendaAlerts({ onOpenAgenda }: { onOpenAgenda: () => void }) {
               </div>
               <div className="flex gap-2.5 px-5 pb-5">
                 <button className="btn btn-ghost flex-1" onClick={() => { onOpenAgenda(); dismiss(e.id) }}>Ver agenda</button>
-                <button className="btn btn-primary flex-1" onClick={() => { dispatch({ type: 'TOGGLE_AGENDA_DONE', id: e.id }); dismiss(e.id) }}>
+                <button className="btn btn-primary flex-1" onClick={() => { dispatch({ type: 'TOGGLE_AGENDA_DONE', id: e.id, userId: me?.id }); dismiss(e.id) }}>
                   <Icon name="check" size={15} /> Hecho
                 </button>
               </div>
@@ -533,11 +622,11 @@ export function AgendaTodayModal({ onOpenAgenda }: { onOpenAgenda: () => void })
   const linkLabel = useLinkLabel()
 
   const hoy = React.useMemo(
-    () => state.agendaEvents.filter(e => e.userId === me?.id && e.date === TODAY_ISO && !e.done).sort(sortByTime),
+    () => state.agendaEvents.filter(e => agendaIsFor(e, me?.id) && e.date === TODAY_ISO && !agendaDoneFor(e, me?.id)).sort(sortByTime),
     [state.agendaEvents, me?.id],
   )
   const vencidos = React.useMemo(
-    () => state.agendaEvents.filter(e => e.userId === me?.id && e.date < TODAY_ISO && !e.done)
+    () => state.agendaEvents.filter(e => agendaIsFor(e, me?.id) && e.date < TODAY_ISO && !agendaDoneFor(e, me?.id))
       .sort((a, b) => b.date.localeCompare(a.date) || sortByTime(a, b)),
     [state.agendaEvents, me?.id],
   )
@@ -563,6 +652,8 @@ export function AgendaTodayModal({ onOpenAgenda }: { onOpenAgenda: () => void })
   const fila = (e: AgendaEvent, vencido?: boolean) => {
     const meta = KIND_META[e.kind]
     const link = linkLabel(e)
+    // Si me invitaron a la anotación de alguien más, se dice de quién es.
+    const organiza = e.userId !== me?.id ? state.users.find(u => u.id === e.userId)?.name : undefined
     return (
       <div key={e.id} className="flex items-start gap-2.5 px-3 py-2.5 border-b border-line-soft last:border-b-0">
         <span className="mt-0.5 shrink-0" style={{ color: meta.color }}><Icon name={meta.icon} size={15} /></span>
@@ -575,6 +666,7 @@ export function AgendaTodayModal({ onOpenAgenda }: { onOpenAgenda: () => void })
             {vencido && <><span className="text-tx-3">·</span><span style={{ color: 'var(--danger)' }}>{fmtDate(e.date)}</span></>}
             {e.location && <><span className="text-tx-3">·</span><span className="inline-flex items-center gap-1"><Icon name="pin" size={11} /> {e.location}</span></>}
             {link && <><span className="text-tx-3">·</span><span>{link}</span></>}
+            {organiza && <><span className="text-tx-3">·</span><span className="inline-flex items-center gap-1"><Icon name="clients" size={11} /> {organiza}</span></>}
           </div>
         </div>
       </div>

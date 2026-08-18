@@ -531,6 +531,8 @@ function mapAgendaEvent(r: any): AgendaEvent {
     id: r.id, userId: r.user_id ?? '', kind: r.kind ?? 'pendiente', title: r.title ?? '',
     date: r.date ?? '', start: r.start_time ?? '09:00', done: !!r.done,
     createdAt: r.created_at ?? new Date().toISOString(),
+    ...(Array.isArray(r.participants) && r.participants.length ? { participants: r.participants as string[] } : {}),
+    ...(Array.isArray(r.done_by) && r.done_by.length ? { doneBy: r.done_by as string[] } : {}),
     ...(r.end_time ? { end: r.end_time } : {}),
     ...(r.location ? { location: r.location } : {}),
     ...(r.notes ? { notes: r.notes } : {}),
@@ -545,6 +547,7 @@ function agendaEventRow(e: AgendaEvent): Record<string, unknown> {
     start_time: e.start, end_time: e.end ?? null, location: e.location ?? null,
     notes: e.notes ?? null, done: e.done, link_kind: e.linkKind ?? null,
     link_id: e.linkId ?? null, created_by: e.createdBy ?? null, created_at: e.createdAt,
+    participants: e.participants ?? [], done_by: e.doneBy ?? [],
   }
 }
 export async function fetchAgendaEvents(): Promise<AgendaEvent[]> {
