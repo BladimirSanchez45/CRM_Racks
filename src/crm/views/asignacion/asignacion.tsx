@@ -134,6 +134,7 @@ export function AsignacionPage() {
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin asignar/editar
   const [assign, setAssign] = React.useState<Project | null>(null)
   const [f, setF] = React.useState('')   // '', 'sin', 'over'
+  const [q, setQ] = React.useState('')   // búsqueda libre por proyecto
 
   // El presupuesto y el costo asignado de cada proyecto.
   const rows = state.projects
@@ -145,6 +146,14 @@ export function AsignacionPage() {
       return { p, budget, cost, assigned, over }
     })
     .filter(r => f === '' ? true : f === 'sin' ? !r.assigned : r.over)
+    .filter(({ p }) => {
+      if (!q.trim()) return true
+      const fSup = p.freightSupplierId ? sel.supplier(state, p.freightSupplierId) : undefined
+      const iSup = p.installSupplierId ? sel.supplier(state, p.installSupplierId) : undefined
+      const hay = [p.code, sel.clientName(state, p.client), p.alias || '', p.city, fSup?.name || '', iSup?.name || '']
+        .join(' ').toLowerCase()
+      return hay.includes(q.trim().toLowerCase())
+    })
     .sort((a, b) => (a.p.created < b.p.created ? 1 : -1))
 
   const totalBudget = state.projects.reduce((a, p) => a + (p.freight || 0) + (p.install || 0), 0)
@@ -166,12 +175,18 @@ export function AsignacionPage() {
       </div>
 
       <div className="flex gap-2 mb-3.5 items-center flex-wrap">
+        <div className="relative flex-[1_1_240px] max-w-[320px]">
+          <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+          <input className="input pl-[34px]" placeholder="Buscar proyecto, cliente, ciudad, proveedor…" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
         <span className="label-k">Filtrar:</span>
         <div className="seg">
           <button className={!f ? 'on' : ''} onClick={() => setF('')}>Todos</button>
           <button className={f === 'sin' ? 'on' : ''} onClick={() => setF('sin')}>Sin asignar</button>
           <button className={f === 'over' ? 'on' : ''} onClick={() => setF('over')}>Sobre presupuesto</button>
         </div>
+        {(q || f) && <button className="btn btn-ghost btn-sm" onClick={() => { setQ(''); setF('') }}><Icon name="close" size={13} /> Limpiar</button>}
+        <span className="flex-1"></span>
         <span className="meta">{rows.length} de {state.projects.length}</span>
       </div>
 
