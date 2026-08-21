@@ -199,6 +199,116 @@ export async function printOC(state: AppState, o: Order, items: OcItem[]) {
   window.open(URL.createObjectURL(blob), '_blank')
 }
 
+/* ---- Estado de cuenta por proveedor (PDF): mismas columnas que la tabla de OC
+   (folio, fecha, descripción, condiciones, monto, pagado, saldo, %, estatus) para
+   las OC recibidas, más los totales del proveedor. Mismo estilo que la OC. ---- */
+export async function buildEstadoCuentaPdf(state: AppState, supplierId: string, orders: Order[]): Promise<Blob> {
+  const supplier = sel.supplier(state, supplierId)
+  const money = (n: number) => '$' + (n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const logo = await loadImage(window.location.origin + '/ccracks_logo.png')
+
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+  const W = doc.internal.pageSize.getWidth()
+  const H = doc.internal.pageSize.getHeight()
+  const M = 14
+  const BLUE: [number, number, number] = [23, 58, 138]
+  const RED: [number, number, number] = [192, 57, 43]
+
+  // ---- Encabezado (logo más grande; fecha alineada al título) ----
+  let y = M
+  if (logo) {
+    const h = 38, w = h * (logo.naturalWidth / logo.naturalHeight)
+    doc.addImage(logo, 'PNG', M, y, w, h)
+  }
+  doc.setFont('helvetica', 'bolditalic'); doc.setTextColor(...BLUE); doc.setFontSize(21)
+  doc.text('ESTADO DE CUENTA', W / 2, y + 22, { align: 'center' })
+  doc.setFontSize(10); doc.setTextColor(30)
+  doc.setFont('helvetica', 'bold'); doc.text('FECHA:', W - M - 46, y + 22)
+  doc.setFont('helvetica', 'normal'); doc.text(fmtDate(TODAY_ISO), W - M, y + 22, { align: 'right' })
+  y += 44
+
+  const bar = (label: string) => {
+    doc.setFillColor(...RED); doc.rect(M, y, W - 2 * M, 6, 'F')
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(10)
+    doc.text(label, W / 2, y + 4.2, { align: 'center' })
+    y += 9
+  }
+  const row = (k: string, v: string, k2?: string, v2?: string) => {
+    doc.setFontSize(9.5)
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(30); doc.text(k, M, y)
+    doc.setFont('helvetica', 'italic'); doc.setTextColor(...BLUE); doc.text(v || '', M + 32, y)
+    if (k2) {
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(30); doc.text(k2, W - M - 60, y)
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(30); doc.text(v2 || '', W - M - 40, y)
+    }
+    y += 5.5
+  }
+
+  bar('PROVEEDOR')
+  row('Proveedor:', supplier ? supplier.name : '—', 'Telefono:', supplier ? supplier.phone : '')
+  if (supplier && supplier.direccion) row('Direccion:', supplier.direccion)
+  y += 2
+
+  // ---- Marca de agua tenue detrás de la tabla ----
+  const tableStart = y
+  if (logo) {
+    try {
+      const GS = (doc as unknown as { GState?: new (o: object) => unknown }).GState
+      const setGS = (doc as unknown as { setGState: (g: unknown) => void }).setGState
+      if (GS) setGS(new GS({ opacity: 0.07 }))
+      const ww = 120, wh = ww * (logo.naturalHeight / logo.naturalWidth)
+      doc.addImage(logo, 'PNG', (W - ww) / 2, tableStart + 26, ww, wh)
+      if (GS) setGS(new GS({ opacity: 1 }))
+    } catch { /* sin marca de agua si no hay soporte de opacidad */ }
+  }
+
+  // ---- Tabla de OC del proveedor (ordenadas por fecha) ----
+  const list = [...orders].sort((a, b) => (a.date < b.date ? -1 : 1))
+  const totalOC = list.reduce((a, o) => a + o.amount, 0)
+  const totalPaid = list.reduce((a, o) => a + sel.ocPaid(state, o.id), 0)
+  const body: string[][] = list.length
+    ? list.map(o => [
+        o.number,
+        fmtDateShort(o.date),
+        ocDesc(state, o),
+        o.conditions || '',
+        money(o.amount),
+        money(sel.ocPaid(state, o.id)),
+        money(sel.ocBalance(state, o)),
+      ])
+    : [['', '', '— Sin órdenes de compra —', '', '', '', '']]
+  autoTable(doc, {
+    startY: tableStart,
+    head: [['OC', 'Fecha', 'Descripcion', 'Condiciones', 'Monto', 'Pagado', 'Saldo']],
+    body,
+    theme: 'grid',
+    styles: { fontSize: 7.5, cellPadding: 1.4, lineColor: [216, 221, 228], textColor: 30, fillColor: false as unknown as undefined, overflow: 'linebreak' },
+    headStyles: { fillColor: BLUE, textColor: 255, halign: 'center', fontStyle: 'bold', fontSize: 7.5 },
+    columnStyles: {
+      0: { cellWidth: 22 }, 1: { halign: 'center', cellWidth: 16 },
+      4: { halign: 'right', cellWidth: 23 }, 5: { halign: 'right', cellWidth: 23 }, 6: { halign: 'right', cellWidth: 23 },
+    },
+    margin: { left: M, right: M },
+  })
+
+  // ---- Totales (caja inferior derecha) ----
+  let fy = ((doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY) + 7
+  if (fy > H - 40) { doc.addPage(); fy = M + 6 }
+  const boxX = W - M - 70
+  doc.setFontSize(9.5); doc.setTextColor(30)
+  const totRow = (label: string, val: string, bold = false) => {
+    doc.setFont('helvetica', bold ? 'bold' : 'normal')
+    doc.text(label, boxX, fy); doc.text(val, W - M, fy, { align: 'right' })
+    fy += 5.5
+  }
+  totRow(`Total OC (${list.length})`, money(totalOC))
+  totRow('Total pagado', money(totalPaid))
+  doc.setDrawColor(...BLUE); doc.setLineWidth(0.4); doc.line(boxX, fy - 3.5, W - M, fy - 3.5)
+  doc.setFontSize(11); totRow('SALDO', money(totalOC - totalPaid), true)
+
+  return doc.output('blob')
+}
+
 /* ============================================================
    Formulario de abono
    ============================================================ */
@@ -759,6 +869,26 @@ export function OrdersPage() {
   const statusCounts = OC_STATES.map(s => ({ s, n: kpiBase.filter(o => ocStatusOf(o) === s).length }))
   const maxCount = Math.max(1, ...statusCounts.map(c => c.n))
 
+  // Estado de cuenta del proveedor filtrado: descarga un PDF con las OC que se
+  // ven en la tabla (respeta también estatus/búsqueda) y sus totales.
+  const [genEdoCta, setGenEdoCta] = React.useState(false)
+  const downloadEstadoCuenta = async () => {
+    if (!fSupplier || genEdoCta) return
+    setGenEdoCta(true)
+    try {
+      const blob = await buildEstadoCuentaPdf(state, fSupplier, list)
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `EstadoCuenta_${(supplierName || 'proveedor').replace(/[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/g, '_')}_${TODAY_ISO}.pdf`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      alert('No se pudo generar el estado de cuenta: ' + (e instanceof Error ? e.message : 'error desconocido'))
+    } finally {
+      setGenEdoCta(false)
+    }
+  }
+
   const openOcForProject = (project: Project, sid: string) => {
     setAssignProj(null)
     setForm({ projectId: project.id, supplierId: sid, description: `${project.code} · ${sel.clientName(state, project.client)}`, responsible: sel.sellerName(state, project.seller), deliveryDate: project.eta })
@@ -840,6 +970,7 @@ export function OrdersPage() {
               <option value="">Todos los proveedores</option>
               {supplierOpts.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
+            {fSupplier && <button className="btn btn-ghost btn-sm" disabled={genEdoCta} onClick={downloadEstadoCuenta} title={`Descarga el estado de cuenta en PDF de ${supplierName}`}><Icon name="download" size={13} /> {genEdoCta ? 'Generando…' : 'Estado de cuenta'}</button>}
             {(fStatus || fSupplier || q || sort.dir !== 0) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier(''); setQ(''); setSort({ key: '', dir: 0 }) }}><Icon name="close" size={13} /> Limpiar</button>}
             <span className="meta">{list.length} de {orders.length}</span>
           </div>
