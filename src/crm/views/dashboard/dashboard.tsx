@@ -97,7 +97,7 @@ function SalesGoalCard() {
   const monthName = MESES_L[TODAY.getMonth()]
   const meta = sel.salesGoal(state, monthPrefix)
 
-  // Vendedores que participan de la meta (sin gerentes de ventas).
+  // Vendedores que participan de la meta (todo el equipo, gerentes incluidos).
   const vendedores = sel.vendedoresMeta(state)
   const idsVendedores = new Set(vendedores.map(v => v.id))
   // Meta personal: la meta del mes repartida en partes iguales entre el equipo.

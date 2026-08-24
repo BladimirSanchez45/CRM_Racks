@@ -77,9 +77,9 @@ export const isVentasRole = (role?: Role | null) => role === 'ventas'
 export const isLogisticaRole = (role?: Role | null) => role === 'logistica'
 /** Rol Dirección: acceso de solo lectura a proyectos, OC, pagos, cobranza y pagos internos. */
 export const isDireccion = (role?: Role | null) => role === 'direccion'
-/** Gerentes de ventas (por correo): registran ventas pero NO compiten en la meta
- *  del equipo (fuera de las gráficas y del reparto); administran la meta mensual
- *  y ven el desglose de ventas por vendedor (vista "Metas de venta"). */
+/** Gerentes de ventas (por correo): administran la meta mensual y ven el desglose
+ *  de ventas por vendedor (vista "Metas de venta"). Participan en la meta y en las
+ *  gráficas como cualquier otro vendedor (ver sel.vendedoresMeta). */
 export const SALES_MANAGER_EMAILS = ['jcastaneda@ccracksmexico.com']
 export const isSalesManager = (u?: { email?: string } | null) =>
   !!u?.email && SALES_MANAGER_EMAILS.includes(u.email.toLowerCase())
@@ -1469,9 +1469,10 @@ export const sel = {
   projectsForClient: (state: AppState, cid: string) => state.projects.filter(p => p.client === cid),
   projectByCode: (state: AppState, code: string) => state.projects.find(p => p.code === code),
   budget: (p: Pick<Project, 'freight' | 'install'>) => (p.freight || 0) + (p.install || 0),
-  /** Vendedores que participan de la meta mensual (excluye gerentes de ventas). */
-  vendedoresMeta: (state: AppState) =>
-    sel.vendedores(state).filter(v => !isSalesManager(state.users.find(x => x.id === v.id))),
+  /** Vendedores que participan de la meta mensual (reparto, barras y totales).
+   *  Hoy son TODOS los vendedores, gerentes incluidos; si algún día alguien deja
+   *  de contar, este es el único lugar que hay que filtrar. */
+  vendedoresMeta: (state: AppState) => sel.vendedores(state),
   /** Meta de ventas de un mes ('YYYY-MM'): la capturada para ese mes o, si no
    *  hay, la del mes anterior más reciente con meta (o el default). Así solo se
    *  captura cuando la meta CAMBIA y los meses pasados conservan la suya. */
