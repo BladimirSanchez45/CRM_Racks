@@ -662,6 +662,7 @@ export async function fetchSettings(): Promise<AppSettings> {
       M: Number(wh?.M ?? WAREHOUSE_DAYS_DEFAULT.M),
       L: Number(wh?.L ?? WAREHOUSE_DAYS_DEFAULT.L),
     },
+    salesGoals: Object.fromEntries(Object.entries((map['sales_goals'] as Record<string, unknown>) ?? {}).map(([k, v]) => [k, Number(v)])),
   }
 }
 export const saveSetting = (key: string, value: unknown) =>

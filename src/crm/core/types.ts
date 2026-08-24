@@ -326,7 +326,12 @@ export interface AppSettings {
   bankBalance: number       // saldo de la cuenta bancaria (manual) — en desuso (cada lista guarda el suyo)
   /** Días de trabajo por talla de almacén (Chico / Mediano / Grande). */
   whDays: WarehouseDays
+  /** Metas de ventas por mes ('YYYY-MM' → subtotal sin IVA). Editable por admin.
+   *  Un mes sin meta capturada hereda la del mes anterior más reciente (o el default). */
+  salesGoals: Record<string, number>
 }
+
+export const SALES_GOAL_DEFAULT = 6_400_000
 
 /** Referencia a un documento adjunto. `path` = ruta en Supabase Storage. */
 export interface DocRef {
@@ -733,6 +738,8 @@ export type Action =
   | { type: 'REMOVE_FROM_WAREHOUSE'; id: string }
   // Días de trabajo por talla (Administración).
   | { type: 'SAVE_WAREHOUSE_DAYS'; days: WarehouseDays }
+  // Meta de ventas de UN mes ('YYYY-MM'); la edita admin desde el panel.
+  | { type: 'SAVE_SALES_GOAL'; month: string; goal: number }
   | { type: 'SAVE_AGENDA_EVENT'; event: AgendaEventInput }
   | { type: 'DELETE_AGENDA_EVENT'; id: string }
   | { type: 'TOGGLE_AGENDA_DONE'; id: string; userId?: string }   // userId: en qué agenda se marca (compartidas); por defecto, la propia

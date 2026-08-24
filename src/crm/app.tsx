@@ -2,7 +2,7 @@
 //  APP SHELL — sidebar, topbar, routing, tweaks
 // ============================================================
 import * as React from 'react'
-import { StoreProvider, useStore, isAdminRole, isSuperadmin, isDireccion, roleLabel } from './core/data'
+import { StoreProvider, useStore, isAdminRole, isSuperadmin, isDireccion, isSalesManager, roleLabel } from './core/data'
 import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { DueSoonModal } from './views/projects/due_soon'
@@ -25,6 +25,7 @@ import { RemisionesPage } from './views/remisiones/remisiones'
 import { InternalPaymentsPage } from './views/internal_payments/internal_payments'
 import { MovementsPage } from './views/movements/movements'
 import { EstadisticasPage } from './views/estadisticas/estadisticas'
+import { SalesStatsPage } from './views/ventas_stats/ventas_stats'
 import { CampaignsPage } from './views/campaigns/campaigns'
 import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
@@ -35,14 +36,14 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'agenda' | 'almacen' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'campaigns' | 'admin' | 'settings'
+type Route = 'dashboard' | 'agenda' | 'almacen' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
 // queden sin ítems visibles (por el rol) se ocultan solas. `SECTIONS` define el orden.
 const SECTIONS = ['General', 'Comercial', 'Marketing', 'Compras', 'Logística', 'Finanzas'] as const
 type Section = typeof SECTIONS[number]
-const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; section: Section }[] = [
+const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; salesManager?: boolean; section: Section }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
   // OJO: 'agenda' NO va aquí a propósito: se entra desde el botón del topbar
   // (junto al de modo oscuro). Sí sigue listada en ROLE_ROUTES porque esa lista
@@ -50,6 +51,9 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   // Estadísticas por origen y Campañas: admin/superadmin, Marketing y Dirección (solo lectura).
   { id: 'estadisticas', label: 'Estadísticas', icon: 'trendUp', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
   { id: 'campaigns',   label: 'Campañas',     icon: 'layers', roles: ['admin', 'superadmin', 'marketing', 'direccion'], section: 'Marketing' },
+  // Metas de venta: desglose mensual por vendedor. Admin/dirección y, aunque su rol
+  // sea ventas, los gerentes de ventas (salesManager, por correo).
+  { id: 'ventas_stats', label: 'Metas de venta', icon: 'trendUp', roles: ['admin', 'superadmin', 'direccion'], salesManager: true, section: 'Comercial' },
   { id: 'prospectos',  label: 'Prospectos',   icon: 'clients',     section: 'Comercial' },
   { id: 'perdidos',    label: 'Perdidos',     icon: 'eyeOff',      section: 'Comercial' },
   { id: 'projects',    label: 'Proyectos',    icon: 'kanban',      section: 'Comercial' },
@@ -81,7 +85,7 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // Admin: todo MENOS Prospectos/Perdidos (comercial de ventas) y
   // Asignación/Remisiones (operación de logística). El superadmin sí ve todo.
   admin: [
-    'dashboard', 'agenda', 'estadisticas', 'campaigns',
+    'dashboard', 'agenda', 'estadisticas', 'ventas_stats', 'campaigns',
     'projects', 'historial', 'clients', 'commissions',
     'suppliers', 'orders', 'almacen',
     'payments', 'cobranza', 'internal_payments', 'movements',
@@ -90,7 +94,10 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // Almacén: SOLO su cola de trabajo (+ panel recortado, agenda y configuración).
   // Nada de proyectos, pagos, comisiones ni movimientos.
   almacen: ['dashboard', 'almacen', 'agenda', 'settings'],
-  ventas: ['dashboard', 'agenda', 'prospectos', 'perdidos', 'projects', 'orders', 'settings'],
+  // 'ventas_stats' va en la lista para que el GERENTE de ventas (rol ventas +
+  // salesManager) pueda navegarla; a los vendedores normales el menú no se las
+  // muestra y la página misma los regresa al Panel.
+  ventas: ['dashboard', 'agenda', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
   logistica: ['dashboard', 'agenda', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'settings'],
@@ -112,7 +119,7 @@ const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', agenda: 'Agenda', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', almacen: 'Almacén', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
-  estadisticas: 'Estadísticas por origen', campaigns: 'Campañas',
+  estadisticas: 'Estadísticas por origen', ventas_stats: 'Metas de venta', campaigns: 'Campañas',
   admin: 'Administración', settings: 'Configuración',
 }
 
@@ -147,7 +154,8 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
   }
   const allowed = allowedRoutes(me?.role)
   const nav = NAV.filter(n => {
-    if (n.roles) return me?.role ? n.roles.includes(me.role) : false   // whitelist explícita de roles
+    // whitelist explícita de roles; `salesManager` la extiende al gerente de ventas (por correo)
+    if (n.roles) return (me?.role ? n.roles.includes(me.role) : false) || (!!n.salesManager && isSalesManager(me))
     if (n.adminOnly) return isAdminRole(me?.role)
     return allowed ? allowed.includes(n.id) : true
   })
@@ -250,6 +258,8 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'clients':     return <ClientsPage onOpenProject={onOpenProject} />
       case 'commissions': return <CommissionsPage />
       case 'estadisticas': return <EstadisticasPage />
+      // Metas de venta: admin/dirección y el gerente de ventas; un vendedor normal cae al Panel.
+      case 'ventas_stats': return (isAdminRole(me?.role) || isDireccion(me?.role) || isSalesManager(me)) ? <SalesStatsPage onOpenProject={onOpenProject} /> : <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'campaigns':   return <CampaignsPage />
       case 'settings':    return <SettingsPage />
       case 'admin':       return isAdminRole(me?.role) ? <AdminPage /> : <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />

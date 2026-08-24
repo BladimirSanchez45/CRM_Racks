@@ -32,7 +32,7 @@ import type {
   WarehouseItem,
   WarehouseSize,
 } from './types'
-import { WAREHOUSE_DAYS_DEFAULT } from './types'
+import { WAREHOUSE_DAYS_DEFAULT, SALES_GOAL_DEFAULT } from './types'
 import {
   fetchMyProfile, signOut, loadAll,
   touchActivity, clearActivity, inactivityExpired,
@@ -77,6 +77,12 @@ export const isVentasRole = (role?: Role | null) => role === 'ventas'
 export const isLogisticaRole = (role?: Role | null) => role === 'logistica'
 /** Rol Dirección: acceso de solo lectura a proyectos, OC, pagos, cobranza y pagos internos. */
 export const isDireccion = (role?: Role | null) => role === 'direccion'
+/** Gerentes de ventas (por correo): registran ventas pero NO compiten en la meta
+ *  del equipo (fuera de las gráficas y del reparto); administran la meta mensual
+ *  y ven el desglose de ventas por vendedor (vista "Metas de venta"). */
+export const SALES_MANAGER_EMAILS = ['jcastaneda@ccracksmexico.com']
+export const isSalesManager = (u?: { email?: string } | null) =>
+  !!u?.email && SALES_MANAGER_EMAILS.includes(u.email.toLowerCase())
 /** Rol Ingeniería: por ahora SOLO ve proyectos (solo lectura). Se ampliará después. */
 export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 /** Rol Marketing: por ahora SOLO ve el módulo de Estadísticas por origen (solo lectura). */
@@ -258,7 +264,7 @@ const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
   movementLists: [], movements: [], campaigns: [], prospects: [], agendaEvents: [], warehouse: [],
-  settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT },
+  settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {} },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
@@ -1237,6 +1243,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'SET_SETTINGS', settings })
         persist([() => saveSetting('wh_days', action.days)]); return
       }
+      case 'SAVE_SALES_GOAL': {
+        const salesGoals = { ...s.settings.salesGoals, [action.month]: action.goal }
+        rawDispatch({ type: 'SET_SETTINGS', settings: { ...s.settings, salesGoals } })
+        persist([() => saveSetting('sales_goals', salesGoals)]); return
+      }
 
       /* ---- Agenda personal ---- */
       case 'SAVE_AGENDA_EVENT': {
@@ -1458,6 +1469,18 @@ export const sel = {
   projectsForClient: (state: AppState, cid: string) => state.projects.filter(p => p.client === cid),
   projectByCode: (state: AppState, code: string) => state.projects.find(p => p.code === code),
   budget: (p: Pick<Project, 'freight' | 'install'>) => (p.freight || 0) + (p.install || 0),
+  /** Vendedores que participan de la meta mensual (excluye gerentes de ventas). */
+  vendedoresMeta: (state: AppState) =>
+    sel.vendedores(state).filter(v => !isSalesManager(state.users.find(x => x.id === v.id))),
+  /** Meta de ventas de un mes ('YYYY-MM'): la capturada para ese mes o, si no
+   *  hay, la del mes anterior más reciente con meta (o el default). Así solo se
+   *  captura cuando la meta CAMBIA y los meses pasados conservan la suya. */
+  salesGoal: (state: AppState, ym: string) => {
+    const g = state.settings.salesGoals
+    if (g[ym] != null) return g[ym]
+    const prev = Object.keys(g).filter(k => k < ym).sort().pop()
+    return prev ? g[prev] : SALES_GOAL_DEFAULT
+  },
   /* ---- Almacén ---- */
   /** Cola ACTIVA (por iniciar + en proceso), en el orden que definió almacén. */
   warehouseQueue: (state: AppState) => state.warehouse.filter(w => w.status !== 'listo').sort(byWhPosition),
