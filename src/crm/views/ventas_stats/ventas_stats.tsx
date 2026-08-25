@@ -72,6 +72,12 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   const vendedores = sel.vendedoresMeta(state)
   const idsVendedores = React.useMemo(() => new Set(vendedores.map(v => v.id)), [vendedores])
 
+  // Filtro por vendedor ('' = todo el equipo). Acota KPIs, tendencia, sistema,
+  // tablas y Excel a ese vendedor; las barras del equipo quedan como contexto.
+  const [sellerId, setSellerId] = React.useState('')
+  const vendedorSel = sellerId ? vendedores.find(v => v.id === sellerId) : undefined
+  const esMio = (x: { seller: string }) => !sellerId || x.seller === sellerId
+
   // Primer mes con ventas registradas (piso de la navegación por mes).
   const minYm = React.useMemo(() => {
     const months = state.projects.filter(p => idsVendedores.has(p.seller)).map(p => p.created.slice(0, 7))
@@ -89,18 +95,24 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
       .sort((a, b) => b.created.localeCompare(a.created)),
     [state.projects, ym, idsVendedores])
   const vendido = ventasMes.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
-  const falta = Math.max(0, meta - vendido)
-  const nVentas = ventasMes.length
-  const ticket = nVentas > 0 ? vendido / nVentas : 0
   const pctVendido = meta > 0 ? (vendido / meta) * 100 : 0
+
+  // Valores que alimentan KPIs y tablas: del vendedor elegido o del equipo.
+  const ventasSel = ventasMes.filter(esMio)
+  const metaSel = vendedorSel ? metaPersonal : meta
+  const vendidoSel = ventasSel.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
+  const faltaSel = Math.max(0, metaSel - vendidoSel)
+  const nVentas = ventasSel.length
+  const ticket = nVentas > 0 ? vendidoSel / nVentas : 0
+  const pctSel = metaSel > 0 ? (vendidoSel / metaSel) * 100 : 0
 
   // Por cerrar (solo tiene sentido en el mes en curso): prospectos cotizados o en
   // negociación sin desenlace, más los Vendido aún sin registrar como proyecto.
-  const abiertos = isCurrent ? state.prospects.filter(pr => idsVendedores.has(pr.seller) && (
+  const abiertos = isCurrent ? state.prospects.filter(pr => idsVendedores.has(pr.seller) && esMio(pr) && (
     (pr.resultado === 'En espera' && (pr.estado === 'Cotizado' || pr.estado === 'Negociación')) ||
     (pr.resultado === 'Vendido' && !pr.convertedProjectId))) : []
   const porCerrar = abiertos.reduce((a, pr) => a + (pr.costo || 0), 0)
-  const proyeccion = vendido + porCerrar
+  const proyeccion = vendidoSel + porCerrar
 
   // Desglose por vendedor, ordenado por total (el orden fija el color en las gráficas).
   const porVendedor = React.useMemo(() => vendedores
@@ -115,12 +127,12 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   // Ventas por sistema vendido (para la dona derecha).
   const porSistema = React.useMemo(() => {
     const map = new Map<string, number>()
-    for (const p of ventasMes) {
+    for (const p of ventasMes.filter(esMio)) {
       const k = p.sistemaVendido?.trim() || 'Sin sistema'
       map.set(k, (map.get(k) || 0) + (p.ventaSubtotal || 0))
     }
     return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value)
-  }, [ventasMes])
+  }, [ventasMes, sellerId])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tendencia: últimos 12 meses (o desde el primer mes con datos).
   const trend = React.useMemo(() => {
@@ -130,11 +142,12 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     return months.map(m => ({
       m,
       total: state.projects
-        .filter(p => p.created.startsWith(m) && idsVendedores.has(p.seller))
+        .filter(p => p.created.startsWith(m) && idsVendedores.has(p.seller) && esMio(p))
         .reduce((a, p) => a + (p.ventaSubtotal || 0), 0),
-      meta: sel.salesGoal(state, m),
+      // Con vendedor elegido, su meta personal de cada mes (meta del mes ÷ equipo).
+      meta: sellerId && vendedores.length > 0 ? sel.salesGoal(state, m) / vendedores.length : sel.salesGoal(state, m),
     }))
-  }, [state, currentYm, minYm, idsVendedores])
+  }, [state, currentYm, minYm, idsVendedores, sellerId])   // eslint-disable-line react-hooks/exhaustive-deps
   const maxTrend = Math.max(1, ...trend.map(t => Math.max(t.total, t.meta)))
 
   // Edición de la meta del MES ELEGIDO (gerente de ventas y admin).
@@ -147,14 +160,16 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   }
 
   const exportar = () => exportVentasExcel({
-    ym, ymLabel: ymLabel(ym), hoy: TODAY_ISO, meta, vendido,
-    vendedores: porVendedor.map(r => ({
+    ym: vendedorSel ? `${ym}_${vendedorSel.name.replace(/\s+/g, '_')}` : ym,
+    ymLabel: vendedorSel ? `${ymLabel(ym)} · ${vendedorSel.name}` : ymLabel(ym),
+    hoy: TODAY_ISO, meta: metaSel, vendido: vendidoSel,
+    vendedores: porVendedor.filter(r => esMio({ seller: r.v.id })).map(r => ({
       vendedor: r.v.name, ventas: r.n, total: r.total,
       ticket: r.n > 0 ? r.total / r.n : 0, metaPersonal,
       pctMeta: metaPersonal > 0 ? (r.total / metaPersonal) * 100 : 0,
       pctEquipo: vendido > 0 ? (r.total / vendido) * 100 : 0,
     })),
-    rows: ventasMes.map(p => ({
+    rows: ventasSel.map(p => ({
       fecha: p.created.slice(0, 10), proyecto: p.code,
       cliente: sel.clientName(state, p.client), vendedor: sel.sellerName(state, p.seller),
       sistema: p.sistemaVendido || '', origen: p.origen || '',
@@ -167,6 +182,11 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     <div>
       <SecTitle title="Metas de venta" sub="Desglose mensual por vendedor" right={
         <div className="flex items-center gap-2">
+          {/* Filtro por vendedor */}
+          <select className="select text-[12px] py-1 px-2 w-[170px]" value={sellerId} onChange={e => setSellerId(e.target.value)} title="Filtrar por vendedor">
+            <option value="">Todo el equipo</option>
+            {vendedores.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+          </select>
           {/* Navegación por mes */}
           <button className="btn btn-ghost btn-sm" disabled={ym <= minYm} onClick={() => setYm(ymAdd(ym, -1))} title="Mes anterior">
             <Icon name="chevron" size={14} className="rotate-180" />
@@ -196,9 +216,9 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
 
       {/* KPIs del mes */}
       <div className="grid grid-cols-4 gap-3.5 mb-5">
-        <KPI label="Meta del mes" value={meta} format={fmtMoney} icon="flag" accent foot={`${fmtK(metaPersonal)} por vendedor (${vendedores.length})`} delay={0} />
-        <KPI label="Vendido" value={vendido} format={fmtMoney} icon="money" foot={`${pctVendido.toFixed(1)}% de la meta`} footTrend={pctVendido >= 100 ? 'up' : undefined} delay={60} />
-        <KPI label={falta > 0 ? 'Falta para la meta' : 'Meta superada por'} value={falta > 0 ? falta : vendido - meta} format={fmtMoney} icon={falta > 0 ? 'alert' : 'check'} footTrend={falta > 0 ? 'dn' : 'up'} foot={isCurrent && porCerrar > 0 ? `Proyección ${fmtK(proyeccion)} con por cerrar` : falta > 0 ? 'Contra lo vendido' : '¡Felicidades al equipo!'} delay={120} />
+        <KPI label={vendedorSel ? `Meta personal · ${vendedorSel.name}` : 'Meta del mes'} value={metaSel} format={fmtMoney} icon="flag" accent foot={vendedorSel ? `Meta del equipo ${fmtK(meta)}` : `${fmtK(metaPersonal)} por vendedor (${vendedores.length})`} delay={0} />
+        <KPI label="Vendido" value={vendidoSel} format={fmtMoney} icon="money" foot={`${pctSel.toFixed(1)}% de ${vendedorSel ? 'su meta' : 'la meta'}`} footTrend={pctSel >= 100 ? 'up' : undefined} delay={60} />
+        <KPI label={faltaSel > 0 ? 'Falta para la meta' : 'Meta superada por'} value={faltaSel > 0 ? faltaSel : vendidoSel - metaSel} format={fmtMoney} icon={faltaSel > 0 ? 'alert' : 'check'} footTrend={faltaSel > 0 ? 'dn' : 'up'} foot={isCurrent && porCerrar > 0 ? `Proyección ${fmtK(proyeccion)} con por cerrar` : faltaSel > 0 ? 'Contra lo vendido' : vendedorSel ? '¡Felicidades!' : '¡Felicidades al equipo!'} delay={120} />
         <KPI label="Ventas registradas" value={nVentas} icon="projects" foot={nVentas > 0 ? `Ticket promedio ${fmtK(ticket)}` : 'Sin ventas este mes'} delay={180} />
       </div>
 
@@ -208,14 +228,14 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           <div className="card-h">
             <Icon name="trendUp" size={17} className="text-ok" />
             <span className="ttl">Vendido vs meta personal</span>
-            <span className="sub ml-auto">meta personal {fmtK(metaPersonal)}</span>
+            <span className="sub ml-auto">meta personal {fmtK(metaPersonal)} · clic en un vendedor para filtrar</span>
           </div>
           <div className="card-b">
             {/* Equipo completo primero, como referencia */}
             <div className="flex items-center gap-3 pb-3 mb-3 border-b border-line-soft">
               <div className="w-[130px] flex-none text-[12.5px] font-semibold">EQUIPO</div>
               <div className="flex-1 h-[22px] bg-bg-1 border border-line relative overflow-hidden">
-                {isCurrent && <div className="absolute inset-y-0 left-0" style={{ width: `${Math.min(100, meta > 0 ? (proyeccion / meta) * 100 : 0)}%`, background: 'var(--acc)', opacity: .28 }}></div>}
+                {isCurrent && !sellerId && <div className="absolute inset-y-0 left-0" style={{ width: `${Math.min(100, meta > 0 ? (proyeccion / meta) * 100 : 0)}%`, background: 'var(--acc)', opacity: .28 }}></div>}
                 <div className="absolute inset-y-0 left-0" style={{ width: `${Math.min(100, pctVendido)}%`, background: 'var(--ok)', opacity: .9, transition: 'width .5s ease' }}></div>
                 <span className="mono absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-tx-2">{pctVendido.toFixed(0)}%</span>
               </div>
@@ -228,9 +248,12 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
               {porVendedor.map(r => {
                 const pct = metaPersonal > 0 ? (r.total / metaPersonal) * 100 : 0
                 const cumplio = metaPersonal > 0 && r.total >= metaPersonal
+                const activo = sellerId === r.v.id
+                const dim = !!sellerId && !activo
                 return (
-                  <div key={r.v.id} className="flex items-center gap-3">
-                    <div className="w-[130px] flex-none text-[12.5px] text-tx-1 truncate" title={r.v.name}>{r.v.name}</div>
+                  <div key={r.v.id} className="flex items-center gap-3 cursor-pointer" style={{ opacity: dim ? .35 : 1, transition: 'opacity .2s' }}
+                    onClick={() => setSellerId(activo ? '' : r.v.id)} title={activo ? 'Quitar filtro' : `Ver solo a ${r.v.name}`}>
+                    <div className="w-[130px] flex-none text-[12.5px] truncate" style={{ color: activo ? 'var(--acc)' : 'var(--tx-1)', fontWeight: activo ? 700 : 400 }} title={r.v.name}>{r.v.name}</div>
                     <div className="flex-1 h-[22px] bg-bg-1 border border-line relative overflow-hidden">
                       <div className="h-full opacity-90" style={{ width: `${Math.min(100, pct)}%`, background: cumplio ? 'var(--ok)' : colorOf(r.v.id), minWidth: r.total ? 3 : 0, transition: 'width .5s ease' }}></div>
                       <span className="mono absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-tx-2">{pct.toFixed(0)}%</span>
@@ -268,8 +291,8 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
         <div className="card">
           <div className="card-h">
             <Icon name="layers" size={17} className="text-st-5" />
-            <span className="ttl">Tendencia mensual</span>
-            <span className="sub ml-auto">clic en un mes para verlo · línea punteada = meta</span>
+            <span className="ttl">Tendencia mensual{vendedorSel ? ` · ${vendedorSel.name}` : ''}</span>
+            <span className="sub ml-auto">clic en un mes para verlo · línea punteada = {vendedorSel ? 'su meta personal' : 'meta'}</span>
           </div>
           <div className="card-b">
             <div className="flex items-end gap-2">
@@ -294,7 +317,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
         <div className="card">
           <div className="card-h">
             <Icon name="grid" size={17} className="text-st-9" />
-            <span className="ttl">Ventas por sistema</span>
+            <span className="ttl">Ventas por sistema{vendedorSel ? ` · ${vendedorSel.name}` : ''}</span>
           </div>
           <div className="card-b">
             <Donut center={String(nVentas)} sub={`venta${nVentas === 1 ? '' : 's'}`}
@@ -313,7 +336,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           <table className="tbl">
             <thead><tr><th>Vendedor</th><th className="num">Ventas</th><th className="num">Total vendido</th><th className="num">Ticket promedio</th><th className="num">Meta personal</th><th className="num">% de su meta</th><th className="num">% del equipo</th></tr></thead>
             <tbody>
-              {porVendedor.map(r => {
+              {porVendedor.filter(r => esMio({ seller: r.v.id })).map(r => {
                 const pctMeta = metaPersonal > 0 ? (r.total / metaPersonal) * 100 : 0
                 return (
                   <tr key={r.v.id}>
@@ -339,15 +362,15 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
       <div className="card">
         <div className="card-h">
           <Icon name="projects" size={17} className="text-acc" />
-          <span className="ttl">Ventas de {ymLabel(ym)}</span>
-          <span className="sub ml-auto">{nVentas} venta{nVentas === 1 ? '' : 's'} · {fmtMoney(vendido)}</span>
+          <span className="ttl">Ventas de {ymLabel(ym)}{vendedorSel ? ` · ${vendedorSel.name}` : ''}</span>
+          <span className="sub ml-auto">{nVentas} venta{nVentas === 1 ? '' : 's'} · {fmtMoney(vendidoSel)}</span>
         </div>
         <div className="card-b p-0 max-h-[420px] overflow-y-auto">
-          {nVentas === 0 ? <Empty icon="projects">Sin ventas registradas este mes</Empty> : (
+          {nVentas === 0 ? <Empty icon="projects">{vendedorSel ? `${vendedorSel.name} no tiene ventas registradas este mes` : 'Sin ventas registradas este mes'}</Empty> : (
             <table className="tbl">
               <thead><tr><th>Fecha</th><th>Proyecto</th><th>Cliente</th><th>Vendedor</th><th>Sistema</th><th className="num">Venta (subtotal)</th></tr></thead>
               <tbody>
-                {ventasMes.map(p => (
+                {ventasSel.map(p => (
                   <tr key={p.id} onClick={() => onOpenProject(p)}>
                     <td className="num text-tx-2">{fmtDateShort(p.created.slice(0, 10))}</td>
                     <td><span className="mono text-acc font-semibold">{p.code}</span></td>
