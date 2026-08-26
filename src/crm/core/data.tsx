@@ -31,6 +31,9 @@ import type {
   AgendaEvent,
   WarehouseItem,
   WarehouseSize,
+  InventoryFamily,
+  InventoryItem,
+  InventoryMove,
 } from './types'
 import { WAREHOUSE_DAYS_DEFAULT, SALES_GOAL_DEFAULT } from './types'
 import {
@@ -48,6 +51,8 @@ import {
   saveCampaign, deleteCampaign as apiDeleteCampaign,
   saveAgendaEvent, deleteAgendaEvent as apiDeleteAgendaEvent,
   saveWarehouseItem, deleteWarehouseItem as apiDeleteWarehouseItem,
+  saveInvFamily, deleteInvFamily as apiDeleteInvFamily,
+  saveInvItem, saveInvItems, deleteInvItem as apiDeleteInvItem, saveInvMove,
   saveProspect, deleteProspect as apiDeleteProspect,
   saveActivity, saveSetting,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
@@ -122,6 +127,15 @@ export const canSeeAllProspects = (u?: { role?: Role; title?: string } | null): 
 
 /** Comisión bancaria fija sobre la lista de movimientos "por fuera" (total = subtotal × (1 + esto)). */
 export const COMISION_BANCARIA = 0.053
+
+/* ---- Umbrales de alarma del INVENTARIO ----
+   Son fijos para todas las claves (no hay mínimo por clave): a partir de aquí
+   la existencia se pinta en rojo o en naranja. Si algún día hacen falta
+   mínimos distintos por material, este es el único lugar que hay que tocar. */
+/** Existencia en ROJO: urge resurtir. */
+export const INV_ROJO = 5
+/** Existencia en NARANJA: ya hay que irla pidiendo. */
+export const INV_NARANJA = 8
 
 /** ¿El usuario puede EDITAR este proyecto?
  *  - Admin / Super Admin: siempre.
@@ -264,6 +278,7 @@ const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
   movementLists: [], movements: [], campaigns: [], prospects: [], agendaEvents: [], warehouse: [],
+  invFamilies: [], invItems: [], invMoves: [],
   settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {} },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
@@ -385,6 +400,13 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_AGENDA_EVENT': return { ...state, agendaEvents: state.agendaEvents.filter(e => e.id !== a.id) }
     case 'UPSERT_WAREHOUSE_ITEM': return { ...state, warehouse: upsertBy(state.warehouse, a.item) }
     case 'REMOVE_WAREHOUSE_ITEM': return { ...state, warehouse: state.warehouse.filter(w => w.id !== a.id) }
+    case 'UPSERT_INV_FAMILY': return { ...state, invFamilies: upsertBy(state.invFamilies, a.family) }
+    case 'REMOVE_INV_FAMILY':
+      // Al quitar la familia se van sus claves (y sus movimientos quedan huérfanos, sin mostrarse).
+      return { ...state, invFamilies: state.invFamilies.filter(f => f.id !== a.id), invItems: state.invItems.filter(i => i.familyId !== a.id) }
+    case 'UPSERT_INV_ITEM': return { ...state, invItems: upsertBy(state.invItems, a.item) }
+    case 'REMOVE_INV_ITEM': return { ...state, invItems: state.invItems.filter(i => i.id !== a.id) }
+    case 'UPSERT_INV_MOVE': return { ...state, invMoves: upsertBy(state.invMoves, a.move) }
     case 'SET_SETTINGS': return { ...state, settings: a.settings }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
@@ -1249,6 +1271,165 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => saveSetting('sales_goals', salesGoals)]); return
       }
 
+      /* ---- Inventario ---- */
+      case 'SAVE_INV_FAMILY': {
+        const full: InventoryFamily = {
+          ...(action.family as InventoryFamily),
+          id: action.family.id ?? uid('if'),
+          position: action.family.position ?? (s.invFamilies.reduce((m, f) => Math.max(m, f.position), 0) + 1000),
+        }
+        rawDispatch({ type: 'UPSERT_INV_FAMILY', family: full })
+        persist([() => saveInvFamily(full)]); return
+      }
+      case 'DELETE_INV_FAMILY': {
+        const items = s.invItems.filter(i => i.familyId === action.id)
+        rawDispatch({ type: 'REMOVE_INV_FAMILY', id: action.id })
+        persist([...items.map(i => () => apiDeleteInvItem(i.id)), () => apiDeleteInvFamily(action.id)]); return
+      }
+      case 'SAVE_INV_ITEM': {
+        // Alta de clave o cambio de mínimo/nombre. La existencia NO se toca aquí:
+        // solo cambia por INV_MOVE / INV_COUNT, que dejan rastro en el kardex.
+        const prev = action.item.id ? s.invItems.find(i => i.id === action.item.id) : undefined
+        const full: InventoryItem = {
+          ...(action.item as InventoryItem),
+          id: action.item.id ?? uid('ii'),
+          qty: prev ? prev.qty : (action.item.qty ?? 0),
+          counted: prev ? prev.counted : (action.item.counted ?? false),
+          updatedAt: nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_INV_ITEM', item: full })
+        persist([() => saveInvItem(full)]); return
+      }
+      case 'DELETE_INV_ITEM':
+        rawDispatch({ type: 'REMOVE_INV_ITEM', id: action.id })
+        persist([() => apiDeleteInvItem(action.id)]); return
+
+      case 'INV_MOVE': {
+        const item = s.invItems.find(i => i.id === action.itemId)
+        if (!item || !action.delta) return
+        // La existencia no baja de cero: si la salida se pasa, se recorta al saldo.
+        const qty = Math.max(0, item.qty + action.delta)
+        const delta = qty - item.qty
+        if (!delta) return
+        const updated: InventoryItem = { ...item, qty, counted: true, updatedAt: nowISO() }
+        const move: InventoryMove = {
+          id: uid('im'), itemId: item.id, motivo: action.motivo, qty: delta, balance: qty,
+          userId: s.currentUser?.id ?? '', at: nowISO(),
+          ...(action.ref ? { ref: action.ref } : {}),
+          ...(action.orderId ? { orderId: action.orderId } : {}),
+          ...(action.projectId ? { projectId: action.projectId } : {}),
+        }
+        rawDispatch({ type: 'UPSERT_INV_ITEM', item: updated })
+        rawDispatch({ type: 'UPSERT_INV_MOVE', move })
+        persist([() => saveInvItem(updated), () => saveInvMove(move)]); return
+      }
+      case 'INV_COUNT': {
+        const item = s.invItems.find(i => i.id === action.itemId); if (!item) return
+        const qty = Math.max(0, Math.round(action.counted))
+        const delta = qty - item.qty
+        // Contar y que cuadre TAMBIÉN es información: la clave queda marcada
+        // como contada aunque no haya diferencia (deja de estar "sin contar").
+        if (delta === 0 && item.counted) return
+        const updated: InventoryItem = { ...item, qty, counted: true, updatedAt: nowISO() }
+        rawDispatch({ type: 'UPSERT_INV_ITEM', item: updated })
+        const thunks: (() => Promise<void>)[] = [() => saveInvItem(updated)]
+        if (delta !== 0) {
+          const move: InventoryMove = {
+            id: uid('im'), itemId: item.id, motivo: 'Ajuste por conteo', qty: delta, balance: qty,
+            userId: s.currentUser?.id ?? '', at: nowISO(), ref: action.ref || 'Conteo físico',
+          }
+          rawDispatch({ type: 'UPSERT_INV_MOVE', move })
+          thunks.push(() => saveInvMove(move))
+        }
+        persist(thunks); return
+      }
+      case 'INV_ADD_ITEMS': {
+        // Completar la cuadrícula: da de alta TODAS las combinaciones que falten,
+        // en cero. Sin modales de por medio: la existencia se captura después
+        // (a mano o en modo conteo), que es donde el trabajo sí vale la pena.
+        const nuevos: InventoryItem[] = []
+        for (const c of action.combos) {
+          if (s.invItems.some(i => i.familyId === action.familyId && i.rowId === c.rowId && i.colId === c.colId)) continue
+          if (nuevos.some(i => i.rowId === c.rowId && i.colId === c.colId)) continue
+          nuevos.push({
+            id: uid('ii'), familyId: action.familyId, rowId: c.rowId, colId: c.colId,
+            qty: 0, counted: false, updatedAt: nowISO(),
+          })
+        }
+        if (!nuevos.length) return
+        for (const it of nuevos) rawDispatch({ type: 'UPSERT_INV_ITEM', item: it })
+        persist([() => saveInvItems(nuevos)]); return
+      }
+      case 'INV_COUNT_CELL': {
+        // Conteo directo sobre la celda. Si la clave no existía, nace aquí con el
+        // número contado: dar de alta y capturar son UN solo gesto.
+        const prev = s.invItems.find(i => i.familyId === action.familyId && i.rowId === action.rowId && i.colId === action.colId)
+        const qty = Math.max(0, Math.round(action.counted))
+        if (prev) {
+          const delta = qty - prev.qty
+          if (delta === 0 && prev.counted) return
+          const updated: InventoryItem = { ...prev, qty, counted: true, updatedAt: nowISO() }
+          rawDispatch({ type: 'UPSERT_INV_ITEM', item: updated })
+          const thunks: (() => Promise<void>)[] = [() => saveInvItem(updated)]
+          if (delta !== 0) {
+            const move: InventoryMove = {
+              id: uid('im'), itemId: prev.id, motivo: 'Ajuste por conteo', qty: delta, balance: qty,
+              userId: s.currentUser?.id ?? '', at: nowISO(), ref: 'Conteo físico',
+            }
+            rawDispatch({ type: 'UPSERT_INV_MOVE', move })
+            thunks.push(() => saveInvMove(move))
+          }
+          persist(thunks); return
+        }
+        // Clave nueva: solo tiene sentido crearla si de verdad hay algo que contar.
+        if (qty <= 0) return
+        const item: InventoryItem = {
+          id: uid('ii'), familyId: action.familyId, rowId: action.rowId, colId: action.colId,
+          qty, counted: true, updatedAt: nowISO(),
+        }
+        const move: InventoryMove = {
+          id: uid('im'), itemId: item.id, motivo: 'Ajuste por conteo', qty, balance: qty,
+          userId: s.currentUser?.id ?? '', at: nowISO(), ref: 'Alta por conteo',
+        }
+        rawDispatch({ type: 'UPSERT_INV_ITEM', item })
+        rawDispatch({ type: 'UPSERT_INV_MOVE', move })
+        persist([() => saveInvItem(item), () => saveInvMove(move)]); return
+      }
+      case 'INV_CONSUMO': {
+        // Salida en lote del material que se usó en una OC. Una sola pasada:
+        // descuenta cada clave y deja un renglón de kardex por partida.
+        const thunks: (() => Promise<void>)[] = []
+        let piezas = 0
+        for (const line of action.lines) {
+          const item = s.invItems.find(i => i.id === line.itemId)
+          if (!item || !line.qty) continue
+          const qty = Math.max(0, item.qty - line.qty)
+          const delta = qty - item.qty
+          if (!delta) continue
+          const updated: InventoryItem = { ...item, qty, counted: true, updatedAt: nowISO() }
+          const move: InventoryMove = {
+            id: uid('im'), itemId: item.id, motivo: 'Salida a proyecto', qty: delta, balance: qty,
+            userId: s.currentUser?.id ?? '', at: nowISO(),
+            ...(action.ref ? { ref: action.ref } : {}),
+            orderId: action.orderId,
+            ...(action.projectId ? { projectId: action.projectId } : {}),
+          }
+          rawDispatch({ type: 'UPSERT_INV_ITEM', item: updated })
+          rawDispatch({ type: 'UPSERT_INV_MOVE', move })
+          thunks.push(() => saveInvItem(updated), () => saveInvMove(move))
+          piezas += -delta
+        }
+        if (!thunks.length) return
+        const ord = s.orders.find(o => o.id === action.orderId)
+        const activity: Activity = {
+          id: uid('a'), t: nowISO(), icon: 'pkg', who: whoName(s),
+          txt: `descontó ${piezas} pza de inventario`, tgt: ord?.number || action.ref || 'consumo', kind: 'work',
+        }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        persist(thunks); return
+      }
+
       /* ---- Agenda personal ---- */
       case 'SAVE_AGENDA_EVENT': {
         const e = action.event
@@ -1416,6 +1597,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'prospects':       rawDispatch({ type: 'REMOVE_PROSPECT', id: c.id }); break
           case 'agenda_events':   rawDispatch({ type: 'REMOVE_AGENDA_EVENT', id: c.id }); break
           case 'warehouse_queue': rawDispatch({ type: 'REMOVE_WAREHOUSE_ITEM', id: c.id }); break
+          case 'inventory_families': rawDispatch({ type: 'REMOVE_INV_FAMILY', id: c.id }); break
+          case 'inventory_items':    rawDispatch({ type: 'REMOVE_INV_ITEM', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -1435,6 +1618,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'prospects':       rawDispatch({ type: 'UPSERT_PROSPECT', prospect: c.row }); break
           case 'agenda_events':   rawDispatch({ type: 'UPSERT_AGENDA_EVENT', event: c.row }); break
           case 'warehouse_queue': rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item: c.row }); break
+          case 'inventory_families': rawDispatch({ type: 'UPSERT_INV_FAMILY', family: c.row }); break
+          case 'inventory_items':    rawDispatch({ type: 'UPSERT_INV_ITEM', item: c.row }); break
+          case 'inventory_moves':    rawDispatch({ type: 'UPSERT_INV_MOVE', move: c.row }); break
         }
       }
     })
@@ -1519,6 +1705,59 @@ export const sel = {
       diasProceso: proceso.reduce((a, w) => a + sel.warehouseDays(state, w), 0),
     }
   },
+
+  /* ---- Inventario ---- */
+  /** Familias en el orden definido. */
+  invFamilies: (state: AppState) => [...state.invFamilies].sort((a, b) => a.position - b.position),
+  /** ¿La familia se dibuja como matriz? (tiene los dos atributos con valores). */
+  invEsMatriz: (f: InventoryFamily) => (f.rows?.length ?? 0) > 0 && (f.cols?.length ?? 0) > 0,
+  /** Claves de una familia. */
+  invItemsForFamily: (state: AppState, fid: string) => state.invItems.filter(i => i.familyId === fid),
+  /** Clave por combinación de atributos (undefined = esa medida no existe en catálogo). */
+  invItemAt: (state: AppState, fid: string, rowId: string, colId: string) =>
+    state.invItems.find(i => i.familyId === fid && i.rowId === rowId && i.colId === colId),
+  /** Nombre legible de una clave: familia + sus atributos (o su nombre libre). */
+  invLabel: (state: AppState, item: InventoryItem): string => {
+    const fam = state.invFamilies.find(f => f.id === item.familyId)
+    if (!fam) return item.label || '—'
+    if (!sel.invEsMatriz(fam)) return item.label || '—'
+    const r = fam.rows.find(x => x.id === item.rowId)?.label ?? ''
+    const c = fam.cols.find(x => x.id === item.colId)?.label ?? ''
+    return [fam.name.replace(/s$/, ''), r, c].filter(Boolean).join(' · ')
+  },
+  /** Nivel de existencia de una clave, para pintarla.
+   *  Umbrales FIJOS para todo el inventario (INV_ROJO / INV_NARANJA).
+   *  Caso aparte: un CERO que nunca se ha contado no es "se acabó", es
+   *  "no sabemos" — se deja en gris para no llenar la matriz de alarmas
+   *  falsas mientras el inventario se termina de capturar. */
+  invNivel: (item: InventoryItem): 'zero' | 'low' | 'mid' | 'ok' =>
+    item.qty <= 0 ? (item.counted ? 'low' : 'zero')
+      : item.qty <= INV_ROJO ? 'low'
+        : item.qty <= INV_NARANJA ? 'mid'
+          : 'ok',
+  /** Resumen para los KPI de la vista. */
+  invResumen: (state: AppState) => {
+    const items = state.invItems
+    const hoy = TODAY_ISO
+    return {
+      piezas: items.reduce((a, i) => a + i.qty, 0),
+      claves: items.length,
+      conExistencia: items.filter(i => i.qty > 0).length,
+      // Mismo criterio que el color de la celda: lo que se ve en rojo es lo que cuenta aquí.
+      porResurtir: items.filter(i => sel.invNivel(i) === 'low').length,
+      sinContar: items.filter(i => !i.counted).length,
+      movsHoy: state.invMoves.filter(m => (m.at || '').slice(0, 10) === hoy).length,
+    }
+  },
+  /** Kardex de una clave, del más reciente al más viejo. */
+  invMovesForItem: (state: AppState, itemId: string) =>
+    state.invMoves.filter(m => m.itemId === itemId).sort((a, b) => (a.at < b.at ? 1 : -1)),
+  /** Kardex completo ordenado (el fetch ya lo acota a los últimos movimientos). */
+  invMovesRecientes: (state: AppState) =>
+    [...state.invMoves].sort((a, b) => (a.at < b.at ? 1 : -1)),
+  /** ¿Ya se capturó el consumo de esta OC? (existe al menos una salida suya). */
+  invConsumoCapturado: (state: AppState, orderId: string) =>
+    state.invMoves.some(m => m.orderId === orderId && m.motivo === 'Salida a proyecto'),
 
   /** Comisiones de un proyecto. */
   commissionsForProject: (state: AppState, pid: string) => state.commissions.filter(c => c.projectId === pid),

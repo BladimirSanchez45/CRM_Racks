@@ -12,6 +12,7 @@ import * as React from 'react'
 import { useStore, sel, fmtDate, fmtMoney2, addDays } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, Badge, DocChip, Confirm, Empty, Seg, SecTitle } from '../../core/ui'
 import { Icon } from '../../core/icons'
+import { InventoryLowCard, ConsumoModal } from '../inventory/inventory'
 import type { Order, Project, WarehouseItem, WarehouseSize, WarehouseStatus } from '../../core/types'
 
 const SIZE_META: Record<WarehouseSize, { label: string; short: string }> = {
@@ -241,7 +242,7 @@ function OrderDetailModal({ order, onClose }: { order: Order; onClose: () => voi
 /* ============================================================
    Renglón de la cola
    ============================================================ */
-function QueueRow({ item, index, total, manage, dragging, over, onOpen, onOpenOrder, onDragStart, onDragOver, onDrop, onDragEnd }: {
+function QueueRow({ item, index, total, manage, dragging, over, onOpen, onOpenOrder, onStatus, onDragStart, onDragOver, onDrop, onDragEnd }: {
   item: WarehouseItem
   index: number
   total: number
@@ -250,6 +251,9 @@ function QueueRow({ item, index, total, manage, dragging, over, onOpen, onOpenOr
   over: boolean
   onOpen: () => void
   onOpenOrder: (o: Order) => void
+  /** Sube el cambio de estado a la página: al pasar a "listo" hay que revisar
+   *  antes si a la OC le falta descontar el material del inventario. */
+  onStatus: (item: WarehouseItem, status: WarehouseStatus) => void
   onDragStart: () => void
   onDragOver: () => void
   onDrop: () => void
@@ -261,7 +265,7 @@ function QueueRow({ item, index, total, manage, dragging, over, onOpen, onOpenOr
   const dias = sel.warehouseDays(state, item)
   const st = STATUS_META[item.status]
   const move = (to: number) => dispatch({ type: 'MOVE_WAREHOUSE_ITEM', id: item.id, toIndex: to })
-  const setStatus = (status: WarehouseStatus) => dispatch({ type: 'SET_WAREHOUSE_STATUS', id: item.id, status })
+  const setStatus = (status: WarehouseStatus) => onStatus(item, status)
   // Evita que los controles de la fila disparen la apertura de la OC.
   const stop = (e: React.MouseEvent) => e.stopPropagation()
 
@@ -364,10 +368,27 @@ export function WarehousePage() {
   // Arrastre para reordenar: qué fila se arrastra y sobre cuál está parada.
   const [dragId, setDragId] = React.useState<string | null>(null)
   const [overIndex, setOverIndex] = React.useState<number | null>(null)
+  // Candado al cerrar: la OC que se quiere marcar lista pero aún no tiene
+  // descontado su material del inventario.
+  const [pendiente, setPendiente] = React.useState<{ item: WarehouseItem; order: Order } | null>(null)
+  const [consumoOc, setConsumoOc] = React.useState<Order | null>(null)
 
   const queue = sel.warehouseQueue(state)
   const done = sel.warehouseDone(state)
   const load = sel.warehouseLoad(state)
+
+  const marcarListo = (item: WarehouseItem) =>
+    dispatch({ type: 'SET_WAREHOUSE_STATUS', id: item.id, status: 'listo' })
+  /** Cambio de estado con candado: al pasar a "listo" se revisa que el material
+   *  ya se haya descontado del inventario. No bloquea —hay OC cuyo material no
+   *  sale de almacén— pero obliga a decidirlo a propósito. */
+  const cambiarEstado = (item: WarehouseItem, status: WarehouseStatus) => {
+    const order = state.orders.find(o => o.id === item.orderId)
+    const faltaConsumo = status === 'listo' && item.status !== 'listo' && order
+      && state.invItems.length > 0 && !sel.invConsumoCapturado(state, order.id)
+    if (faltaConsumo) { setPendiente({ item, order }); return }
+    dispatch({ type: 'SET_WAREHOUSE_STATUS', id: item.id, status })
+  }
 
   const endDrag = () => { setDragId(null); setOverIndex(null) }
   const onDrop = (toIndex: number) => {
@@ -409,7 +430,7 @@ export function WarehousePage() {
                 {queue.map((w, i) => (
                   <QueueRow key={w.id} item={w} index={i} total={queue.length} manage={manage}
                     dragging={dragId === w.id} over={overIndex === i && dragId !== null && dragId !== w.id}
-                    onOpen={() => setOpen(w)} onOpenOrder={setOpenOrder}
+                    onOpen={() => setOpen(w)} onOpenOrder={setOpenOrder} onStatus={cambiarEstado}
                     onDragStart={() => setDragId(w.id)}
                     onDragOver={() => setOverIndex(i)}
                     onDrop={() => onDrop(i)}
@@ -454,6 +475,40 @@ export function WarehousePage() {
 
       {open && <WarehouseItemModal item={open} onClose={() => setOpen(null)} />}
       {openOrder && <OrderDetailModal order={openOrder} onClose={() => setOpenOrder(null)} />}
+
+      {/* Antes de dar por lista una OC: recordar que falta descontar su material. */}
+      {pendiente && !consumoOc && (
+        <Modal width={500} icon="alert" title="Falta descontar el material"
+          sub={`OC ${pendiente.order.number}`}
+          onClose={() => setPendiente(null)}
+          footer={<>
+            <button className="btn btn-ghost" onClick={() => setPendiente(null)}>Cancelar</button>
+            <div className="flex-1"></div>
+            <button className="btn btn-ghost" title="El inventario se queda como está"
+              onClick={() => { marcarListo(pendiente.item); setPendiente(null) }}>
+              Marcar listo sin descontar
+            </button>
+            <button className="btn btn-primary" onClick={() => setConsumoOc(pendiente.order)}>
+              <Icon name="pkg" size={15} /> Capturar consumo
+            </button>
+          </>}>
+          <div className="text-[13px] text-tx-1 leading-[1.6]">
+            Esta orden de compra todavía no tiene capturado el consumo, así que el material que se
+            ocupó <b>no se ha descontado del inventario</b>. Si la das por lista así, las existencias
+            van a quedar más altas de lo que de verdad hay en el piso.
+          </div>
+          <div className="meta mt-3">
+            Si el material de esta OC no sale del almacén, marcarla lista sin descontar es lo correcto.
+          </div>
+        </Modal>
+      )}
+
+      {/* Al guardar el consumo, la OC queda lista en el mismo movimiento. */}
+      {consumoOc && (
+        <ConsumoModal order={consumoOc}
+          onSaved={() => { if (pendiente) marcarListo(pendiente.item) }}
+          onClose={() => { setConsumoOc(null); setPendiente(null) }} />
+      )}
     </div>
   )
 }
@@ -715,6 +770,11 @@ export function WarehouseDashboard({ onNavigate }: { onNavigate: (route: string)
             ? <Empty icon="check">La cola está al día</Empty>
             : <div>{siguientes.map(fila)}</div>}
         </div>
+      </div>
+
+      {/* Lo que hay que resurtir. Solo aparece cuando ya hay inventario capturado. */}
+      <div className="mt-4">
+        <InventoryLowCard onNavigate={onNavigate} />
       </div>
 
       {openOrder && <OrderDetailModal order={openOrder} onClose={() => setOpenOrder(null)} />}

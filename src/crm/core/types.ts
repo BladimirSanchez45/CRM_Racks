@@ -568,6 +568,66 @@ export interface WarehouseItem {
 export type WarehouseDays = Record<WarehouseSize, number>
 export const WAREHOUSE_DAYS_DEFAULT: WarehouseDays = { S: 2, M: 4, L: 8 }
 
+/* ---- INVENTARIO: existencias de almacén ----
+   Stock GENERAL: una sola bolsa. De dónde vino el material queda como
+   trazabilidad en el movimiento, no como una existencia por proyecto. */
+
+/** Valor de un atributo de la familia (un peralte, una longitud, un calibre). */
+export interface InventoryAttr {
+  id: string
+  label: string
+  /** Equivalencia o aclaración que se muestra chiquita debajo (p. ej. "8 ft"). */
+  sub?: string
+}
+
+/** Familia de inventario: agrupa claves que comparten los mismos atributos.
+ *  Con DOS atributos (fila y columna) la vista se dibuja como MATRIZ; con uno
+ *  o ninguno, como lista simple. Así "Vigas" es una cuadrícula peralte × largo
+ *  y "Tornillería" es una lista, sin forzar a ninguna al molde de la otra. */
+export interface InventoryFamily {
+  id: string
+  name: string
+  unit: string              // pza, m, kg, caja…
+  rowLabel?: string         // nombre del atributo de fila; vacío = lista simple
+  colLabel?: string         // nombre del atributo de columna
+  rows: InventoryAttr[]
+  cols: InventoryAttr[]
+  position: number
+}
+
+/** Clave de inventario (SKU): la combinación concreta que tiene existencia.
+ *  `qty` es el ACUMULADO de sus movimientos; nunca se edita directo.
+ *  No hay mínimo por clave: la alarma es por umbrales FIJOS de todo el
+ *  inventario (ver INV_ROJO / INV_NARANJA en data.tsx). */
+export interface InventoryItem {
+  id: string
+  familyId: string
+  rowId?: string            // valor del atributo de fila (familias con matriz)
+  colId?: string            // valor del atributo de columna
+  label?: string            // nombre libre (familias de lista, sin atributos)
+  sub?: string
+  qty: number               // existencia actual
+  counted: boolean          // ¿ya se le capturó un conteo alguna vez?
+  updatedAt: string         // ISO
+}
+
+/** Motivo de un movimiento de inventario. */
+export type InventoryMotivo = 'Entrada' | 'Salida a proyecto' | 'Ajuste por conteo' | 'Devolución'
+
+/** Renglón del kardex: toda variación de existencia pasa por aquí. */
+export interface InventoryMove {
+  id: string
+  itemId: string
+  motivo: InventoryMotivo
+  qty: number               // delta con signo (+ entra, − sale)
+  balance: number           // saldo que quedó tras el movimiento
+  userId: string
+  ref?: string              // folio de OC, código de proyecto o nota libre
+  orderId?: string
+  projectId?: string
+  at: string                // ISO
+}
+
 /* ---- AGENDA personal (pendientes, recordatorios y citas) ---- */
 
 /** Tipo de anotación en la agenda:
@@ -621,6 +681,9 @@ export interface AppState {
   campaigns: Campaign[]
   agendaEvents: AgendaEvent[]
   warehouse: WarehouseItem[]
+  invFamilies: InventoryFamily[]
+  invItems: InventoryItem[]
+  invMoves: InventoryMove[]
   settings: AppSettings
   activity: Activity[]
   notifications: Notification[]
@@ -679,6 +742,16 @@ export type CampaignInput = Omit<Campaign, 'id' | 'createdBy' | 'createdAt'> & {
 export type ProspectInput = Omit<Prospect, 'id' | 'createdAt'> & {
   id?: string
   createdAt?: string
+}
+export type InventoryFamilyInput = Omit<InventoryFamily, 'id' | 'position'> & {
+  id?: string
+  position?: number
+}
+export type InventoryItemInput = Omit<InventoryItem, 'id' | 'qty' | 'counted' | 'updatedAt'> & {
+  id?: string
+  qty?: number
+  counted?: boolean
+  updatedAt?: string
 }
 
 /** Acciones del store. */
@@ -740,6 +813,26 @@ export type Action =
   | { type: 'SAVE_WAREHOUSE_DAYS'; days: WarehouseDays }
   // Meta de ventas de UN mes ('YYYY-MM'); la edita admin desde el panel.
   | { type: 'SAVE_SALES_GOAL'; month: string; goal: number }
+  /* ---- Inventario ---- */
+  | { type: 'SAVE_INV_FAMILY'; family: InventoryFamilyInput }
+  | { type: 'DELETE_INV_FAMILY'; id: string }
+  // Alta de clave o cambio de su mínimo/nombre. NUNCA toca la existencia.
+  | { type: 'SAVE_INV_ITEM'; item: InventoryItemInput }
+  | { type: 'DELETE_INV_ITEM'; id: string }
+  /** Registra un movimiento: `delta` con signo. Es el ÚNICO camino por el que
+   *  cambia la existencia (actualiza la clave y escribe el renglón del kardex). */
+  | { type: 'INV_MOVE'; itemId: string; motivo: InventoryMotivo; delta: number; ref?: string; orderId?: string; projectId?: string }
+  /** Conteo físico: fija la existencia en `counted` y deja el ajuste en el kardex. */
+  | { type: 'INV_COUNT'; itemId: string; counted: number; ref?: string }
+  /** Consumo de una OC en lote: varias salidas de un jalón, con la misma referencia. */
+  | { type: 'INV_CONSUMO'; orderId: string; projectId?: string; ref?: string; lines: { itemId: string; qty: number }[] }
+  /** Alta EN LOTE de claves de una familia (completar la cuadrícula de un jalón).
+   *  Las combinaciones que ya existen se ignoran; las nuevas nacen en cero. */
+  | { type: 'INV_ADD_ITEMS'; familyId: string; combos: { rowId: string; colId: string }[] }
+  /** Conteo sobre una CELDA: si la clave todavía no existe, la crea y le aplica el
+   *  conteo de un solo golpe. Es lo que permite llenar la matriz escribiendo encima,
+   *  sin dar de alta nada por separado. */
+  | { type: 'INV_COUNT_CELL'; familyId: string; rowId: string; colId: string; counted: number }
   | { type: 'SAVE_AGENDA_EVENT'; event: AgendaEventInput }
   | { type: 'DELETE_AGENDA_EVENT'; id: string }
   | { type: 'TOGGLE_AGENDA_DONE'; id: string; userId?: string }   // userId: en qué agenda se marca (compartidas); por defecto, la propia
@@ -786,6 +879,11 @@ export type StateAction =
   | { type: 'REMOVE_AGENDA_EVENT'; id: string }
   | { type: 'UPSERT_WAREHOUSE_ITEM'; item: WarehouseItem }
   | { type: 'REMOVE_WAREHOUSE_ITEM'; id: string }
+  | { type: 'UPSERT_INV_FAMILY'; family: InventoryFamily }
+  | { type: 'REMOVE_INV_FAMILY'; id: string }
+  | { type: 'UPSERT_INV_ITEM'; item: InventoryItem }
+  | { type: 'REMOVE_INV_ITEM'; id: string }
+  | { type: 'UPSERT_INV_MOVE'; move: InventoryMove }
   | { type: 'UPSERT_PROSPECT'; prospect: Prospect }
   | { type: 'REMOVE_PROSPECT'; id: string }
   | { type: 'SET_SETTINGS'; settings: AppSettings }

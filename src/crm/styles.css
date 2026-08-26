@@ -287,6 +287,28 @@ select.select { appearance: none; background-image: url("data:image/svg+xml,%3Cs
 .tbl tbody tr:hover { @apply bg-bg-3 cursor-pointer; }
 .tbl .num { @apply font-mono; font-feature-settings: "tnum" 1; }
 
+/* Matriz (Inventario): aquí cada CELDA es una clave distinta, así que el
+   resaltado va por celda y NO por renglón — si no, parece que seleccionas la
+   fila entera y no sabes cuál vas a tocar. Va después de `.tbl tbody tr:hover`
+   a propósito: misma especificidad, gana la última. */
+.tbl-matrix tbody tr:hover { @apply bg-transparent cursor-default; }
+/* El encabezado de la matriz lleva DOS renglones (el nombre de la segunda medida
+   sobre sus valores). Con `sticky top-0` los dos se pegarían al mismo borde y se
+   encimarían, así que aquí no se fija; la tabla vive dentro de una tarjeta corta. */
+.tbl-matrix thead th { position: static; vertical-align: middle; }
+.cell-btn {
+  @apply w-full flex items-center justify-center gap-1 font-mono font-semibold cursor-pointer bg-transparent;
+  height: 42px; border: none; transition: background .1s, box-shadow .1s;
+}
+.cell-btn:hover { background: var(--acc-ghost); box-shadow: inset 0 0 0 2px var(--acc); }
+.cell-btn:focus-visible { background: var(--acc-ghost); box-shadow: inset 0 0 0 2px var(--acc); outline: none; }
+/* Celda sin clave dada de alta: se insinúa apagada y despierta al pasar encima. */
+.cell-btn.cell-empty { @apply text-tx-3; opacity: .4; }
+.cell-btn.cell-empty:hover { opacity: 1; }
+/* Sin permiso para tocarla, la celda no debe insinuar que es pulsable. */
+.cell-btn:disabled { @apply cursor-default; opacity: .2; }
+.cell-btn:disabled:hover { background: transparent; box-shadow: none; opacity: .2; }
+
 /* KPI */
 .kpi { @apply bg-bg-2 border border-line p-5 relative overflow-hidden rounded-[12px]; box-shadow: var(--shadow-1); }
 .kpi-accent { border-color: color-mix(in srgb, var(--acc) 35%, var(--line)); }

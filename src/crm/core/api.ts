@@ -8,7 +8,7 @@ import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
   Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
-  AgendaEvent, WarehouseItem,
+  AgendaEvent, WarehouseItem, InventoryFamily, InventoryItem, InventoryMove,
 } from './types'
 import { WAREHOUSE_DAYS_DEFAULT } from './types'
 
@@ -586,6 +586,105 @@ export async function fetchWarehouse(): Promise<WarehouseItem[]> {
 export const saveWarehouseItem = (w: WarehouseItem) => upsert('warehouse_queue', warehouseItemRow(w))
 export const deleteWarehouseItem = (id: string) => removeRow('warehouse_queue', id)
 
+/* ---- Inventario: familias, claves y kardex ----
+   Las lecturas van envueltas en `sinTabla`: mientras no se corra
+   step26_inventario.sql, el módulo llega vacío en vez de tumbar el
+   `Promise.all` de loadAll() y con él la carga de TODO el CRM. */
+
+/** Devuelve [] si la tabla todavía no existe; cualquier otro error sí truena. */
+async function sinTabla<T>(fn: () => Promise<T[]>, tabla: string): Promise<T[]> {
+  try {
+    return await fn()
+  } catch (err) {
+    const e = err as { code?: string; message?: string }
+    const falta = e?.code === '42P01' || e?.code === 'PGRST205' || /does not exist|schema cache/i.test(e?.message ?? '')
+    if (!falta) throw err
+    console.warn(`[supabase] La tabla "${tabla}" no existe todavía: corre database/step26_inventario.sql`)
+    return []
+  }
+}
+
+function mapInvFamily(r: any): InventoryFamily {
+  return {
+    id: r.id, name: r.name ?? '', unit: r.unit ?? 'pza',
+    rows: Array.isArray(r.row_vals) ? r.row_vals : [],
+    cols: Array.isArray(r.col_vals) ? r.col_vals : [],
+    position: Number(r.position ?? 0),
+    ...(r.row_label ? { rowLabel: r.row_label } : {}),
+    ...(r.col_label ? { colLabel: r.col_label } : {}),
+  }
+}
+function invFamilyRow(f: InventoryFamily): Record<string, unknown> {
+  return {
+    id: f.id, name: f.name, unit: f.unit,
+    row_label: orNull(f.rowLabel), col_label: orNull(f.colLabel),
+    row_vals: f.rows ?? [], col_vals: f.cols ?? [], position: f.position,
+  }
+}
+function mapInvItem(r: any): InventoryItem {
+  return {
+    id: r.id, familyId: r.family_id ?? '', qty: Number(r.qty ?? 0),
+    counted: !!r.counted, updatedAt: r.updated_at ?? new Date().toISOString(),
+    ...(r.row_id ? { rowId: r.row_id } : {}),
+    ...(r.col_id ? { colId: r.col_id } : {}),
+    ...(r.label ? { label: r.label } : {}),
+    ...(r.sub ? { sub: r.sub } : {}),
+  }
+}
+function invItemRow(i: InventoryItem): Record<string, unknown> {
+  return {
+    id: i.id, family_id: i.familyId, row_id: i.rowId ?? null, col_id: i.colId ?? null,
+    label: orNull(i.label), sub: orNull(i.sub), qty: i.qty,
+    counted: i.counted, updated_at: i.updatedAt,
+  }
+}
+function mapInvMove(r: any): InventoryMove {
+  return {
+    id: r.id, itemId: r.item_id ?? '', motivo: r.motivo ?? 'Entrada',
+    qty: Number(r.qty ?? 0), balance: Number(r.balance ?? 0), userId: r.user_id ?? '',
+    at: r.at ?? new Date().toISOString(),
+    ...(r.ref ? { ref: r.ref } : {}),
+    ...(r.order_id ? { orderId: r.order_id } : {}),
+    ...(r.project_id ? { projectId: r.project_id } : {}),
+  }
+}
+function invMoveRow(m: InventoryMove): Record<string, unknown> {
+  return {
+    id: m.id, item_id: m.itemId, motivo: m.motivo, qty: m.qty, balance: m.balance,
+    user_id: orNull(m.userId), ref: orNull(m.ref),
+    order_id: m.orderId ?? null, project_id: m.projectId ?? null, at: m.at,
+  }
+}
+export const fetchInvFamilies = (): Promise<InventoryFamily[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('inventory_families').select('*').order('position', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map(mapInvFamily)
+}, 'inventory_families')
+
+export const fetchInvItems = (): Promise<InventoryItem[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('inventory_items').select('*')
+  if (error) throw error
+  return (data ?? []).map(mapInvItem)
+}, 'inventory_items')
+
+/** Kardex reciente. Se acota para no arrastrar años de historial al front. */
+export const fetchInvMoves = (limit = 500): Promise<InventoryMove[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('inventory_moves').select('*').order('at', { ascending: false }).limit(limit)
+  if (error) throw error
+  return (data ?? []).map(mapInvMove)
+}, 'inventory_moves')
+export const saveInvFamily = (f: InventoryFamily) => upsert('inventory_families', invFamilyRow(f))
+export const deleteInvFamily = (id: string) => removeRow('inventory_families', id)
+export const saveInvItem = (i: InventoryItem) => upsert('inventory_items', invItemRow(i))
+/** Alta en lote (completar la cuadrícula): UNA petición en vez de una por clave. */
+export async function saveInvItems(items: InventoryItem[]): Promise<void> {
+  if (!items.length) return
+  const { error } = await supabase.from('inventory_items').upsert(items.map(invItemRow))
+  if (error) throw error
+}
+export const deleteInvItem = (id: string) => removeRow('inventory_items', id)
+export const saveInvMove = (m: InventoryMove) => upsert('inventory_moves', invMoveRow(m))
+
 /* ---- Prospectos / leads (CRM previo a Proyectos) ---- */
 function mapProspect(r: any): Prospect {
   return {
@@ -773,6 +872,9 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   prospects: mapProspect,
   agenda_events: mapAgendaEvent,
   warehouse_queue: mapWarehouseItem,
+  inventory_families: mapInvFamily,
+  inventory_items: mapInvItem,
+  inventory_moves: mapInvMove,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -846,11 +948,12 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(), fetchSettings(), fetchActivity(), fetchNotifications(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(),
+      fetchInvFamilies(), fetchInvItems(), fetchInvMoves(), fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications }
 }

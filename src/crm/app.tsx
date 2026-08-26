@@ -8,6 +8,7 @@ import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { DueSoonModal } from './views/projects/due_soon'
 import { AgendaPage, AgendaTodayModal, AgendaAlerts } from './views/agenda/agenda'
 import { WarehousePage } from './views/warehouse/warehouse'
+import { InventoryPage } from './views/inventory/inventory'
 import { Icon, type IconName } from './core/icons'
 import { useTweaks, TweaksPanel, TweakSection, TweakSlider, TweakToggle, TweakRadio, TweakColor } from './core/tweaks-panel'
 import { DashboardPage } from './views/dashboard/dashboard'
@@ -36,7 +37,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'agenda' | 'almacen' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'admin' | 'settings'
+type Route = 'dashboard' | 'agenda' | 'almacen' | 'inventario' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -64,6 +65,8 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders',  section: 'Compras' },
   // Almacén: su cola de trabajo. La ven almacén, admin y dirección (lectura).
   { id: 'almacen',     label: 'Almacén',      icon: 'pkg', roles: ['almacen', 'admin', 'superadmin', 'direccion'], section: 'Logística' },
+  // Inventario: existencias del almacén. Lo opera almacén; admin y dirección lo consultan.
+  { id: 'inventario',  label: 'Inventario',   icon: 'grid', roles: ['almacen', 'admin', 'superadmin', 'direccion'], section: 'Logística' },
   { id: 'asignacion',  label: 'Asignación',   icon: 'handshake',   section: 'Logística' },
   { id: 'remisiones',  label: 'Remisiones',   icon: 'truck',       section: 'Logística' },
   { id: 'payments',    label: 'Pagos',        icon: 'money',       section: 'Finanzas' },
@@ -87,13 +90,13 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   admin: [
     'dashboard', 'agenda', 'estadisticas', 'ventas_stats', 'campaigns',
     'projects', 'historial', 'clients', 'commissions',
-    'suppliers', 'orders', 'almacen',
+    'suppliers', 'orders', 'almacen', 'inventario',
     'payments', 'cobranza', 'internal_payments', 'movements',
     'admin', 'settings',
   ],
-  // Almacén: SOLO su cola de trabajo (+ panel recortado, agenda y configuración).
-  // Nada de proyectos, pagos, comisiones ni movimientos.
-  almacen: ['dashboard', 'almacen', 'agenda', 'ventas_stats', 'settings'],
+  // Almacén: SOLO su cola de trabajo y su inventario (+ panel recortado, agenda
+  // y configuración). Nada de proyectos, pagos, comisiones ni movimientos.
+  almacen: ['dashboard', 'almacen', 'inventario', 'agenda', 'ventas_stats', 'settings'],
   ventas: ['dashboard', 'agenda', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
@@ -114,7 +117,7 @@ const landingRoute = (role?: Role | null): Route => {
 }
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', agenda: 'Agenda', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
-  orders: 'Órdenes de Compra', almacen: 'Almacén', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
+  orders: 'Órdenes de Compra', almacen: 'Almacén', inventario: 'Inventario', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   estadisticas: 'Estadísticas por origen', ventas_stats: 'Metas de venta', campaigns: 'Campañas',
   admin: 'Administración', settings: 'Configuración',
@@ -239,6 +242,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'dashboard':   return <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'agenda':      return <AgendaPage onOpenProject={onOpenProject} />
       case 'almacen':     return <WarehousePage />
+      case 'inventario':  return <InventoryPage />
       case 'prospectos':  return <ProspectosPage />
       case 'perdidos':    return <PerdidosPage />
       case 'projects':    return <ProjectsPage />
