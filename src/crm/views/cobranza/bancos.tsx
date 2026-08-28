@@ -72,12 +72,15 @@ function sugerir(state: AppState, tx: BankTransaction): Sugerencia[] {
     const mismos = new Set(state.bankTxs.filter(t => t.id !== tx.id && t.projectId && t.numRef === tx.numRef).map(t => t.projectId as string))
     for (const pid of mismos) { const p = state.projects.find(x => x.id === pid); if (p) add(p, 'Mismo pagador que un abono ya asignado', 50) }
   }
+  // Cobros ya ligados a OTRO abono del banco: no se pueden volver a ligar.
+  const ligados = new Set(state.bankTxs.filter(b => b.id !== tx.id && b.clientPaymentId).map(b => b.clientPaymentId as string))
   for (const p of state.projects) {
     const saldo = sel.projectSaldoCliente(state, p)
     const client = sel.client(state, p.client)
-    // 1) Cobro programado con el mismo importe → candidato fuerte (se liga, no se duplica).
-    for (const c of state.clientPayments.filter(c => c.projectId === p.id && c.status === 'Programado' && near(c.amount, tx.amount))) {
-      add(p, `Cobro programado #${c.n} por el mismo importe`, 60, c)
+    // 1) Cobro del proyecto (programado o ya capturado a mano) con el mismo importe → candidato
+    //    fuerte: se LIGA en lugar de crear otro, para no contar el dinero dos veces.
+    for (const c of state.clientPayments.filter(c => c.projectId === p.id && c.status !== 'Cancelado' && !ligados.has(c.id) && near(c.amount, tx.amount))) {
+      add(p, c.status === 'Cobrado' ? `Cobro #${c.n} ya registrado a mano por el mismo importe` : `Cobro programado #${c.n} por el mismo importe`, c.status === 'Cobrado' ? 70 : 60, c)
     }
     // 2) Saldo pendiente igual al abono (finiquito) o mitad del total (anticipo 50%).
     if (saldo > 0 && near(saldo, tx.amount)) add(p, 'El saldo pendiente coincide', 40)
@@ -110,7 +113,16 @@ function AssignModal({ tx, onClose }: { tx: BankTransaction; onClose: () => void
   const proj = state.projects.find(p => p.id === projectId)
   const total = proj ? sel.projectTotalConIva(proj) : 0
   const cobrado = proj ? sel.projectCobrado(state, proj.id) : 0
-  const programados = proj ? state.clientPayments.filter(c => c.projectId === proj.id && c.status === 'Programado') : []
+  // Cobros del proyecto que se pueden ligar: programados o ya capturados a mano, siempre que
+  // no estén ligados a OTRO abono del banco. Ligar evita contar el mismo dinero dos veces.
+  const ligadosOtro = new Set(state.bankTxs.filter(b => b.id !== tx.id && b.clientPaymentId).map(b => b.clientPaymentId as string))
+  const ligables = proj ? state.clientPayments.filter(c => c.projectId === proj.id && c.status !== 'Cancelado' && !ligadosOtro.has(c.id)).sort((a, b) => a.n - b.n) : []
+  const ligado = paymentId ? ligables.find(c => c.id === paymentId) : undefined
+  // Cobrado "sin" este abono: si se liga un cobro que ya estaba Cobrado, su importe se sustituye por el del banco.
+  const cobradoBase = cobrado - (ligado && ligado.status === 'Cobrado' ? ligado.amount : 0)
+  const cobradoTras = cobradoBase + tx.amount
+  const exceso = Math.round((cobradoTras - total) * 100) / 100
+  const yaRegistrados = ligables.filter(c => c.status === 'Cobrado')
   const options: ComboOption[] = state.projects.map(p => ({
     value: p.id,
     label: `${p.code} · ${sel.clientName(state, p.client)}`,
@@ -170,24 +182,36 @@ function AssignModal({ tx, onClose }: { tx: BankTransaction; onClose: () => void
           <div className="col-span-2 bg-bg-1 border border-line rounded-[8px] p-3 grid grid-cols-3 gap-2 text-center">
             <div><div className="label-k">Total venta</div><div className="font-display font-bold text-[15px] mt-0.5">{fmtMoney(total)}</div></div>
             <div><div className="label-k">Cobrado</div><div className="font-display font-bold text-[15px] mt-0.5 text-ok">{fmtMoney(cobrado)}</div></div>
-            <div><div className="label-k">Saldo tras este abono</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: total - cobrado - tx.amount > 0.5 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(Math.max(0, total - cobrado - tx.amount))}</div></div>
+            <div><div className="label-k">Saldo tras este abono</div><div className="font-display font-bold text-[15px] mt-0.5" style={{ color: total - cobradoTras > 0.5 ? 'var(--warn)' : 'var(--ok)' }}>{fmtMoney(Math.max(0, total - cobradoTras))}</div></div>
           </div>
         )}
-        {proj && programados.length > 0 && (
+        {proj && ligables.length > 0 && (
           <Field label="¿Cómo registrarlo?" span={2}>
             <div className="flex flex-col gap-1.5">
               <label className="flex items-center gap-2 text-[13px] cursor-pointer">
                 <input type="radio" name="cp" checked={!paymentId} onChange={() => setPaymentId('')} /> Crear un cobro nuevo
               </label>
-              {programados.map(c => (
-                <label key={c.id} className="flex items-center gap-2 text-[13px] cursor-pointer">
+              {ligables.map(c => (
+                <label key={c.id} className="flex items-center gap-2 text-[13px] cursor-pointer flex-wrap">
                   <input type="radio" name="cp" checked={paymentId === c.id} onChange={() => setPaymentId(c.id)} />
-                  Ligar al cobro programado <span className="mono">#{c.n}</span> · {c.concept || 'sin concepto'} · {fmtMoney2(c.amount)} · {fmtDateShort(c.date)}
-                  {Math.abs(c.amount - tx.amount) >= 1 && <span className="meta">(se actualizará al importe del banco)</span>}
+                  {c.status === 'Cobrado' ? 'Ligar al cobro ya registrado' : 'Ligar al cobro programado'} <span className="mono">#{c.n}</span> · {c.concept || 'sin concepto'} · {fmtMoney2(c.amount)} · {fmtDateShort(c.date)}
+                  {c.status === 'Cobrado' && Math.abs(c.amount - tx.amount) < 1 && <Badge color="var(--ok)">mismo importe</Badge>}
+                  {Math.abs(c.amount - tx.amount) >= 1 && <span className="meta">(tomará fecha e importe del banco)</span>}
                 </label>
               ))}
             </div>
           </Field>
+        )}
+        {proj && !paymentId && exceso > 0.5 && (
+          <div className="col-span-2 flex items-start gap-2 text-[12.5px]" style={{ color: 'var(--warn)' }}>
+            <Icon name="alert" size={15} className="mt-px shrink-0" />
+            <span>
+              Con un cobro nuevo, lo cobrado superaría el total del proyecto por <b>{fmtMoney(exceso)}</b>.
+              {yaRegistrados.length > 0
+                ? <> Este dinero probablemente ya está registrado a mano: <b>liga el abono al cobro existente</b> (arriba) en vez de crear otro.</>
+                : <> Revisa que el proyecto y el importe sean correctos antes de guardar.</>}
+            </span>
+          </div>
         )}
         <Field label="Concepto del cobro" span={2}>
           <Input list="banco-concepts" value={concept} onChange={e => setConcept(e.target.value)} placeholder="Anticipo, Finiquito…" />
@@ -272,6 +296,7 @@ export function BancosView() {
   const [assign, setAssign] = React.useState<BankTransaction | null>(null)
   const [cfdi, setCfdi] = React.useState<BankTransaction | null>(null)
   const [del, setDel] = React.useState<BankTransaction | null>(null)
+  const [blocked, setBlocked] = React.useState<BankTransaction | null>(null)   // intento de borrar un abono con CFDI
   const [imp, setImp] = React.useState<{ file: string; lines: ParsedBankLine[]; skipped: number; headerOk: boolean } | null>(null)
   const [parsing, setParsing] = React.useState(false)
   const [err, setErr] = React.useState('')
@@ -362,7 +387,9 @@ export function BancosView() {
       {err && <div className="text-[12px] mb-3" style={{ color: 'var(--danger)' }}>{err}</div>}
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Altura acotada con scroll interno (el encabezado .tbl th es sticky): la tabla no se
+            extiende hasta abajo aunque haya cientos de abonos. */}
+        <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 330px)', minHeight: 220 }}>
           <table className="tbl">
             <thead><tr>
               <th>Fecha</th><th>Concepto</th><th className="num">Importe</th><th>Tipo</th><th>Proyecto</th><th>Estado</th><th>Facturación</th><th></th>
@@ -383,7 +410,9 @@ export function BancosView() {
                     </td>
                     <td className="num font-semibold text-ok whitespace-nowrap">{fmtMoney2(t.amount)}</td>
                     <td onClick={e => e.stopPropagation()}>
-                      {readOnly || t.projectId ? (
+                      {/* CANDADO: con proyecto asignado o documentos cargados, el tipo ya no se cambia
+                          (primero desasigna / elimina los CFDI). */}
+                      {readOnly || t.projectId || docs.length > 0 ? (
                         <Badge color={CAT[t.category].color}>{CAT[t.category].label}</Badge>
                       ) : (
                         <Select value={t.category} onChange={e => dispatch({ type: 'SET_BANK_TX_CATEGORY', id: t.id, category: e.target.value as BankTxCategory })} className="w-auto text-[12px] py-1">
@@ -409,7 +438,7 @@ export function BancosView() {
                         <div className="flex gap-1 justify-end">
                           {esCobro(t) && <button className="btn btn-sm btn-ghost" onClick={() => setAssign(t)}><Icon name={t.projectId ? 'edit' : 'plus'} size={13} /> {t.projectId ? 'Cambiar' : 'Asignar'}</button>}
                           {t.projectId && <button className="icon-btn w-7 h-7" title="Quitar asignación" onClick={() => dispatch({ type: 'UNASSIGN_BANK_TX', id: t.id })}><Icon name="close" size={13} /></button>}
-                          <button className="icon-btn w-7 h-7" title="Eliminar del registro" onClick={() => setDel(t)}><Icon name="trash" size={13} /></button>
+                          <button className="icon-btn w-7 h-7" title={docs.length ? 'Tiene CFDI cargados: elimínalos primero' : 'Eliminar del registro'} onClick={() => (docs.length ? setBlocked(t) : setDel(t))}><Icon name={docs.length ? 'lock' : 'trash'} size={13} /></button>
                         </div>
                       )}
                     </td>
@@ -431,6 +460,11 @@ export function BancosView() {
       {assign && <AssignModal tx={assign} onClose={() => setAssign(null)} />}
       {cfdi && <CfdiModal tx={cfdi} onClose={() => setCfdi(null)} />}
       {imp && <ImportModal {...imp} onClose={() => setImp(null)} />}
+      {blocked && (
+        <Confirm title="No se puede eliminar" confirmLabel="Ver documentos" danger={false}
+          message={<>El abono de <b>{fmtMoney2(blocked.amount)}</b> del {fmtDate(blocked.date)} tiene {docsDe(blocked).length} CFDI cargado{docsDe(blocked).length === 1 ? '' : 's'}. Elimínalos primero desde Facturación y luego podrás borrar el abono.</>}
+          onConfirm={() => setCfdi(blocked)} onClose={() => setBlocked(null)} />
+      )}
       {del && (
         <Confirm title="Eliminar movimiento" confirmLabel="Eliminar"
           message={<>Se quitará el abono de <b>{fmtMoney2(del.amount)}</b> del {fmtDate(del.date)}.{del.paymentCreated ? <> También se borrará el cobro que se creó desde él.</> : null}<br /><span className="meta">Si vuelves a importar el mismo archivo, reaparecerá.</span></>}

@@ -34,7 +34,7 @@ function CobranzaDetail({ project, onClose }: { project: Project; onClose: () =>
   const acumOf = (c: ClientPayment) => cobros.filter(x => x.status !== 'Cancelado' && x.n <= c.n).reduce((a, x) => a + x.amount, 0)
 
   return (
-    <Modal width={720} icon="download" title={`${p.code} · ${sel.clientName(state, p.client)}`} sub="Cobranza del proyecto" onClose={onClose}
+    <Modal width={860} icon="download" title={`${p.code} · ${sel.clientName(state, p.client)}`} sub="Cobranza del proyecto" onClose={onClose}
       footer={<><div className="flex-1"></div>{!readOnly && <button className="btn btn-primary" onClick={() => setCobro({})}><Icon name="plus" size={15} /> Registrar cobro</button>}</>}>
       <div className="grid grid-cols-3 gap-3 mb-4">
         <div className="bg-bg-1 border border-line rounded-[8px] p-3"><div className="label-k">Monto total (c/IVA)</div><div className="font-display font-bold text-[17px] mt-0.5">{fmtMoney(total)}</div></div>
@@ -47,7 +47,9 @@ function CobranzaDetail({ project, onClose }: { project: Project; onClose: () =>
           Sin cobros registrados.<br />Registra el <strong>anticipo</strong> para poder avanzar a la orden de compra.
         </div>
       ) : (
-        <div className="border border-line rounded-[8px] overflow-hidden">
+        // overflow-x-auto (no hidden): si la fila es más ancha que el modal, se desplaza en vez de
+        // recortar la columna de acciones (editar / eliminar).
+        <div className="border border-line rounded-[8px] overflow-x-auto">
           <table className="tbl">
             <thead><tr><th>#</th><th>Fecha</th><th>Concepto</th><th className="num">Importe</th><th className="num">Acum.</th><th>Forma</th><th>Estado</th><th></th></tr></thead>
             <tbody>
@@ -58,7 +60,12 @@ function CobranzaDetail({ project, onClose }: { project: Project; onClose: () =>
                   <td className="text-[12.5px]">{c.concept || '—'}</td>
                   <td className="num">{fmtMoney(c.amount)}</td>
                   <td className="num text-[12px]">{fmtMoney(acumOf(c))}<div className="meta">de {fmtMoney(total)}</div></td>
-                  <td className="text-tx-1 text-[12px]">{c.method || '—'}{sel.bankTxForPayment(state, c.id) && <div className="mt-0.5"><Badge color="var(--acc)">Conciliado con banco</Badge></div>}</td>
+                  <td className="text-tx-1 text-[12px]">
+                    <span className="flex items-center gap-1.5 flex-wrap">
+                      <span>{c.method || '—'}</span>
+                      {sel.bankTxForPayment(state, c.id) && <span title="Conciliado con el estado de cuenta: fecha e importe vienen del banco"><Badge color="var(--acc)">Banco</Badge></span>}
+                    </span>
+                  </td>
                   <td><Badge color={COBRO_COLOR[c.status]}>{c.status}</Badge></td>
                   <td>{!readOnly && <div className="flex gap-1 justify-end">
                     <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setCobro(c)}><Icon name="edit" size={13} /></button>

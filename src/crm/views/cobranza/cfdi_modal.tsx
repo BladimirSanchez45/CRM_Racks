@@ -25,8 +25,10 @@ const emptyForm = (kind: CfdiKind): FormState => ({
 })
 
 /* ---- Campo XML: sube el archivo y, de paso, lo lee para llenar el formulario ---- */
-function XmlField({ value, path, folder, onFile, onClear }: {
+function XmlField({ value, path, folder, validate, onFile, onClear }: {
   value?: string; path?: string; folder: string
+  /** Devuelve un mensaje para RECHAZAR el XML antes de subirlo (p. ej. UUID repetido). */
+  validate?: (parsed: ReturnType<typeof parseCfdiXml>) => string | null
   onFile: (name: string, path: string, text: string) => void
   onClear: () => void
 }) {
@@ -37,7 +39,9 @@ function XmlField({ value, path, folder, onFile, onClear }: {
     setBusy(true); setErr('')
     try {
       const text = await file.text()
-      parseCfdiXml(text)   // valida ANTES de subir (si no es CFDI, no se sube nada)
+      const parsed = parseCfdiXml(text)   // valida ANTES de subir (si no es CFDI, no se sube nada)
+      const reject = validate?.(parsed)
+      if (reject) throw new Error(reject)
       const p = await uploadDoc(file, folder)
       onFile(file.name, p, text)
     } catch (e) {
@@ -80,10 +84,23 @@ function CfdiForm({ tx, doc, kind, onClose }: { tx: BankTransaction; doc?: CfdiD
   const proj = tx.projectId ? state.projects.find(p => p.id === tx.projectId) : undefined
   const cliente = proj ? sel.client(state, proj.client) : undefined
   const rfcMismatch = !!(f.rfcReceptor && cliente?.rfc && cliente.rfc.toUpperCase() !== f.rfcReceptor.toUpperCase())
-  const uuidEnOtro = f.uuid ? state.cfdiDocs.find(d => d.uuid === f.uuid.toUpperCase() && d.id !== doc?.id && d.bankTxId !== tx.id) : undefined
-  const otroTx = uuidEnOtro ? state.bankTxs.find(t => t.id === uuidEnOtro.bankTxId) : undefined
-  const valid = f.total > 0 || f.uuid.trim() || f.folio.trim() || f.pdfPath || f.xmlPath
+  // CANDADO: un CFDI (UUID) solo puede existir una vez en todo el sistema.
+  const uuidNorm = f.uuid.trim().toUpperCase()
+  const uuidDup = uuidNorm ? state.cfdiDocs.find(d => d.uuid === uuidNorm && d.id !== doc?.id) : undefined
+  const dupTx = uuidDup ? state.bankTxs.find(t => t.id === uuidDup.bankTxId) : undefined
+  const dupProj = dupTx?.projectId ? state.projects.find(p => p.id === dupTx.projectId) : undefined
+  const hasData = f.total > 0 || f.uuid.trim() || f.folio.trim() || f.pdfPath || f.xmlPath
+  const valid = hasData && !uuidDup
 
+  // CANDADO (antes de subir el XML): si ese UUID ya existe, se rechaza y no se sube nada.
+  const validateXml = (p: ReturnType<typeof parseCfdiXml>): string | null => {
+    if (!p.uuid) return null
+    const dup = state.cfdiDocs.find(d => d.uuid === p.uuid && d.id !== doc?.id)
+    if (!dup) return null
+    const t = state.bankTxs.find(x => x.id === dup.bankTxId)
+    const where = dup.bankTxId === tx.id ? 'en este mismo abono' : t ? `en el abono de ${fmtMoney2(t.amount)} del ${fmtDateShort(t.date)}` : 'en otro abono'
+    return `Este CFDI ya está cargado ${where}. Un mismo documento no se puede cargar dos veces.${p.kind === 'factura' && dup.bankTxId !== tx.id ? ' Si es PPD y cubre este abono, carga aquí solo su complemento de pago.' : ''}`
+  }
   const onXml = (name: string, path: string, text: string) => {
     const p = parseCfdiXml(text)
     setF(s => ({
@@ -106,7 +123,7 @@ function CfdiForm({ tx, doc, kind, onClose }: { tx: BankTransaction; doc?: CfdiD
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
       </>}>
       <div className="grid grid-cols-2 gap-3.5">
-        <div className="col-span-2"><XmlField value={f.xml} path={f.xmlPath} folder={folder} onFile={onXml} onClear={() => setF(s => ({ ...s, xml: undefined, xmlPath: undefined }))} /></div>
+        <div className="col-span-2"><XmlField value={f.xml} path={f.xmlPath} folder={folder} validate={validateXml} onFile={onXml} onClear={() => setF(s => ({ ...s, xml: undefined, xmlPath: undefined }))} /></div>
         <Field label="PDF" span={2}>
           <FileField label="" value={f.pdf || ''} path={f.pdfPath} folder={folder} accept=".pdf" onChange={v => setF(s => ({ ...s, pdf: v.name || undefined, pdfPath: v.path || undefined }))} />
         </Field>
@@ -135,10 +152,18 @@ function CfdiForm({ tx, doc, kind, onClose }: { tx: BankTransaction; doc?: CfdiD
         <Field label="Nombre receptor"><Input value={f.nombreReceptor} onChange={e => set('nombreReceptor', e.target.value)} /></Field>
         <Field label="Notas" span={2}><Input value={f.notes} onChange={e => set('notes', e.target.value)} /></Field>
       </div>
-      {(rfcMismatch || uuidEnOtro) && (
+      {(rfcMismatch || uuidDup) && (
         <div className="mt-3.5 flex flex-col gap-1.5 text-[12px]">
+          {uuidDup && (
+            <div className="flex items-start gap-2" style={{ color: 'var(--danger)' }}>
+              <Icon name="lock" size={14} className="mt-px shrink-0" />
+              <span>
+                Este CFDI ya está cargado{uuidDup.bankTxId === tx.id ? ' en este mismo abono' : dupTx ? <> en el abono de <b>{fmtMoney2(dupTx.amount)}</b> del {fmtDateShort(dupTx.date)}{dupProj ? <> (<span className="mono">{dupProj.code}</span>)</> : ''}</> : ' en otro abono'}. Un mismo documento no se puede cargar dos veces.
+                {f.kind === 'factura' && uuidDup.bankTxId !== tx.id && <> Si esta factura es PPD y cubre también este abono, carga aquí solo su <b>complemento de pago</b>.</>}
+              </span>
+            </div>
+          )}
           {rfcMismatch && <div className="flex items-center gap-2" style={{ color: 'var(--warn)' }}><Icon name="alert" size={14} /> El RFC del receptor no coincide con el del cliente del proyecto ({cliente?.rfc}).</div>}
-          {uuidEnOtro && otroTx && <div className="flex items-center gap-2 text-tx-2"><Icon name="alert" size={14} /> Este UUID ya está cargado en el abono de {fmtMoney2(otroTx.amount)} del {fmtDateShort(otroTx.date)} (normal si es una factura PPD pagada en partes).</div>}
         </div>
       )}
       {guard}
@@ -200,14 +225,12 @@ export function CfdiModal({ tx, onClose }: { tx: BankTransaction; onClose: () =>
             <thead><tr><th>Tipo</th><th>Folio</th><th>Fecha</th><th className="num">Importe</th><th>Método</th><th>Archivos</th><th></th></tr></thead>
             <tbody>
               {docs.map(d => {
-                const enOtro = d.uuid ? state.cfdiDocs.some(x => x.uuid === d.uuid && x.bankTxId !== d.bankTxId) : false
                 return (
                   <tr key={d.id} style={{ cursor: 'default' }}>
                     <td><Badge color={KIND_COLOR[d.kind]}>{KIND_LABEL[d.kind]}</Badge></td>
                     <td>
                       <div className="mono text-[12.5px] font-semibold">{cfdiFolio(d)}</div>
                       {d.uuid && <div className="meta mono truncate max-w-[200px]" title={d.uuid}>{d.uuid}</div>}
-                      {enOtro && <div className="meta">también en otro abono</div>}
                     </td>
                     <td className="num text-[12px]">{d.fecha ? fmtDateShort(d.fecha) : '—'}</td>
                     <td className="num font-semibold">{fmtMoney2(d.total)}</td>

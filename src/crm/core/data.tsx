@@ -1292,10 +1292,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         notifyFirstCobro(s, cp)
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `concilió un abono de ${fmtMoney(tx.amount)} con`, tgt: proj.code, kind: 'done' }
         rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        // Los CFDI ya cargados al abono siguen al proyecto nuevo.
+        const movedDocs = s.cfdiDocs.filter(d => d.bankTxId === tx.id && d.projectId !== proj.id).map(d => ({ ...d, projectId: proj.id }))
+        for (const d of movedDocs) rawDispatch({ type: 'UPSERT_CFDI_DOC', doc: d })
         // Orden importa (FK): primero el cobro, luego el abono que lo referencia, al final el borrado del anterior.
         persist([
           () => saveClientPayment(cp).then(() => saveBankTx(updated)).then(() => (prevCreated ? apiDeleteClientPayment(prevCreated) : Promise.resolve())),
           () => saveActivity(activity),
+          ...movedDocs.map(d => () => saveCfdiDoc(d)),
         ]); return
       }
       case 'UNASSIGN_BANK_TX': {
@@ -1304,7 +1308,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'UPSERT_BANK_TX', tx: freed })
         const toDelete = tx.paymentCreated ? tx.clientPaymentId : undefined
         if (toDelete) rawDispatch({ type: 'REMOVE_CLIENT_PAYMENT', id: toDelete })
-        persist([() => saveBankTx(freed).then(() => (toDelete ? apiDeleteClientPayment(toDelete) : Promise.resolve()))]); return
+        // Sus CFDI se quedan en el abono, pero sin proyecto.
+        const freedDocs = s.cfdiDocs.filter(d => d.bankTxId === tx.id && d.projectId).map(d => ({ ...d, projectId: undefined }))
+        for (const d of freedDocs) rawDispatch({ type: 'UPSERT_CFDI_DOC', doc: d })
+        persist([
+          () => saveBankTx(freed).then(() => (toDelete ? apiDeleteClientPayment(toDelete) : Promise.resolve())),
+          ...freedDocs.map(d => () => saveCfdiDoc(d)),
+        ]); return
       }
       case 'SET_BANK_TX_CATEGORY': {
         const tx = s.bankTxs.find(t => t.id === action.id); if (!tx) return

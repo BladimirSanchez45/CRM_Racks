@@ -28,6 +28,9 @@ export function CobroForm({ project, cobro, onClose, readOnly }: { project?: Pro
   const { requestClose, guard } = useUnsavedGuard(c, onClose)
   const save = () => { dispatch({ type: 'SAVE_CLIENT_PAYMENT', payment: { ...c, n: +c.n || 1, amount: +c.amount || 0 } as ClientPaymentInput }); onClose() }
   const proj = state.projects.find(x => x.id === c.projectId)
+  // CANDADO: si el cobro se concilió desde Bancos, fecha / importe / estado vienen del estado de
+  // cuenta y no se editan aquí (concepto, comentarios y comprobante sí).
+  const bankTx = cobro?.id ? sel.bankTxForPayment(state, cobro.id) : undefined
   const total = proj ? sel.projectTotalConIva(proj) : 0
   const abonadoAntes = state.clientPayments.filter(x => x.projectId === c.projectId && x.status === 'Cobrado' && x.id !== c.id).reduce((a, x) => a + x.amount, 0)
   const abonado = abonadoAntes + (c.status === 'Cobrado' ? (+c.amount || 0) : 0)
@@ -55,14 +58,22 @@ export function CobroForm({ project, cobro, onClose, readOnly }: { project?: Pro
             </Select>
           </Field>
         )}
+        {bankTx && (
+          <div className="col-span-2 flex items-center gap-2 text-[12px] text-tx-2">
+            <Badge color="var(--acc)">Banco</Badge>
+            Conciliado con el estado de cuenta ({bankTx.bank}{bankTx.bankFrom ? ' · ' + bankTx.bankFrom : ''} · {fmtDateShort(bankTx.date)}): fecha, importe y estado vienen del banco. Para cambiarlos, quita la asignación en Cobranza → Bancos.
+          </div>
+        )}
         <Field label="No. de cobro"><Input type="number" value={c.n} onChange={e => set('n', e.target.value)} /></Field>
-        <Field label="Fecha"><Input type="date" value={c.date} onChange={e => set('date', e.target.value)} /></Field>
-        <Field label="Importe (MXN)"><MoneyInput value={c.amount} onChange={v => set('amount', v)} /></Field>
-        <Field label="Estado">
-          <Select value={c.status} onChange={e => set('status', e.target.value)}>
-            {(['Cobrado', 'Programado', 'Cancelado'] as ClientPaymentStatus[]).map(s => <option key={s} value={s}>{s}</option>)}
-          </Select>
-        </Field>
+        <fieldset disabled={!!bankTx} className="contents">
+          <Field label="Fecha"><Input type="date" value={c.date} onChange={e => set('date', e.target.value)} /></Field>
+          <Field label="Importe (MXN)"><MoneyInput value={c.amount} onChange={v => set('amount', v)} className={bankTx ? 'opacity-60' : undefined} /></Field>
+          <Field label="Estado">
+            <Select value={c.status} onChange={e => set('status', e.target.value)}>
+              {(['Cobrado', 'Programado', 'Cancelado'] as ClientPaymentStatus[]).map(s => <option key={s} value={s}>{s}</option>)}
+            </Select>
+          </Field>
+        </fieldset>
         <Field label="Concepto" span={2}>
           <Input list="cobro-concepts" value={c.concept} onChange={e => set('concept', e.target.value)} placeholder="Anticipo, Finiquito…" />
           <datalist id="cobro-concepts"><option value="Anticipo 50%" /><option value="Finiquito" /><option value="Abono" /><option value="Pago de contado" /></datalist>
