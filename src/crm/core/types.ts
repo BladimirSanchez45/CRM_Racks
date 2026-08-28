@@ -4,7 +4,7 @@
 // ============================================================
 import type { IconName } from './icons'
 
-/** Las 10 etapas del pipeline, en orden. */
+/** Las 11 etapas del pipeline, en orden. */
 export type StageId =
   | 'registro'
   | 'creacion'
@@ -12,6 +12,7 @@ export type StageId =
   | 'compra'
   | 'fabricacion'
   | 'entrega_est'
+  | 'vencido'
   | 'pago'
   | 'coordinacion'
   | 'instalacion'
@@ -416,6 +417,7 @@ export interface Activity {
  *  - project_created: un vendedor registró una venta → se avisa a los administradores.
  *  - client_anticipo_paid: entró el primer cobro del cliente → se avisa a admins (ya pueden emitir la OC).
  *  - project_due_soon: el proyecto entró a "Por Vencer" (≤5 días de entrega y sin pagar) → se avisa a admins.
+ *  - project_overdue: el proyecto entró a "Vencido" (la fecha de entrega ya pasó y sigue sin pagar) → se avisa a admins.
  *  - project_paid: el cliente liquidó el total → se avisa a logística (coordinar envío/instalación).
  *  - internal_payment_requested: logística solicitó un pago interno → se avisa a los administradores.
  *  - internal_payment_decided: el admin aprobó/rechazó un pago interno → se avisa al solicitante. */
@@ -424,6 +426,7 @@ export type NotificationKind =
   | 'project_created'
   | 'client_anticipo_paid'
   | 'project_due_soon'
+  | 'project_overdue'
   | 'project_paid'
   | 'internal_payment_requested'
   | 'internal_payment_decided'
@@ -469,6 +472,65 @@ export interface Campaign {
   ads: CampaignAd[]       // anuncios que la componen (con su % del total)
   createdBy?: string      // usuario que la registró
   createdAt: string       // ISO
+}
+
+/* ============================================================
+   BANCOS — renglones del estado de cuenta importados (BBVA .exp/.txt)
+   ============================================================ */
+export type BankTxKind = 'abono' | 'cargo'
+/** Clasificación automática (editable) de un abono:
+ *  cliente = cobro de un cliente (pendiente de asignar a proyecto)
+ *  tpv = venta con terminal punto de venta · efectivo = depósito en efectivo
+ *  devolucion = SPEI devuelto (no es ingreso) · prueba = transferencia de $0.01
+ *  no_aplica = marcado a mano como "no es cobro" (traspasos, reembolsos…) */
+export type BankTxCategory = 'cliente' | 'tpv' | 'efectivo' | 'devolucion' | 'prueba' | 'no_aplica'
+export interface BankTransaction {
+  id: string
+  bank: string              // 'BBVA'
+  date: string              // YYYY-MM-DD
+  kind: BankTxKind
+  amount: number
+  balance?: number          // saldo después del movimiento (como lo reporta el banco)
+  concept: string           // texto completo del banco
+  detail: string            // texto libre del pagador ("PAGO FACTURA 1750")
+  reference: string         // clave de rastreo / referencia
+  numRef: string            // referencia numérica: SPEI → la que capturó el cliente (suele ser folio de factura); cuenta BBVA → id del pagador
+  bankFrom: string          // banco emisor (SPEI)
+  hash: string              // huella única del renglón (dedupe entre importaciones)
+  category: BankTxCategory
+  projectId?: string        // proyecto al que se asignó el abono
+  clientPaymentId?: string  // cobro (client_payments) ligado
+  paymentCreated: boolean   // el cobro se creó desde este abono (se borra al desasignar)
+  notes: string
+  importedBy?: string
+  importedAt: string        // ISO
+}
+
+/** Documento fiscal ligado a un abono: factura (CFDI tipo I) o complemento de pago (tipo P).
+ *  Un abono puede tener varios; el estado (Sin factura / Falta complemento / Facturado)
+ *  se calcula en core/cfdi.ts. Los datos se leen del XML al subirlo (editables). */
+export type CfdiKind = 'factura' | 'complemento'
+export interface CfdiDoc {
+  id: string
+  bankTxId: string          // abono al que pertenece
+  projectId?: string        // proyecto del abono al momento de cargarlo
+  kind: CfdiKind
+  uuid: string              // folio fiscal
+  serie: string
+  folio: string
+  fecha: string             // factura: emisión · complemento: fecha de pago (YYYY-MM-DD)
+  total: number             // factura: Total · complemento: Monto pagado
+  metodoPago: string        // PUE | PPD (factura)
+  rfcReceptor: string
+  nombreReceptor: string
+  relatedUuid: string       // complemento: UUID de la factura que paga
+  pdf?: string
+  pdfPath?: string
+  xml?: string
+  xmlPath?: string
+  notes: string
+  createdBy?: string
+  createdAt: string         // ISO
 }
 
 /** Etapa de seguimiento de un prospecto (antes de convertirlo en Proyecto). */
@@ -679,6 +741,8 @@ export interface AppState {
   movementLists: MovementList[]
   movements: Movement[]
   campaigns: Campaign[]
+  bankTxs: BankTransaction[]
+  cfdiDocs: CfdiDoc[]
   agendaEvents: AgendaEvent[]
   warehouse: WarehouseItem[]
   invFamilies: InventoryFamily[]
@@ -735,6 +799,16 @@ export type AgendaEventInput = Omit<AgendaEvent, 'id' | 'userId' | 'done' | 'cre
   createdAt?: string
 }
 export type CampaignInput = Omit<Campaign, 'id' | 'createdBy' | 'createdAt'> & {
+  id?: string
+  createdBy?: string
+  createdAt?: string
+}
+export type BankTransactionInput = Omit<BankTransaction, 'id' | 'importedBy' | 'importedAt'> & {
+  id?: string
+  importedBy?: string
+  importedAt?: string
+}
+export type CfdiDocInput = Omit<CfdiDoc, 'id' | 'createdBy' | 'createdAt'> & {
   id?: string
   createdBy?: string
   createdAt?: string
@@ -800,6 +874,18 @@ export type Action =
   | { type: 'DECIDE_MOVEMENT'; id: string; approve: boolean; reason?: string }
   | { type: 'SAVE_CAMPAIGN'; campaign: CampaignInput }
   | { type: 'DELETE_CAMPAIGN'; id: string }
+  /* ---- Bancos ---- */
+  /** Importa renglones del estado de cuenta (ya parseados y sin duplicados). */
+  | { type: 'IMPORT_BANK_TXS'; txs: BankTransactionInput[] }
+  /** Asigna un abono a un proyecto: crea un cobro "Cobrado" o liga/actualiza uno existente. */
+  | { type: 'ASSIGN_BANK_TX'; id: string; projectId: string; clientPaymentId?: string; concept: string }
+  /** Quita la asignación (y borra el cobro si nació desde el abono). */
+  | { type: 'UNASSIGN_BANK_TX'; id: string }
+  | { type: 'SET_BANK_TX_CATEGORY'; id: string; category: BankTxCategory; notes?: string }
+  | { type: 'DELETE_BANK_TX'; id: string }
+  /** Factura / complemento de pago de un abono (PDF + XML en Storage). */
+  | { type: 'SAVE_CFDI_DOC'; doc: CfdiDocInput }
+  | { type: 'DELETE_CFDI_DOC'; id: string }
   /* ---- Almacén ---- */
   // Edita talla, fecha estimada o notas de un renglón de la cola.
   | { type: 'SAVE_WAREHOUSE_ITEM'; item: Partial<WarehouseItem> & { id: string } }
@@ -875,6 +961,11 @@ export type StateAction =
   | { type: 'REMOVE_MOVEMENT'; id: string }
   | { type: 'UPSERT_CAMPAIGN'; campaign: Campaign }
   | { type: 'REMOVE_CAMPAIGN'; id: string }
+  | { type: 'UPSERT_BANK_TX'; tx: BankTransaction }
+  | { type: 'UPSERT_BANK_TXS'; txs: BankTransaction[] }
+  | { type: 'REMOVE_BANK_TX'; id: string }
+  | { type: 'UPSERT_CFDI_DOC'; doc: CfdiDoc }
+  | { type: 'REMOVE_CFDI_DOC'; id: string }
   | { type: 'UPSERT_AGENDA_EVENT'; event: AgendaEvent }
   | { type: 'REMOVE_AGENDA_EVENT'; id: string }
   | { type: 'UPSERT_WAREHOUSE_ITEM'; item: WarehouseItem }

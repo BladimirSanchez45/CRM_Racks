@@ -1,14 +1,18 @@
 // ============================================================
-//  COBRANZA — dos vistas:
+//  COBRANZA — tres vistas:
 //   · "Por proyecto": estado de cobro de cada proyecto (una fila por proyecto).
 //   · "Por día": qué clientes pagaron cada día (agrupado por FECHA DE PAGO).
+//   · "Bancos": abonos importados del estado de cuenta, para conciliar con proyectos.
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, addDays, TODAY_ISO, isDireccion } from '../../core/data'
 import { Modal, Badge, Empty, KPI, Select, Seg, DocChip } from '../../core/ui'
 import { CobroForm } from '../projects/project_views'
+import { BancosView } from './bancos'
 import { Icon } from '../../core/icons'
 import type { Project, ClientPayment, ClientPaymentStatus } from '../../core/types'
+
+const VIEW_OPTS = [{ value: 'proyecto', label: 'Por proyecto' }, { value: 'dia', label: 'Por día' }, { value: 'bancos', label: 'Bancos' }]
 
 const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)', Programado: 'var(--warn)', Cancelado: 'var(--tx-3)' }
 
@@ -54,7 +58,7 @@ function CobranzaDetail({ project, onClose }: { project: Project; onClose: () =>
                   <td className="text-[12.5px]">{c.concept || '—'}</td>
                   <td className="num">{fmtMoney(c.amount)}</td>
                   <td className="num text-[12px]">{fmtMoney(acumOf(c))}<div className="meta">de {fmtMoney(total)}</div></td>
-                  <td className="text-tx-1 text-[12px]">{c.method || '—'}</td>
+                  <td className="text-tx-1 text-[12px]">{c.method || '—'}{sel.bankTxForPayment(state, c.id) && <div className="mt-0.5"><Badge color="var(--acc)">Conciliado con banco</Badge></div>}</td>
                   <td><Badge color={COBRO_COLOR[c.status]}>{c.status}</Badge></td>
                   <td>{!readOnly && <div className="flex gap-1 justify-end">
                     <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setCobro(c)}><Icon name="edit" size={13} /></button>
@@ -191,7 +195,7 @@ export function CobranzaPage() {
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [q, setQ] = React.useState('')
   const [fSupplier, setFSupplier] = React.useState('')
-  const [view, setView] = React.useState('proyecto')   // 'proyecto' | 'dia'
+  const [view, setView] = React.useState('proyecto')   // 'proyecto' | 'dia' | 'bancos'
 
   // ---- Marcador "Nuevo" (no abierto), por usuario y persistido en el navegador ----
   // Cada usuario lleva su propio set de proyectos ya abiertos. Las filas que NO estén
@@ -247,14 +251,14 @@ export function CobranzaPage() {
   // Proveedores que tienen al menos una OC ligada a un proyecto (para poblar el filtro).
   const supplierOpts = state.suppliers.filter(s => state.orders.some(o => o.supplierId === s.id && o.projectId))
 
-  if (view === 'dia') {
+  if (view === 'dia' || view === 'bancos') {
     return (
       <div>
         <div className="spread mb-[18px]">
-          <div className="sec-title m-0"><h2>Cobranza</h2><span className="sub">Quién pagó cada día (por fecha de pago)</span></div>
-          <Seg value={view} onChange={setView} options={[{ value: 'proyecto', label: 'Por proyecto' }, { value: 'dia', label: 'Por día' }]} />
+          <div className="sec-title m-0"><h2>Cobranza</h2><span className="sub">{view === 'dia' ? 'Quién pagó cada día (por fecha de pago)' : 'Abonos del estado de cuenta, para conciliar con proyectos'}</span></div>
+          <Seg value={view} onChange={setView} options={VIEW_OPTS} />
         </div>
-        <CobrosPorDia />
+        {view === 'dia' ? <CobrosPorDia /> : <BancosView />}
       </div>
     )
   }
@@ -263,7 +267,7 @@ export function CobranzaPage() {
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Cobranza</h2><span className="sub">Estado de cobro por proyecto</span></div>
-        <Seg value={view} onChange={setView} options={[{ value: 'proyecto', label: 'Por proyecto' }, { value: 'dia', label: 'Por día' }]} />
+        <Seg value={view} onChange={setView} options={VIEW_OPTS} />
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-4">

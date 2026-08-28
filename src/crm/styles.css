@@ -25,7 +25,7 @@
   /* Stage hues */
   --st-1: #8a94a6; --st-2: #3b82f6; --st-3: #8b5cf6; --st-4: #2f6feb; --st-5: #0ea5e9;
   --st-6: #16a34a; --st-7: #f97316; --st-8: #6366f1; --st-9: #10b981;
-  --st-10: #db2777;
+  --st-10: #db2777; --st-11: #dc2626;
   /* Semantic */
   --ok: #16a34a; --warn: #d97706; --danger: #e5484d; --info: #3b82f6;
   /* Geometry */
@@ -72,6 +72,7 @@
   --color-st-8: var(--st-8);
   --color-st-9: var(--st-9);
   --color-st-10: var(--st-10);
+  --color-st-11: var(--st-11);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-danger: var(--danger);

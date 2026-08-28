@@ -27,6 +27,8 @@ import type {
   Movement,
   MovementList,
   Campaign,
+  BankTransaction,
+  CfdiDoc,
   Prospect,
   AgendaEvent,
   WarehouseItem,
@@ -49,6 +51,8 @@ import {
   saveMovementList, deleteMovementList as apiDeleteMovementList,
   saveMovement, deleteMovement as apiDeleteMovement,
   saveCampaign, deleteCampaign as apiDeleteCampaign,
+  saveBankTx, insertBankTxs, deleteBankTx as apiDeleteBankTx,
+  saveCfdiDoc, deleteCfdiDoc as apiDeleteCfdiDoc, deleteDoc as apiDeleteDoc,
   saveAgendaEvent, deleteAgendaEvent as apiDeleteAgendaEvent,
   saveWarehouseItem, deleteWarehouseItem as apiDeleteWarehouseItem,
   saveInvFamily, deleteInvFamily as apiDeleteInvFamily,
@@ -148,7 +152,7 @@ export const canEditProject = (user: User | null | undefined, p: Project) => {
   return false
 }
 
-/* ---- The 9 pipeline stages (exact, in order) ---- */
+/* ---- The 11 pipeline stages (exact, in order) ---- */
 export const STAGES: Stage[] = [
   { id: 'registro',     n: 1, label: 'Registro de Venta',            short: 'Registro de Venta',     color: 'var(--st-1)', icon: 'flag',        hint: 'Captura inicial de datos de la venta' },
   { id: 'creacion',     n: 2, label: 'Creación del Proyecto',        short: 'Creación del Proyecto',     color: 'var(--st-2)', icon: 'docPlus',     hint: 'Admin captura la info del correo del vendedor' },
@@ -156,13 +160,20 @@ export const STAGES: Stage[] = [
   { id: 'compra',       n: 4, label: 'Creacion de orden de Compra', short: 'Orden de Compra',  color: 'var(--st-10)', icon: 'doc',   hint: 'Creacion de orden de Compra' },
   { id: 'fabricacion',  n: 5, label: 'En Fabricación',               short: 'Fabricación',  color: 'var(--st-4)', icon: 'factory',     hint: 'Fabricación en proceso, logística da seguimiento' },
   { id: 'entrega_est',  n: 6, label: 'Entrega por vencer',           short: 'Por Vencer',   color: 'var(--st-5)', icon: 'calendar',    hint: 'Faltan ≤5 días para la entrega y el cliente aún no paga el total' },
-  { id: 'pago',         n: 7, label: 'Pago Recibido',                short: 'Pago Recibido',color: 'var(--st-6)', icon: 'money',       hint: 'Cliente pagó completo, logística coordina envío' },
-  { id: 'coordinacion', n: 8, label: 'Coordinación Envío/Instalación',short: 'Coordinación',color: 'var(--st-7)', icon: 'truck',      hint: 'Define proveedores de servicio, crea remisión' },
-  { id: 'instalacion',  n: 9, label: 'Instalación en Curso',         short: 'Instalación',  color: 'var(--st-8)', icon: 'layers',      hint: 'Material en destino con instaladores' },
-  { id: 'finalizado',   n: 10, label: 'Finalizado',                   short: 'Finalizado',   color: 'var(--st-9)', icon: 'check',       hint: 'Carta fin de obra firmada, proyecto cerrado' },
+  { id: 'vencido',      n: 7, label: 'Entrega vencida',              short: 'Vencido',      color: 'var(--st-11)', icon: 'alert',      hint: 'La fecha de entrega ya pasó y el cliente aún no paga el total' },
+  { id: 'pago',         n: 8, label: 'Pago Recibido',                short: 'Pago Recibido',color: 'var(--st-6)', icon: 'money',       hint: 'Cliente pagó completo, logística coordina envío' },
+  { id: 'coordinacion', n: 9, label: 'Coordinación Envío/Instalación',short: 'Coordinación',color: 'var(--st-7)', icon: 'truck',      hint: 'Define proveedores de servicio, crea remisión' },
+  { id: 'instalacion',  n: 10, label: 'Instalación en Curso',        short: 'Instalación',  color: 'var(--st-8)', icon: 'layers',      hint: 'Material en destino con instaladores' },
+  { id: 'finalizado',   n: 11, label: 'Finalizado',                  short: 'Finalizado',   color: 'var(--st-9)', icon: 'check',       hint: 'Carta fin de obra firmada, proyecto cerrado' },
 ]
 export const STAGE_MAP = Object.fromEntries(STAGES.map(s => [s.id, s])) as Record<StageId, Stage>
 export const stageIndex = (id: StageId) => STAGES.findIndex(s => s.id === id)
+/** Etapas a las que solo entra el sistema (según fecha ETA); los botones manuales de
+ *  "Avanzar / Regresar" las saltan para no ofrecer "Avanzar a Vencido". */
+export const AUTO_ONLY_STAGES: ReadonlySet<StageId> = new Set<StageId>(['vencido'])
+/** Siguiente / anterior etapa para el avance MANUAL (salta las etapas automáticas). */
+export const manualNextStage = (id: StageId): Stage | undefined => STAGES.slice(stageIndex(id) + 1).find(s => !AUTO_ONLY_STAGES.has(s.id))
+export const manualPrevStage = (id: StageId): Stage | undefined => STAGES.slice(0, stageIndex(id)).reverse().find(s => !AUTO_ONLY_STAGES.has(s.id))
 
 /* ---- Helpers ---- */
 // Todos los montos se muestran con 2 decimales (nada se redondea a entero).
@@ -277,7 +288,7 @@ export const regimenLabel = (code?: string) =>
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
-  movementLists: [], movements: [], campaigns: [], prospects: [], agendaEvents: [], warehouse: [],
+  movementLists: [], movements: [], campaigns: [], bankTxs: [], cfdiDocs: [], prospects: [], agendaEvents: [], warehouse: [],
   invFamilies: [], invItems: [], invMoves: [],
   settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {} },
   activity: [], notifications: [],
@@ -368,7 +379,13 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'LOGOUT': return { ...state, currentUser: null }
     case 'UPSERT_PROJECT': return { ...state, projects: upsertBy(state.projects, a.project) }
     case 'REMOVE_PROJECT':
-      return { ...state, projects: state.projects.filter(p => p.id !== a.id), clientPayments: state.clientPayments.filter(c => c.projectId !== a.id) }
+      return {
+        ...state,
+        projects: state.projects.filter(p => p.id !== a.id),
+        clientPayments: state.clientPayments.filter(c => c.projectId !== a.id),
+        // Los abonos del banco ligados a ese proyecto vuelven a "sin asignar" (la base hace SET NULL).
+        bankTxs: state.bankTxs.map(t => (t.projectId === a.id ? { ...t, projectId: undefined, clientPaymentId: undefined, paymentCreated: false } : t)),
+      }
     case 'UPSERT_ORDER': return { ...state, orders: upsertBy(state.orders, a.order) }
     case 'REMOVE_ORDER':
       return { ...state, orders: state.orders.filter(o => o.id !== a.id), payments: state.payments.filter(p => p.orderId !== a.id) }
@@ -394,6 +411,18 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_MOVEMENT': return { ...state, movements: state.movements.filter(m => m.id !== a.id) }
     case 'UPSERT_CAMPAIGN': return { ...state, campaigns: upsertBy(state.campaigns, a.campaign) }
     case 'REMOVE_CAMPAIGN': return { ...state, campaigns: state.campaigns.filter(c => c.id !== a.id) }
+    case 'UPSERT_BANK_TX': return { ...state, bankTxs: upsertBy(state.bankTxs, a.tx) }
+    case 'UPSERT_BANK_TXS': {
+      // Lote: se ignoran los que ya existan por hash (mismo criterio que la base).
+      const seen = new Set(state.bankTxs.map(t => t.hash))
+      const fresh = a.txs.filter(t => !seen.has(t.hash))
+      return fresh.length ? { ...state, bankTxs: [...fresh, ...state.bankTxs] } : state
+    }
+    case 'REMOVE_BANK_TX':
+      // Sus CFDI se van con él (la base hace CASCADE).
+      return { ...state, bankTxs: state.bankTxs.filter(t => t.id !== a.id), cfdiDocs: state.cfdiDocs.filter(d => d.bankTxId !== a.id) }
+    case 'UPSERT_CFDI_DOC': return { ...state, cfdiDocs: upsertBy(state.cfdiDocs, a.doc) }
+    case 'REMOVE_CFDI_DOC': return { ...state, cfdiDocs: state.cfdiDocs.filter(d => d.id !== a.id) }
     case 'UPSERT_PROSPECT': return { ...state, prospects: upsertBy(state.prospects, a.prospect) }
     case 'REMOVE_PROSPECT': return { ...state, prospects: state.prospects.filter(p => p.id !== a.id) }
     case 'UPSERT_AGENDA_EVENT': return { ...state, agendaEvents: upsertBy(state.agendaEvents, a.event) }
@@ -452,6 +481,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  // Aviso: PRIMER cobro "Cobrado" del proyecto (transición 0→1) → ya se puede emitir
+  // la OC al proveedor. Avisa a los administradores (no se repite en cobros siguientes).
+  // Lo usan tanto el cobro capturado a mano como la conciliación desde Bancos.
+  const notifyFirstCobro = React.useCallback((st: AppState, full: ClientPayment) => {
+    if (full.status !== 'Cobrado' || !full.projectId) return
+    const hadCobradoBefore = st.clientPayments.some(c => c.id !== full.id && c.projectId === full.projectId && c.status === 'Cobrado')
+    if (hadCobradoBefore) return
+    const proj = st.projects.find(p => p.id === full.projectId)
+    const admins = st.users.filter(u => isAdminRole(u.role) && u.active && u.id !== st.currentUser?.id)
+    notify(admins, {
+      kind: 'client_anticipo_paid',
+      title: `Anticipo recibido: ${proj?.code ?? ''}`,
+      body: `Ya entró el anticipo${proj ? ` de ${sel.clientName(st, proj.client)}` : ''}. Puedes emitir la orden de compra.`,
+      projectId: full.projectId,
+    })
+  }, [notify])
+
   // Avisa al VENDEDOR del proyecto que cambió de etapa (movida manual o auto-avance).
   // Solo aplica si ese vendedor tiene usuario con login (los vendedores del catálogo sin
   // usuario comparten id con el usuario cuando lo tienen) y no es quien hizo el cambio.
@@ -508,6 +554,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           kind: 'project_due_soon',
           title: `Por vencer: ${proj.code}`,
           body: `Entrega en ≤${ENTREGA_EST_DIAS_PREVIOS} días y el cliente aún debe ${fmtMoney(saldo)}.`,
+          projectId: proj.id,
+        })
+      } else if (stage === 'vencido') {
+        // Vencido: la fecha de entrega ya pasó y el cliente sigue sin liquidar → avisa a admins.
+        const saldo = sel.projectSaldoCliente(ns, updated)
+        const dias = -(daysBetween(proj.eta) ?? 0)
+        notify(others(r => isAdminRole(r)), {
+          kind: 'project_overdue',
+          title: `Vencido: ${proj.code}`,
+          body: `La entrega venció hace ${dias} día${dias === 1 ? '' : 's'} y el cliente aún debe ${fmtMoney(saldo)}.`,
           projectId: proj.id,
         })
       } else if (stage === 'pago') {
@@ -692,26 +748,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case 'SAVE_CLIENT_PAYMENT': {
         const full: ClientPayment = { ...(action.payment as ClientPayment), id: action.payment.id ?? uid('cp') }
         rawDispatch({ type: 'UPSERT_CLIENT_PAYMENT', payment: full })
-        // Aviso: PRIMER cobro "Cobrado" del proyecto (transición 0→1) → ya se puede emitir
-        // la OC al proveedor. Avisa a los administradores (no se repite en cobros siguientes).
-        if (full.status === 'Cobrado' && full.projectId) {
-          const hadCobradoBefore = s.clientPayments.some(c => c.id !== full.id && c.projectId === full.projectId && c.status === 'Cobrado')
-          if (!hadCobradoBefore) {
-            const proj = s.projects.find(p => p.id === full.projectId)
-            const admins = s.users.filter(u => isAdminRole(u.role) && u.active && u.id !== s.currentUser?.id)
-            notify(admins, {
-              kind: 'client_anticipo_paid',
-              title: `Anticipo recibido: ${proj?.code ?? ''}`,
-              body: `Ya entró el anticipo${proj ? ` de ${sel.clientName(s, proj.client)}` : ''}. Puedes emitir la orden de compra.`,
-              projectId: full.projectId,
-            })
-          }
-        }
+        notifyFirstCobro(s, full)
         persist([() => saveClientPayment(full)]); return
       }
-      case 'DELETE_CLIENT_PAYMENT':
+      case 'DELETE_CLIENT_PAYMENT': {
         rawDispatch({ type: 'REMOVE_CLIENT_PAYMENT', id: action.id })
-        persist([() => apiDeleteClientPayment(action.id)]); return
+        const thunks: (() => Promise<void>)[] = [() => apiDeleteClientPayment(action.id)]
+        // Si el cobro venía de un abono del banco, ese abono vuelve a "sin asignar".
+        const linked = s.bankTxs.find(t => t.clientPaymentId === action.id)
+        if (linked) {
+          const freed: BankTransaction = { ...linked, projectId: undefined, clientPaymentId: undefined, paymentCreated: false }
+          rawDispatch({ type: 'UPSERT_BANK_TX', tx: freed })
+          thunks.push(() => saveBankTx(freed))
+        }
+        persist(thunks); return
+      }
 
       case 'SAVE_CLIENT': {
         const existing = s.clients.find(c => c.id === action.client.id)
@@ -1204,6 +1255,101 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => apiDeleteCampaign(action.id)]); return
       }
 
+      /* ---- Bancos: estado de cuenta ---- */
+      case 'IMPORT_BANK_TXS': {
+        const seen = new Set(s.bankTxs.map(t => t.hash))
+        const full: BankTransaction[] = action.txs
+          .filter(t => !seen.has(t.hash))
+          .map(t => ({ ...(t as BankTransaction), id: t.id ?? uid('btx'), importedBy: t.importedBy ?? s.currentUser?.id, importedAt: t.importedAt ?? nowISO() }))
+        if (!full.length) return
+        rawDispatch({ type: 'UPSERT_BANK_TXS', txs: full })
+        const abonos = full.filter(t => t.kind === 'abono').length
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `importó ${full.length} movimiento${full.length === 1 ? '' : 's'} del estado de cuenta (${abonos} abono${abonos === 1 ? '' : 's'})`, tgt: full[0].bank, kind: 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        persist([() => insertBankTxs(full), () => saveActivity(activity)]); return
+      }
+      case 'ASSIGN_BANK_TX': {
+        const tx = s.bankTxs.find(t => t.id === action.id); if (!tx) return
+        const proj = s.projects.find(p => p.id === action.projectId); if (!proj) return
+        const method = `${tx.bank}${tx.bankFrom ? ' · ' + tx.bankFrom : ''}${tx.reference ? ' · ' + tx.reference : ''}`
+        let cp: ClientPayment
+        let created = false
+        const existing = action.clientPaymentId ? s.clientPayments.find(c => c.id === action.clientPaymentId) : undefined
+        if (existing) {
+          // Liga un cobro ya capturado (normalmente "Programado"): toma fecha/importe reales del banco.
+          cp = { ...existing, status: 'Cobrado', date: tx.date, amount: tx.amount, method, concept: action.concept || existing.concept }
+        } else {
+          const n = Math.max(0, ...s.clientPayments.filter(c => c.projectId === proj.id).map(c => c.n)) + 1
+          cp = { id: uid('cp'), projectId: proj.id, n, date: tx.date, amount: tx.amount, concept: action.concept || 'Abono', method, status: 'Cobrado', comments: `Conciliado con estado de cuenta ${tx.bank}${tx.detail ? ` · "${tx.detail}"` : ''}` }
+          created = true
+        }
+        // Si el abono ya estaba ligado a OTRO cobro creado desde él, ese cobro se borra (se sustituye).
+        const prevCreated = tx.paymentCreated && tx.clientPaymentId && tx.clientPaymentId !== cp.id ? tx.clientPaymentId : undefined
+        const updated: BankTransaction = { ...tx, projectId: proj.id, clientPaymentId: cp.id, paymentCreated: created, category: 'cliente' }
+        if (prevCreated) rawDispatch({ type: 'REMOVE_CLIENT_PAYMENT', id: prevCreated })
+        rawDispatch({ type: 'UPSERT_CLIENT_PAYMENT', payment: cp })
+        rawDispatch({ type: 'UPSERT_BANK_TX', tx: updated })
+        notifyFirstCobro(s, cp)
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `concilió un abono de ${fmtMoney(tx.amount)} con`, tgt: proj.code, kind: 'done' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        // Orden importa (FK): primero el cobro, luego el abono que lo referencia, al final el borrado del anterior.
+        persist([
+          () => saveClientPayment(cp).then(() => saveBankTx(updated)).then(() => (prevCreated ? apiDeleteClientPayment(prevCreated) : Promise.resolve())),
+          () => saveActivity(activity),
+        ]); return
+      }
+      case 'UNASSIGN_BANK_TX': {
+        const tx = s.bankTxs.find(t => t.id === action.id); if (!tx) return
+        const freed: BankTransaction = { ...tx, projectId: undefined, clientPaymentId: undefined, paymentCreated: false }
+        rawDispatch({ type: 'UPSERT_BANK_TX', tx: freed })
+        const toDelete = tx.paymentCreated ? tx.clientPaymentId : undefined
+        if (toDelete) rawDispatch({ type: 'REMOVE_CLIENT_PAYMENT', id: toDelete })
+        persist([() => saveBankTx(freed).then(() => (toDelete ? apiDeleteClientPayment(toDelete) : Promise.resolve()))]); return
+      }
+      case 'SET_BANK_TX_CATEGORY': {
+        const tx = s.bankTxs.find(t => t.id === action.id); if (!tx) return
+        const updated: BankTransaction = { ...tx, category: action.category, notes: action.notes ?? tx.notes }
+        rawDispatch({ type: 'UPSERT_BANK_TX', tx: updated })
+        persist([() => saveBankTx(updated)]); return
+      }
+      case 'DELETE_BANK_TX': {
+        const tx = s.bankTxs.find(t => t.id === action.id); if (!tx) return
+        rawDispatch({ type: 'REMOVE_BANK_TX', id: action.id })
+        const toDelete = tx.paymentCreated ? tx.clientPaymentId : undefined
+        if (toDelete) rawDispatch({ type: 'REMOVE_CLIENT_PAYMENT', id: toDelete })
+        // Archivos de sus CFDI en Storage: se quitan best-effort (las filas caen por CASCADE).
+        const files = s.cfdiDocs.filter(d => d.bankTxId === tx.id).flatMap(d => [d.pdfPath, d.xmlPath]).filter((p): p is string => !!p)
+        for (const p of files) apiDeleteDoc(p).catch(() => { /* best-effort */ })
+        persist([() => apiDeleteBankTx(action.id).then(() => (toDelete ? apiDeleteClientPayment(toDelete) : Promise.resolve()))]); return
+      }
+      case 'SAVE_CFDI_DOC': {
+        const tx = s.bankTxs.find(t => t.id === action.doc.bankTxId); if (!tx) return
+        const isNew = !action.doc.id || !s.cfdiDocs.some(d => d.id === action.doc.id)
+        const full: CfdiDoc = {
+          ...(action.doc as CfdiDoc),
+          id: action.doc.id ?? uid('cfdi'),
+          projectId: action.doc.projectId ?? tx.projectId,
+          createdBy: action.doc.createdBy ?? s.currentUser?.id,
+          createdAt: action.doc.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_CFDI_DOC', doc: full })
+        const thunks: (() => Promise<void>)[] = [() => saveCfdiDoc(full)]
+        if (isNew) {
+          const proj = full.projectId ? s.projects.find(p => p.id === full.projectId) : undefined
+          const label = full.kind === 'factura' ? 'la factura' : 'el complemento de pago'
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'doc', who: whoName(s), txt: `cargó ${label}${full.folio ? ` ${full.serie}${full.serie && full.folio ? '-' : ''}${full.folio}` : ''} del abono de ${fmtMoney(tx.amount)}`, tgt: proj?.code ?? tx.bank, kind: 'info' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        persist(thunks); return
+      }
+      case 'DELETE_CFDI_DOC': {
+        const doc = s.cfdiDocs.find(d => d.id === action.id); if (!doc) return
+        rawDispatch({ type: 'REMOVE_CFDI_DOC', id: action.id })
+        for (const p of [doc.pdfPath, doc.xmlPath]) if (p) apiDeleteDoc(p).catch(() => { /* best-effort */ })
+        persist([() => apiDeleteCfdiDoc(action.id)]); return
+      }
+
       /* ---- Almacén: cola de trabajo ---- */
       case 'SAVE_WAREHOUSE_ITEM': {
         const prev = s.warehouse.find(w => w.id === action.item.id); if (!prev) return
@@ -1506,7 +1652,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => markAllNotificationsRead()]); return
       }
     }
-  }, [persist, notify, notifySellerStage])
+  }, [persist, notify, notifySellerStage, notifyFirstCobro])
 
   // Reconciliación: tras cualquier cambio en proyectos / OC / pagos / cobros
   // (incluida la carga inicial), recalcula etapa y finiquito de cada proyecto.
@@ -1594,6 +1740,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movement_lists':  rawDispatch({ type: 'REMOVE_MOVEMENT_LIST', id: c.id }); break
           case 'movements':       rawDispatch({ type: 'REMOVE_MOVEMENT', id: c.id }); break
           case 'campaigns':       rawDispatch({ type: 'REMOVE_CAMPAIGN', id: c.id }); break
+          case 'bank_transactions': rawDispatch({ type: 'REMOVE_BANK_TX', id: c.id }); break
+          case 'cfdi_docs':       rawDispatch({ type: 'REMOVE_CFDI_DOC', id: c.id }); break
           case 'prospects':       rawDispatch({ type: 'REMOVE_PROSPECT', id: c.id }); break
           case 'agenda_events':   rawDispatch({ type: 'REMOVE_AGENDA_EVENT', id: c.id }); break
           case 'warehouse_queue': rawDispatch({ type: 'REMOVE_WAREHOUSE_ITEM', id: c.id }); break
@@ -1615,6 +1763,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movement_lists':  rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: c.row }); break
           case 'movements':       rawDispatch({ type: 'UPSERT_MOVEMENT', movement: c.row }); break
           case 'campaigns':       rawDispatch({ type: 'UPSERT_CAMPAIGN', campaign: c.row }); break
+          case 'bank_transactions': rawDispatch({ type: 'UPSERT_BANK_TX', tx: c.row }); break
+          case 'cfdi_docs':       rawDispatch({ type: 'UPSERT_CFDI_DOC', doc: c.row }); break
           case 'prospects':       rawDispatch({ type: 'UPSERT_PROSPECT', prospect: c.row }); break
           case 'agenda_events':   rawDispatch({ type: 'UPSERT_AGENDA_EVENT', event: c.row }); break
           case 'warehouse_queue': rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item: c.row }); break
@@ -1639,6 +1789,10 @@ export function useStore(): StoreValue {
 /* ---- Selectors ---- */
 export const sel = {
   clientName: (state: AppState, id: string) => (state.clients.find(c => c.id === id) || ({} as Client)).name || '—',
+  /** Abono del banco ligado a un cobro (si el cobro se concilió desde Bancos). */
+  bankTxForPayment: (state: AppState, cpId: string) => state.bankTxs.find(t => t.clientPaymentId === cpId),
+  /** CFDI (facturas / complementos) de un abono, en orden de carga. */
+  cfdiForTx: (state: AppState, txId: string) => state.cfdiDocs.filter(d => d.bankTxId === txId),
   client: (state: AppState, id: string) => state.clients.find(c => c.id === id),
   seller: (state: AppState, id: string) => state.sellers.find(s => s.id === id),
   sellerName: (state: AppState, id: string) => (state.sellers.find(s => s.id === id) || ({} as Seller)).name || '—',
@@ -1933,11 +2087,15 @@ export function autoStageFor(state: AppState, p: Project): StageId | null {
   const total = sel.projectTotalConIva(p)
   if (total > 0 && sel.projectCobrado(state, p.id) >= total - 0.5) return 'pago'
   const anticipoProveedor = sel.projectAnticipoProveedor(state, p.id)
-  // 6 · Por Vencer — material en fabricación y faltan ≤ 5 días para la fecha ETA
-  //     (o ya venció). Se adelanta el salto a esta etapa para detectar a tiempo los
-  //     proyectos próximos a vencer que aún no han recibido el pago del cliente.
+  // 7 · Vencido — material en fabricación, la fecha ETA ya pasó y el cliente no ha pagado.
+  // 6 · Por Vencer — material en fabricación y faltan ≤ 5 días para la fecha ETA.
+  //     Se adelanta el salto a esta etapa para detectar a tiempo los proyectos
+  //     próximos a vencer que aún no han recibido el pago del cliente.
   const etaDays = daysBetween(p.eta)
-  if (anticipoProveedor && p.eta && etaDays != null && etaDays <= ENTREGA_EST_DIAS_PREVIOS) return 'entrega_est'
+  if (anticipoProveedor && p.eta && etaDays != null) {
+    if (etaDays < 0) return 'vencido'
+    if (etaDays <= ENTREGA_EST_DIAS_PREVIOS) return 'entrega_est'
+  }
   // 5 · Fabricación — se pagó anticipo al proveedor.
   if (anticipoProveedor) return 'fabricacion'
   // 4 · Orden de Compra — ya existe la OC del proyecto.

@@ -10,11 +10,11 @@ import { Modal, StageBadge } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Project } from '../../core/types'
 
-/** Un proyecto está "por vencer" si está en la etapa Por Vencer (entrega_est), o si
- *  su ETA ya venció y todavía no llega a "Pago Recibido" (red de seguridad). */
+/** Un proyecto está "por vencer" si está en la etapa Por Vencer (entrega_est) o Vencido,
+ *  o si su ETA ya venció y todavía no llega a "Pago Recibido" (red de seguridad). */
 export const isDueSoon = (p: Project): boolean => {
   if (p.stage === 'finalizado') return false
-  if (p.stage === 'entrega_est') return true
+  if (p.stage === 'entrega_est' || p.stage === 'vencido') return true
   const d = daysBetween(p.eta)
   return !!p.eta && d != null && d < 0 && stageIndex(p.stage) < stageIndex('pago')
 }
@@ -57,7 +57,7 @@ export function DueSoonModal({ onOpenProject }: { onOpenProject: (p: Project) =>
   const openOne = (p: Project) => onOpenProject(p)
 
   return (
-    <Modal width={860} icon="calendar" title="Proyectos por vencer"
+    <Modal width={860} icon="calendar" title="Proyectos por vencer y vencidos"
       sub={`Tienes ${list.length} proyecto${list.length === 1 ? '' : 's'} que requieren prioridad`}
       onClose={close}
       footer={<><div className="flex-1"></div>

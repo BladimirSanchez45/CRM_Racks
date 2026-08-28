@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -109,9 +109,9 @@ type ProjectFormState = {
 export function MoveStage({ project }: { project: Project }) {
   const { state, dispatch } = useStore()
   const [open, setOpen] = React.useState(false)
-  const cur = stageIndex(project.stage)
-  const next = STAGES[cur + 1]
-  const prev = STAGES[cur - 1]
+  // Saltan las etapas automáticas (p. ej. "Vencido"): esas solo las pone el sistema.
+  const next = manualNextStage(project.stage)
+  const prev = manualPrevStage(project.stage)
   // Requisito faltante para avanzar a la siguiente etapa (null = se puede avanzar).
   const nextBlocked = next ? stageBlockedReason(state, project, next.id) : null
   return (

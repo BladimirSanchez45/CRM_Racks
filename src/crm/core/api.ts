@@ -8,7 +8,7 @@ import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
   Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
-  AgendaEvent, WarehouseItem, InventoryFamily, InventoryItem, InventoryMove,
+  AgendaEvent, WarehouseItem, InventoryFamily, InventoryItem, InventoryMove, BankTransaction, CfdiDoc,
 } from './types'
 import { WAREHOUSE_DAYS_DEFAULT } from './types'
 
@@ -523,6 +523,88 @@ export async function fetchCampaigns(): Promise<Campaign[]> {
 export const saveCampaign = (c: Campaign) => upsert('campaigns', campaignRow(c))
 export const deleteCampaign = (id: string) => removeRow('campaigns', id)
 
+/* ---- Bancos: renglones del estado de cuenta ---- */
+function mapBankTx(r: any): BankTransaction {
+  return {
+    id: r.id, bank: r.bank ?? 'BBVA', date: r.date ?? '', kind: r.kind, amount: Number(r.amount ?? 0),
+    ...(r.balance != null ? { balance: Number(r.balance) } : {}),
+    concept: r.concept ?? '', detail: r.detail ?? '', reference: r.reference ?? '', numRef: r.num_ref ?? '', bankFrom: r.bank_from ?? '',
+    hash: r.hash, category: r.category ?? 'cliente',
+    ...(r.project_id ? { projectId: r.project_id } : {}),
+    ...(r.client_payment_id ? { clientPaymentId: r.client_payment_id } : {}),
+    paymentCreated: !!r.payment_created, notes: r.notes ?? '',
+    ...(r.imported_by ? { importedBy: r.imported_by } : {}),
+    importedAt: r.imported_at ?? '',
+  }
+}
+function bankTxRow(t: BankTransaction): Record<string, unknown> {
+  return {
+    id: t.id, bank: t.bank, date: t.date, kind: t.kind, amount: t.amount, balance: t.balance ?? null,
+    concept: t.concept, detail: t.detail, reference: t.reference, num_ref: t.numRef, bank_from: t.bankFrom, hash: t.hash,
+    category: t.category, project_id: t.projectId ?? null, client_payment_id: t.clientPaymentId ?? null,
+    payment_created: t.paymentCreated, notes: t.notes, imported_by: t.importedBy ?? null, imported_at: t.importedAt,
+  }
+}
+export async function fetchBankTxs(): Promise<BankTransaction[]> {
+  const { data, error } = await supabase.from('bank_transactions').select('*').order('date', { ascending: false })
+  if (error) {
+    // Si todavía no se corrió step28_bancos.sql (tabla inexistente), no tumbar la carga
+    // de TODA la app: Bancos simplemente arranca vacío y se avisa en consola.
+    if (error.code === 'PGRST205' || /bank_transactions/.test(error.message ?? '')) {
+      console.warn('[supabase] Falta la tabla bank_transactions (corre database/step28_bancos.sql):', error.message)
+      return []
+    }
+    throw error
+  }
+  return (data ?? []).map(mapBankTx)
+}
+export const saveBankTx = (t: BankTransaction) => upsert('bank_transactions', bankTxRow(t))
+/** Inserta en lote; los renglones cuyo hash ya exista se ignoran (dedupe a nivel base). */
+export async function insertBankTxs(txs: BankTransaction[]): Promise<void> {
+  if (!txs.length) return
+  const { error } = await supabase.from('bank_transactions').upsert(txs.map(bankTxRow), { onConflict: 'hash', ignoreDuplicates: true })
+  if (error) throw error
+}
+export const deleteBankTx = (id: string) => removeRow('bank_transactions', id)
+
+/* ---- CFDI (factura / complemento de pago) por abono ---- */
+function mapCfdi(r: any): CfdiDoc {
+  return {
+    id: r.id, bankTxId: r.bank_tx_id, kind: r.kind,
+    ...(r.project_id ? { projectId: r.project_id } : {}),
+    uuid: r.uuid ?? '', serie: r.serie ?? '', folio: r.folio ?? '', fecha: r.fecha ?? '',
+    total: Number(r.total ?? 0), metodoPago: r.metodo_pago ?? '',
+    rfcReceptor: r.rfc_receptor ?? '', nombreReceptor: r.nombre_receptor ?? '', relatedUuid: r.related_uuid ?? '',
+    ...(r.pdf ? { pdf: r.pdf } : {}), ...(r.pdf_path ? { pdfPath: r.pdf_path } : {}),
+    ...(r.xml ? { xml: r.xml } : {}), ...(r.xml_path ? { xmlPath: r.xml_path } : {}),
+    notes: r.notes ?? '',
+    ...(r.created_by ? { createdBy: r.created_by } : {}),
+    createdAt: r.created_at ?? '',
+  }
+}
+function cfdiRow(d: CfdiDoc): Record<string, unknown> {
+  return {
+    id: d.id, bank_tx_id: d.bankTxId, project_id: d.projectId ?? null, kind: d.kind,
+    uuid: d.uuid, serie: d.serie, folio: d.folio, fecha: orNull(d.fecha), total: d.total, metodo_pago: d.metodoPago,
+    rfc_receptor: d.rfcReceptor, nombre_receptor: d.nombreReceptor, related_uuid: d.relatedUuid,
+    pdf: d.pdf ?? null, pdf_path: d.pdfPath ?? null, xml: d.xml ?? null, xml_path: d.xmlPath ?? null,
+    notes: d.notes, created_by: d.createdBy ?? null, created_at: d.createdAt,
+  }
+}
+export async function fetchCfdiDocs(): Promise<CfdiDoc[]> {
+  const { data, error } = await supabase.from('cfdi_docs').select('*').order('created_at', { ascending: true })
+  if (error) {
+    if (error.code === 'PGRST205' || /cfdi_docs/.test(error.message ?? '')) {
+      console.warn('[supabase] Falta la tabla cfdi_docs (corre database/step29_cfdi.sql):', error.message)
+      return []
+    }
+    throw error
+  }
+  return (data ?? []).map(mapCfdi)
+}
+export const saveCfdiDoc = (d: CfdiDoc) => upsert('cfdi_docs', cfdiRow(d))
+export const deleteCfdiDoc = (id: string) => removeRow('cfdi_docs', id)
+
 /* ---- Agenda personal (pendientes, recordatorios y citas) ----
    Las horas se guardan como texto 'HH:MM' (no TIME) para que el front no tenga
    que lidiar con zonas horarias ni con el formato 'HH:MM:SS' de Postgres. */
@@ -869,6 +951,8 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   movement_lists: mapMovementList,
   movements: mapMovement,
   campaigns: mapCampaign,
+  bank_transactions: mapBankTx,
+  cfdi_docs: mapCfdi,
   prospects: mapProspect,
   agenda_events: mapAgendaEvent,
   warehouse_queue: mapWarehouseItem,
@@ -948,12 +1032,12 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchBankTxs(), fetchCfdiDocs(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(),
       fetchInvFamilies(), fetchInvItems(), fetchInvMoves(), fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications }
 }
