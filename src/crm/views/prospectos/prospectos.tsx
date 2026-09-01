@@ -5,7 +5,7 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, canSeeAllProspects } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
@@ -280,7 +280,7 @@ const hoyISO = () => {
 function ProspectComments({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
-  const readOnly = isDireccion(me?.role)
+  const readOnly = isDireccion(me?.role) || isMarketing(me?.role)
   const p = state.prospects.find(x => x.id === prospect.id) || prospect
   const comments = p.comments || []
   const [text, setText] = React.useState('')
@@ -329,7 +329,7 @@ function ProspectComments({ prospect, onClose }: { prospect: Prospect; onClose: 
 function ProspectEval({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
-  const readOnly = isDireccion(me?.role)
+  const readOnly = isDireccion(me?.role) || isMarketing(me?.role)
   const p = state.prospects.find(x => x.id === prospect.id) || prospect
   const [e, setE] = React.useState<ProspectEvaluation>(() => p.evaluacion
     ? { ...p.evaluacion }
@@ -398,7 +398,7 @@ function ProspectEval({ prospect, onClose }: { prospect: Prospect; onClose: () =
 export function ProspectosPage() {
   const { state, dispatch } = useStore()
   const me = state.currentUser
-  const readOnly = isDireccion(me?.role)   // dirección: solo lectura
+  const readOnly = isDireccion(me?.role) || isMarketing(me?.role)   // dirección y marketing: solo lectura
 
   const [form, setForm] = React.useState<Prospect | {} | null>(null)
   const [convert, setConvert] = React.useState<Prospect | null>(null)
@@ -699,7 +699,7 @@ export function ProspectosPage() {
 export function PerdidosPage() {
   const { state, dispatch } = useStore()
   const me = state.currentUser
-  const readOnly = isDireccion(me?.role)
+  const readOnly = isDireccion(me?.role) || isMarketing(me?.role)
   const verTodo = canSeeAllProspects(me)
 
   const [q, setQ] = React.useState('')

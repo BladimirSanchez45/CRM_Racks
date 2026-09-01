@@ -330,6 +330,11 @@ export interface AppSettings {
   /** Metas de ventas por mes ('YYYY-MM' → subtotal sin IVA). Editable por admin.
    *  Un mes sin meta capturada hereda la del mes anterior más reciente (o el default). */
   salesGoals: Record<string, number>
+  /** Metas PERSONALES por mes ('YYYY-MM' → { vendedorId → subtotal sin IVA }).
+   *  Quien no tiene meta propia recibe el reparto (meta del equipo ÷ vendedores).
+   *  Misma herencia que salesGoals: un mes sin captura toma la del mes anterior
+   *  más reciente para ese vendedor; `null` = "vuelve al reparto" desde ese mes. */
+  salesGoalsPersonal: Record<string, Record<string, number | null>>
 }
 
 export const SALES_GOAL_DEFAULT = 6_400_000
@@ -342,14 +347,18 @@ export interface DocRef {
 }
 
 export interface ProjectDocs {
-  cotizacion: DocRef        // Cotización
+  /** Cotizaciones en PDF (varias: a veces se cotizan opciones o fases). Los
+   *  proyectos viejos guardaban UN objeto; api.normalizeDocs lo vuelve lista. */
+  cotizacion: DocRef[]
   layout: DocRef            // Lay out
   anticipo: DocRef          // Comprobante de anticipo
   ordenCompra: DocRef[]     // Órdenes de compra (una por OC generada; varios espacios)
   finiquito: DocRef         // Comprobante de finiquito
   remision: DocRef          // Remisión de salida
   cartaFin: DocRef          // Carta fin de obra
-  excel?: DocRef            // Excel del proyecto (control / cotización en hoja de cálculo). Opcional.
+  /** Excel(es) del proyecto: cotizadores / control en hoja de cálculo (varios).
+   *  Mismo legado que `cotizacion`: objeto único → lista. */
+  excel: DocRef[]
   evidencia?: DocRef[]      // Imágenes de evidencia de obra terminada (varias). Requisito para finalizar.
 }
 
@@ -899,6 +908,8 @@ export type Action =
   | { type: 'SAVE_WAREHOUSE_DAYS'; days: WarehouseDays }
   // Meta de ventas de UN mes ('YYYY-MM'); la edita admin desde el panel.
   | { type: 'SAVE_SALES_GOAL'; month: string; goal: number }
+  // Meta PERSONAL de un vendedor para UN mes; `goal: null` la quita (vuelve al reparto).
+  | { type: 'SAVE_SALES_GOAL_PERSONAL'; month: string; sellerId: string; goal: number | null }
   /* ---- Inventario ---- */
   | { type: 'SAVE_INV_FAMILY'; family: InventoryFamilyInput }
   | { type: 'DELETE_INV_FAMILY'; id: string }

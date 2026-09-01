@@ -215,14 +215,18 @@ export const deleteSeller = (id: string) => removeRow('sellers', id)
 /* ---- Proyectos ---- */
 const emptyDoc = () => ({ name: '', ok: false })
 const emptyDocs = (): Project['docs'] => ({
-  cotizacion: emptyDoc(), layout: emptyDoc(), anticipo: emptyDoc(), ordenCompra: [],
-  finiquito: emptyDoc(), remision: emptyDoc(), cartaFin: emptyDoc(), evidencia: [],
+  cotizacion: [], layout: emptyDoc(), anticipo: emptyDoc(), ordenCompra: [],
+  finiquito: emptyDoc(), remision: emptyDoc(), cartaFin: emptyDoc(), excel: [], evidencia: [],
 })
-/** Normaliza los docs de un proyecto: `ordenCompra` y `evidencia` deben ser LISTAS.
- *  Proyectos viejos guardaban `ordenCompra` como un solo objeto → se convierte a [obj]. */
+/** Normaliza los docs de un proyecto: `cotizacion`, `excel`, `ordenCompra` y
+ *  `evidencia` deben ser LISTAS. Proyectos viejos guardaban un solo objeto en
+ *  cotizacion / excel / ordenCompra → se convierte a [obj] (o [] si estaba vacío). */
 function normalizeDocs(raw: any): Project['docs'] {
   const docs = { ...emptyDocs(), ...(raw ?? {}) } as any
-  if (!Array.isArray(docs.ordenCompra)) docs.ordenCompra = docs.ordenCompra && (docs.ordenCompra.ok || docs.ordenCompra.name) ? [docs.ordenCompra] : []
+  const toList = (v: any) => Array.isArray(v) ? v : (v && (v.ok || v.name) ? [v] : [])
+  docs.cotizacion = toList(docs.cotizacion)
+  docs.excel = toList(docs.excel)
+  docs.ordenCompra = toList(docs.ordenCompra)
   if (!Array.isArray(docs.evidencia)) docs.evidencia = []
   return docs as Project['docs']
 }
@@ -844,6 +848,11 @@ export async function fetchSettings(): Promise<AppSettings> {
       L: Number(wh?.L ?? WAREHOUSE_DAYS_DEFAULT.L),
     },
     salesGoals: Object.fromEntries(Object.entries((map['sales_goals'] as Record<string, unknown>) ?? {}).map(([k, v]) => [k, Number(v)])),
+    salesGoalsPersonal: Object.fromEntries(
+      Object.entries((map['sales_goals_personal'] as Record<string, Record<string, unknown>>) ?? {}).map(([ym, bySeller]) => [
+        ym,
+        Object.fromEntries(Object.entries(bySeller ?? {}).map(([sid, v]) => [sid, v == null ? null : Number(v)])),
+      ])),
   }
 }
 export const saveSetting = (key: string, value: unknown) =>

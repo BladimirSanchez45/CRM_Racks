@@ -103,8 +103,9 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   logistica: ['dashboard', 'agenda', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'ventas_stats', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
   ingenieria: ['dashboard', 'agenda', 'projects', 'ventas_stats', 'settings'],
-  // Marketing: módulos de Estadísticas por origen y Campañas (+ configuración personal).
-  marketing: ['agenda', 'estadisticas', 'campaigns', 'ventas_stats', 'settings'],
+  // Marketing: Estadísticas por origen, Campañas y Prospectos (solo lectura, ve a
+  // todo el equipo) + agenda, metas y configuración personal.
+  marketing: ['agenda', 'prospectos', 'estadisticas', 'campaigns', 'ventas_stats', 'settings'],
 }
 /** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
 const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null

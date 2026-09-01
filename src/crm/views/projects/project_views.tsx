@@ -2,13 +2,13 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
 import { ClientForm } from '../clients/clients'
 import { WarehouseProjectLine, WarehouseLoadStrip } from '../warehouse/warehouse'
-import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, InternalPayment, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
+import type { AppState, ClientPayment, ClientPaymentInput, ClientPaymentStatus, DocRef, InternalPayment, PayStatus, Project, ProjectDocs, StageId } from '../../core/types'
 
 /* ---- badge de estado de cobro + formulario de cobro del cliente ---- */
 const COBRO_COLOR: Record<ClientPaymentStatus, string> = { Cobrado: 'var(--ok)', Programado: 'var(--warn)', Cancelado: 'var(--tx-3)' }
@@ -268,6 +268,16 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
     dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, [k]: { name: v.name, ok: !!v.name, ...(v.path ? { path: v.path } : {}) } } } })
   const addEvidencia = (v: { name: string; path: string }) => { if (!v.name) return; dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, evidencia: [...(p.docs.evidencia || []), { name: v.name, ok: true, path: v.path }] } } }) }
   const removeEvidencia = (i: number) => dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, evidencia: (p.docs.evidencia || []).filter((_, idx) => idx !== i) } } })
+  // Cotizaciones (PDF) y Excels del cotizador, hasta MAX_DOCS_LISTA cada lista, desde la
+  // ficha: admin/logística siempre; ventas en SUS proyectos (sin importar la etapa).
+  const me = state.currentUser
+  const canUploadCotiz = !historial && (isAdminRole(me?.role) || me?.role === 'logistica' || (me?.role === 'ventas' && p.seller === me.id))
+  const addDocLista = (k: DocListKey, v: { name: string; path: string }) => {
+    if (!v.name || (p.docs[k] || []).length >= MAX_DOCS_LISTA) return
+    dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, [k]: [...(p.docs[k] || []), { name: v.name, ok: true, path: v.path }] } } })
+  }
+  const removeDocLista = (k: DocListKey, i: number) =>
+    dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, [k]: (p.docs[k] || []).filter((_, idx) => idx !== i) } } })
 
   return (
     <Modal width={760} onClose={onClose}
@@ -384,11 +394,30 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
       <div className="mt-5">
         <div className="label-k mb-2">Documentos ({docCount(p).done}/7)</div>
         <div className="flex flex-wrap gap-2">
+          {/* Cotizaciones y Excels son listas: un chip por archivo (o "faltante" si no hay ninguno) */}
+          {(p.docs.cotizacion || []).length
+            ? (p.docs.cotizacion || []).map((c, i) => <DocChip key={'cot' + i} doc={c} label={`Cotización ${i + 1}`} />)
+            : <DocChip label="Cotización" />}
           {DOC_LABELS.map(d => <DocChip key={d.key} doc={p.docs[d.key]} label={d.label} />)}
           {(p.docs.ordenCompra || []).map((oc, i) => <DocChip key={'oc' + i} doc={oc} label={`Orden de compra ${i + 1}`} />)}
-          <DocChip doc={p.docs.excel} label="Excel" />
+          {(p.docs.excel || []).length
+            ? (p.docs.excel || []).map((x, i) => <DocChip key={'xl' + i} doc={x} label={`Excel ${i + 1}`} />)
+            : <DocChip label="Excel" />}
         </div>
       </div>
+
+      {/* Cotizaciones y Excels (varios) sin abrir el formulario completo */}
+      {canUploadCotiz && (
+        <div className="mt-5">
+          <div className="label-k mb-2">Cotizaciones y Excel del cotizador</div>
+          <div className="grid grid-cols-2 gap-3.5">
+            <DocListField label="Cotización" docs={p.docs.cotizacion || []} folder={obraFolder} accept=".pdf,.jpg,.jpeg,.png"
+              onAdd={v => addDocLista('cotizacion', v)} onRemove={i => removeDocLista('cotizacion', i)} />
+            <DocListField label="Excel" docs={p.docs.excel || []} folder={obraFolder} accept=".xlsx,.xlsm,.xls,.csv"
+              onAdd={v => addDocLista('excel', v)} onRemove={i => removeDocLista('excel', i)} />
+          </div>
+        </div>
+      )}
 
       {/* Subida de documentos de obra (logística / admin) sin abrir el formulario completo */}
       {canUploadObra && (
@@ -520,8 +549,37 @@ const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
   client: '', seller: '', city: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending', created: TODAY_ISO,
-  docs: { cotizacion: docNo(), layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo() },
+  docs: { cotizacion: [], layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo(), excel: [], evidencia: [] },
 })
+
+/** Lista de archivos de un proyecto (cotizaciones PDF, excels): chips con vista
+ *  previa, botón para quitar y un campo para subir otro hasta `max`. */
+function DocListField({ label, docs, folder, accept, max = MAX_DOCS_LISTA, onAdd, onRemove }: {
+  label: string
+  docs: DocRef[]
+  folder: string
+  accept: string
+  max?: number
+  onAdd: (v: { name: string; path: string }) => void
+  onRemove: (i: number) => void
+}) {
+  return (
+    <div className="field">
+      <label>{label} ({docs.length}/{max})</label>
+      <div className="flex flex-col gap-2">
+        {docs.map((d, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <div className="flex-1 min-w-0"><DocChip doc={d} label={d.name || `${label} ${i + 1}`} /></div>
+            <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar" onClick={() => onRemove(i)}><Icon name="trash" size={13} /></button>
+          </div>
+        ))}
+        {docs.length < max
+          ? <FileField label="" value="" folder={folder} onChange={onAdd} accept={accept} />
+          : <div className="meta">Máximo {max}. Quita uno para subir otro.</div>}
+      </div>
+    </div>
+  )
+}
 
 /* ---- Vista rápida de la info del cliente desde el formulario de proyecto ---- */
 function ClientInfoModal({ clientId, onClose }: { clientId: string; onClose: () => void }) {
@@ -588,6 +646,12 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
   // Evidencia de obra terminada: lista de imágenes (varias). Requisito para finalizar.
   const addEvidencia = (v: { name: string; path: string }) => { if (!v.name) return; setP(s => ({ ...s, docs: { ...s.docs, evidencia: [...(s.docs.evidencia || []), { name: v.name, ok: true, path: v.path }] } })) }
   const removeEvidencia = (i: number) => setP(s => ({ ...s, docs: { ...s.docs, evidencia: (s.docs.evidencia || []).filter((_, idx) => idx !== i) } }))
+  // Cotizaciones (PDF) y Excels: listas de hasta MAX_DOCS_LISTA archivos cada una.
+  const addDocLista = (k: DocListKey, v: { name: string; path: string }) => {
+    if (!v.name) return
+    setP(s => (s.docs[k] || []).length >= MAX_DOCS_LISTA ? s : ({ ...s, docs: { ...s.docs, [k]: [...(s.docs[k] || []), { name: v.name, ok: true, path: v.path }] } }))
+  }
+  const removeDocLista = (k: DocListKey, i: number) => setP(s => ({ ...s, docs: { ...s.docs, [k]: (s.docs[k] || []).filter((_, idx) => idx !== i) } }))
   const docFolder = `projects/${p.code || project?.id || 'nuevos'}`
 
   const valid = p.client && p.city && p.seller
@@ -695,10 +759,14 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
         <div className="grid grid-cols-2 gap-3.5 items-start">
           {/* Columna izquierda */}
           <div className="flex flex-col gap-3.5">
+            {/* Varias cotizaciones (opciones / fases) y varios excels del cotizador */}
+            <DocListField label="Cotización" docs={p.docs.cotizacion || []} folder={docFolder} accept=".pdf,.jpg,.jpeg,.png"
+              onAdd={v => addDocLista('cotizacion', v)} onRemove={i => removeDocLista('cotizacion', i)} />
             {DOC_LABELS.filter((_, i) => i % 2 === 0).map(d => (
               <FileField key={d.key} label={d.label} value={p.docs[d.key]?.name} path={p.docs[d.key]?.path} folder={docFolder} onChange={v => setDoc(d.key, v)} accept=".pdf,.xlsx,.xls,.jpg,.png,.dwg" />
             ))}
-            <FileField label="Excel" value={p.docs.excel?.name} path={p.docs.excel?.path} folder={docFolder} onChange={v => setDoc('excel', v)} accept=".xlsx,.xls,.csv" />
+            <DocListField label="Excel" docs={p.docs.excel || []} folder={docFolder} accept=".xlsx,.xlsm,.xls,.csv"
+              onAdd={v => addDocLista('excel', v)} onRemove={i => removeDocLista('excel', i)} />
           </div>
           {/* Columna derecha */}
           <div className="flex flex-col gap-3.5">

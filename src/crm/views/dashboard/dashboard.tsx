@@ -2,7 +2,7 @@
 //  DASHBOARD — KPIs, pipeline chart, activity, alerts
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtK, fmtDate, daysBetween, ago, docCount, TODAY, TODAY_ISO, MESES_L, isAdminRole, isSalesManager } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, fmtMoney, fmtK, fmtDate, daysBetween, ago, docCount, TODAY, TODAY_ISO, MESES_L, canEditSalesGoals, moneyDigits, fmtMoneyInput } from '../../core/data'
 import { KPI, StageBadge, Badge, SecTitle, Empty } from '../../core/ui'
 import { WarehouseLoadCard, WarehouseDashboard } from '../warehouse/warehouse'
 import { Icon, type IconName } from '../../core/icons'
@@ -92,7 +92,7 @@ const SELLER_PALETTE = ['#2f6feb', '#14b8a6', '#f59e0b', '#c084fc', '#f472b6', '
 function SalesGoalCard() {
   const { state, dispatch } = useStore()
   const me = state.currentUser
-  const canEdit = isAdminRole(me?.role) || isSalesManager(me)
+  const canEdit = canEditSalesGoals(me)
   const monthPrefix = TODAY_ISO.slice(0, 7)
   const monthName = MESES_L[TODAY.getMonth()]
   const meta = sel.salesGoal(state, monthPrefix)
@@ -123,9 +123,12 @@ function SalesGoalCard() {
   const porVendedor = vendedores
     .map(v => {
       const mias = ventasMes.filter(p => p.seller === v.id)
-      return { v, n: mias.length, total: mias.reduce((a, p) => a + (p.ventaSubtotal || 0), 0) }
+      // Meta personal efectiva: la capturada para esa persona o el reparto (meta ÷ equipo).
+      return { v, n: mias.length, total: mias.reduce((a, p) => a + (p.ventaSubtotal || 0), 0), meta: sel.salesGoalFor(state, monthPrefix, v.id) }
     })
     .sort((a, b) => b.total - a.total)
+  const hayPropias = vendedores.some(v => sel.salesGoalPersonalExplicit(state, monthPrefix, v.id) != null)
+  const sumaMetas = porVendedor.reduce((a, r) => a + r.meta, 0)
 
   // Edición de la meta DEL MES en curso (solo admin); los meses pasados
   // conservan la suya. Se guarda en app_settings y sincroniza para todos.
@@ -145,16 +148,16 @@ function SalesGoalCard() {
         <span className="flex-1"></span>
         {editing ? (
           <span className="flex items-center gap-1.5">
-            <input autoFocus className="input mono text-[12px] w-[120px] py-1 px-2" value={draft}
-              onChange={e => setDraft(e.target.value)}
+            <input autoFocus className="input mono text-[12px] w-[120px] py-1 px-2" value={fmtMoneyInput(draft)}
+              onChange={e => setDraft(moneyDigits(e.target.value))}
               onKeyDown={e => { if (e.key === 'Enter') saveGoal(); if (e.key === 'Escape') setEditing(false) }} />
             <button className="btn btn-ghost btn-sm" onClick={saveGoal}><Icon name="check" size={13} /></button>
             <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}><Icon name="close" size={13} /></button>
           </span>
         ) : (
           <span className="flex items-center gap-1.5">
-            <span className="sub">Meta <span className="mono font-semibold text-tx-0">{fmtK(meta)}</span> · <span className="mono">{fmtK(metaPersonal)}</span> c/u</span>
-            {canEdit && <button className="btn btn-ghost btn-sm" title={`Editar la meta de ${monthName}`} onClick={() => { setDraft(String(meta)); setEditing(true) }}><Icon name="edit" size={13} /></button>}
+            <span className="sub">Meta <span className="mono font-semibold text-tx-0">{fmtK(meta)}</span> · {hayPropias ? 'metas por persona' : <><span className="mono">{fmtK(metaPersonal)}</span> c/u</>}</span>
+            {canEdit && <button className="btn btn-ghost btn-sm" title={`Editar la meta de ${monthName}`} onClick={() => { setDraft(String(Math.round(meta))); setEditing(true) }}><Icon name="edit" size={13} /></button>}
           </span>
         )}
       </div>
@@ -186,11 +189,15 @@ function SalesGoalCard() {
         </div>
 
         {/* Avance de cada vendedor contra su meta personal (meta ÷ equipo) */}
-        <div className="meta mb-2">Meta personal: <span className="mono font-semibold text-tx-1">{fmtMoney(metaPersonal)}</span> por vendedor ({vendedores.length})</div>
+        {hayPropias ? (
+          <div className="meta mb-2">Metas por persona · suman <span className="mono font-semibold" style={{ color: Math.abs(sumaMetas - meta) > 1 ? 'var(--warn)' : 'var(--tx-1)' }}>{fmtMoney(sumaMetas)}</span>{Math.abs(sumaMetas - meta) > 1 ? ` (meta del equipo ${fmtK(meta)})` : ''} · se capturan en Metas de venta</div>
+        ) : (
+          <div className="meta mb-2">Meta personal: <span className="mono font-semibold text-tx-1">{fmtMoney(metaPersonal)}</span> por vendedor ({vendedores.length})</div>
+        )}
         <div className="flex flex-col gap-2">
           {porVendedor.map((r, i) => {
-            const pct = metaPersonal > 0 ? (r.total / metaPersonal) * 100 : 0
-            const cumplio = metaPersonal > 0 && r.total >= metaPersonal
+            const pct = r.meta > 0 ? (r.total / r.meta) * 100 : 0
+            const cumplio = r.meta > 0 && r.total >= r.meta
             return (
               <div key={r.v.id} className="flex items-center gap-3">
                 <div className="w-[110px] flex-none text-[12.5px] text-tx-1 truncate" title={r.v.name}>{r.v.name}</div>
@@ -201,9 +208,9 @@ function SalesGoalCard() {
                 <div className="w-[180px] flex-none text-right leading-tight">
                   <div className="text-[12px]">
                     <span className="mono font-semibold" style={{ color: r.total ? 'var(--tx-0)' : 'var(--tx-3)' }}>{fmtK(r.total)}</span>
-                    <span className="text-tx-3 text-[10.5px]"> / {fmtK(metaPersonal)} · {r.n} venta{r.n === 1 ? '' : 's'}</span>
+                    <span className="text-tx-3 text-[10.5px]"> / {fmtK(r.meta)} · {r.n} venta{r.n === 1 ? '' : 's'}</span>
                   </div>
-                  <div className="meta" style={cumplio ? { color: 'var(--ok)' } : undefined}>{cumplio ? '¡Meta cumplida!' : `faltan ${fmtK(metaPersonal - r.total)}`}</div>
+                  <div className="meta" style={cumplio ? { color: 'var(--ok)' } : undefined}>{cumplio ? '¡Meta cumplida!' : `faltan ${fmtK(r.meta - r.total)}`}</div>
                 </div>
               </div>
             )

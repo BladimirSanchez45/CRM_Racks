@@ -5,7 +5,7 @@
 //  exportación a Excel. Navegable por mes para ver el histórico.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, isAdminRole, isSalesManager } from '../../core/data'
+import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, moneyDigits, fmtMoneyInput } from '../../core/data'
 import { KPI, SecTitle, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { exportVentasExcel } from '../../core/export_ventas'
@@ -65,7 +65,7 @@ function Donut({ data, center, sub }: { data: { label: string; value: number; co
 export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
-  const canEdit = isAdminRole(me?.role) || isSalesManager(me)
+  const canEdit = canEditSalesGoals(me)
   const currentYm = TODAY_ISO.slice(0, 7)
   const [ym, setYm] = React.useState(currentYm)
 
@@ -85,7 +85,11 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   }, [state.projects, idsVendedores, currentYm])
 
   const meta = sel.salesGoal(state, ym)
+  // Reparto: lo que toca a quien NO tiene meta propia capturada.
   const metaPersonal = vendedores.length > 0 ? meta / vendedores.length : 0
+  // Meta efectiva de cada vendedor (propia o reparto) y si es propia.
+  const metaDe = (id: string) => sel.salesGoalFor(state, ym, id)
+  const metaPropia = (id: string) => sel.salesGoalPersonalExplicit(state, ym, id)
   const isCurrent = ym === currentYm
 
   // Ventas del mes elegido: proyectos REGISTRADOS ese mes por el equipo, por su subtotal.
@@ -99,7 +103,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
 
   // Valores que alimentan KPIs y tablas: del vendedor elegido o del equipo.
   const ventasSel = ventasMes.filter(esMio)
-  const metaSel = vendedorSel ? metaPersonal : meta
+  const metaSel = vendedorSel ? metaDe(vendedorSel.id) : meta
   const vendidoSel = ventasSel.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
   const faltaSel = Math.max(0, metaSel - vendidoSel)
   const nVentas = ventasSel.length
@@ -119,9 +123,12 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     .map(v => {
       const mias = ventasMes.filter(p => p.seller === v.id)
       const total = mias.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
-      return { v, n: mias.length, total }
+      return { v, n: mias.length, total, meta: metaDe(v.id), propia: metaPropia(v.id) != null }
     })
-    .sort((a, b) => b.total - a.total), [vendedores, ventasMes])
+    .sort((a, b) => b.total - a.total), [vendedores, ventasMes, ym, state.settings])   // eslint-disable-line react-hooks/exhaustive-deps
+  const hayPropias = porVendedor.some(r => r.propia)
+  const sumaMetas = porVendedor.reduce((a, r) => a + r.meta, 0)
+  const sumaDifiere = hayPropias && Math.abs(sumaMetas - meta) > 1
   const colorOf = (id: string) => PALETTE[Math.max(0, porVendedor.findIndex(r => r.v.id === id)) % PALETTE.length]
 
   // Ventas por sistema vendido (para la dona derecha).
@@ -144,8 +151,8 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
       total: state.projects
         .filter(p => p.created.startsWith(m) && idsVendedores.has(p.seller) && esMio(p))
         .reduce((a, p) => a + (p.ventaSubtotal || 0), 0),
-      // Con vendedor elegido, su meta personal de cada mes (meta del mes ÷ equipo).
-      meta: sellerId && vendedores.length > 0 ? sel.salesGoal(state, m) / vendedores.length : sel.salesGoal(state, m),
+      // Con vendedor elegido, su meta personal de cada mes (propia o reparto).
+      meta: sellerId ? sel.salesGoalFor(state, m, sellerId) : sel.salesGoal(state, m),
     }))
   }, [state, currentYm, minYm, idsVendedores, sellerId])   // eslint-disable-line react-hooks/exhaustive-deps
   const maxTrend = Math.max(1, ...trend.map(t => Math.max(t.total, t.meta)))
@@ -159,14 +166,30 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     setEditing(false)
   }
 
+  // Edición de la meta PERSONAL de un vendedor para el mes elegido (misma gente).
+  // Guardar fija su meta propia desde ese mes; "Quitar" lo regresa al reparto.
+  const [editSeller, setEditSeller] = React.useState<string | null>(null)
+  const [draftP, setDraftP] = React.useState('')
+  const startEditPersonal = (id: string) => { setDraftP(String(Math.round(metaDe(id)))); setEditSeller(id) }
+  const savePersonal = () => {
+    if (!editSeller) return
+    const n = Number(draftP.replace(/[^0-9.]/g, ''))
+    if (n > 0 && n !== metaPropia(editSeller)) dispatch({ type: 'SAVE_SALES_GOAL_PERSONAL', month: ym, sellerId: editSeller, goal: n })
+    setEditSeller(null)
+  }
+  const quitarPersonal = (id: string) => {
+    dispatch({ type: 'SAVE_SALES_GOAL_PERSONAL', month: ym, sellerId: id, goal: null })
+    setEditSeller(null)
+  }
+
   const exportar = () => exportVentasExcel({
     ym: vendedorSel ? `${ym}_${vendedorSel.name.replace(/\s+/g, '_')}` : ym,
     ymLabel: vendedorSel ? `${ymLabel(ym)} · ${vendedorSel.name}` : ymLabel(ym),
     hoy: TODAY_ISO, meta: metaSel, vendido: vendidoSel,
     vendedores: porVendedor.filter(r => esMio({ seller: r.v.id })).map(r => ({
       vendedor: r.v.name, ventas: r.n, total: r.total,
-      ticket: r.n > 0 ? r.total / r.n : 0, metaPersonal,
-      pctMeta: metaPersonal > 0 ? (r.total / metaPersonal) * 100 : 0,
+      ticket: r.n > 0 ? r.total / r.n : 0, metaPersonal: r.meta,
+      pctMeta: r.meta > 0 ? (r.total / r.meta) * 100 : 0,
       pctEquipo: vendido > 0 ? (r.total / vendido) * 100 : 0,
     })),
     rows: ventasSel.map(p => ({
@@ -198,8 +221,8 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           {/* Meta del mes elegido */}
           {editing ? (
             <span className="flex items-center gap-1.5">
-              <input autoFocus className="input mono text-[12px] w-[120px] py-1 px-2" value={draft}
-                onChange={e => setDraft(e.target.value)}
+              <input autoFocus className="input mono text-[12px] w-[120px] py-1 px-2" value={fmtMoneyInput(draft)}
+                onChange={e => setDraft(moneyDigits(e.target.value))}
                 onKeyDown={e => { if (e.key === 'Enter') saveGoal(); if (e.key === 'Escape') setEditing(false) }} />
               <button className="btn btn-ghost btn-sm" onClick={saveGoal}><Icon name="check" size={13} /></button>
               <button className="btn btn-ghost btn-sm" onClick={() => setEditing(false)}><Icon name="close" size={13} /></button>
@@ -207,7 +230,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           ) : (
             <span className="flex items-center gap-1">
               <span className="sub">Meta <span className="mono font-semibold text-tx-0">{fmtK(meta)}</span></span>
-              {canEdit && <button className="btn btn-ghost btn-sm" title={`Editar la meta de ${ymLabel(ym)}`} onClick={() => { setDraft(String(meta)); setEditing(true) }}><Icon name="edit" size={13} /></button>}
+              {canEdit && <button className="btn btn-ghost btn-sm" title={`Editar la meta de ${ymLabel(ym)}`} onClick={() => { setDraft(String(Math.round(meta))); setEditing(true) }}><Icon name="edit" size={13} /></button>}
             </span>
           )}
           <button className="btn btn-sm" onClick={() => void exportar()}><Icon name="download" size={14} /> Excel</button>
@@ -216,7 +239,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
 
       {/* KPIs del mes */}
       <div className="grid grid-cols-4 gap-3.5 mb-5">
-        <KPI label={vendedorSel ? `Meta personal · ${vendedorSel.name}` : 'Meta del mes'} value={metaSel} format={fmtMoney} icon="flag" accent foot={vendedorSel ? `Meta del equipo ${fmtK(meta)}` : `${fmtK(metaPersonal)} por vendedor (${vendedores.length})`} delay={0} />
+        <KPI label={vendedorSel ? `Meta personal · ${vendedorSel.name}` : 'Meta del mes'} value={metaSel} format={fmtMoney} icon="flag" accent foot={vendedorSel ? `Meta del equipo ${fmtK(meta)}${metaPropia(vendedorSel.id) != null ? ' · meta propia' : ' · reparto'}` : hayPropias ? `Metas por persona · suman ${fmtK(sumaMetas)}` : `${fmtK(metaPersonal)} por vendedor (${vendedores.length})`} delay={0} />
         <KPI label="Vendido" value={vendidoSel} format={fmtMoney} icon="money" foot={`${pctSel.toFixed(1)}% de ${vendedorSel ? 'su meta' : 'la meta'}`} footTrend={pctSel >= 100 ? 'up' : undefined} delay={60} />
         <KPI label={faltaSel > 0 ? 'Falta para la meta' : 'Meta superada por'} value={faltaSel > 0 ? faltaSel : vendidoSel - metaSel} format={fmtMoney} icon={faltaSel > 0 ? 'alert' : 'check'} footTrend={faltaSel > 0 ? 'dn' : 'up'} foot={isCurrent && porCerrar > 0 ? `Proyección ${fmtK(proyeccion)} con por cerrar` : faltaSel > 0 ? 'Contra lo vendido' : vendedorSel ? '¡Felicidades!' : '¡Felicidades al equipo!'} delay={120} />
         <KPI label="Ventas registradas" value={nVentas} icon="projects" foot={nVentas > 0 ? `Ticket promedio ${fmtK(ticket)}` : 'Sin ventas este mes'} delay={180} />
@@ -228,7 +251,14 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           <div className="card-h">
             <Icon name="trendUp" size={17} className="text-ok" />
             <span className="ttl">Vendido vs meta personal</span>
-            <span className="sub ml-auto">meta personal {fmtK(metaPersonal)} · clic en un vendedor para filtrar</span>
+            <span className="sub ml-auto">
+              {hayPropias ? (
+                <>metas por persona · suman <span className="mono font-semibold" style={{ color: sumaDifiere ? 'var(--warn)' : 'var(--tx-0)' }}>{fmtK(sumaMetas)}</span>{sumaDifiere ? ` vs meta del equipo ${fmtK(meta)}` : ''}</>
+              ) : (
+                <>meta personal {fmtK(metaPersonal)} (reparto)</>
+              )}
+              {' · clic en un vendedor para filtrar'}{canEdit ? ' · ✎ para fijar su meta' : ''}
+            </span>
           </div>
           <div className="card-b">
             {/* Equipo completo primero, como referencia */}
@@ -239,31 +269,48 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
                 <div className="absolute inset-y-0 left-0" style={{ width: `${Math.min(100, pctVendido)}%`, background: 'var(--ok)', opacity: .9, transition: 'width .5s ease' }}></div>
                 <span className="mono absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-tx-2">{pctVendido.toFixed(0)}%</span>
               </div>
-              <div className="w-[200px] flex-none text-right text-[12px]">
+              <div className="w-[250px] flex-none text-right text-[12px]">
                 <span className="mono font-semibold">{fmtMoney(vendido)}</span>
                 <span className="text-tx-3 text-[10.5px]"> / {fmtK(meta)}</span>
               </div>
             </div>
             <div className="flex flex-col gap-2.5">
               {porVendedor.map(r => {
-                const pct = metaPersonal > 0 ? (r.total / metaPersonal) * 100 : 0
-                const cumplio = metaPersonal > 0 && r.total >= metaPersonal
+                const pct = r.meta > 0 ? (r.total / r.meta) * 100 : 0
+                const cumplio = r.meta > 0 && r.total >= r.meta
                 const activo = sellerId === r.v.id
                 const dim = !!sellerId && !activo
+                const editandoEste = editSeller === r.v.id
                 return (
                   <div key={r.v.id} className="flex items-center gap-3 cursor-pointer" style={{ opacity: dim ? .35 : 1, transition: 'opacity .2s' }}
-                    onClick={() => setSellerId(activo ? '' : r.v.id)} title={activo ? 'Quitar filtro' : `Ver solo a ${r.v.name}`}>
+                    onClick={() => { if (!editandoEste) setSellerId(activo ? '' : r.v.id) }} title={activo ? 'Quitar filtro' : `Ver solo a ${r.v.name}`}>
                     <div className="w-[130px] flex-none text-[12.5px] truncate" style={{ color: activo ? 'var(--acc)' : 'var(--tx-1)', fontWeight: activo ? 700 : 400 }} title={r.v.name}>{r.v.name}</div>
                     <div className="flex-1 h-[22px] bg-bg-1 border border-line relative overflow-hidden">
                       <div className="h-full opacity-90" style={{ width: `${Math.min(100, pct)}%`, background: cumplio ? 'var(--ok)' : colorOf(r.v.id), minWidth: r.total ? 3 : 0, transition: 'width .5s ease' }}></div>
                       <span className="mono absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-semibold text-tx-2">{pct.toFixed(0)}%</span>
                     </div>
-                    <div className="w-[200px] flex-none text-right leading-tight">
+                    <div className="w-[250px] flex-none text-right leading-tight">
                       <div className="text-[12px]">
                         <span className="mono font-semibold" style={{ color: r.total ? 'var(--tx-0)' : 'var(--tx-3)' }}>{fmtMoney(r.total)}</span>
                         <span className="text-tx-3 text-[10.5px]"> · {r.n} venta{r.n === 1 ? '' : 's'}</span>
                       </div>
-                      <div className="meta" style={cumplio ? { color: 'var(--ok)' } : undefined}>{cumplio ? '¡Meta cumplida!' : `faltan ${fmtK(metaPersonal - r.total)}`}</div>
+                      {editandoEste ? (
+                        /* Captura de la meta personal de este vendedor para el mes elegido */
+                        <div className="flex items-center justify-end gap-1 mt-0.5" onClick={e => e.stopPropagation()}>
+                          <input autoFocus className="input mono text-[11px] w-[105px] py-0.5 px-1.5" value={fmtMoneyInput(draftP)}
+                            onChange={e => setDraftP(moneyDigits(e.target.value))}
+                            onKeyDown={e => { if (e.key === 'Enter') savePersonal(); if (e.key === 'Escape') setEditSeller(null) }} />
+                          <button className="btn btn-ghost btn-sm" title="Guardar meta personal" onClick={savePersonal}><Icon name="check" size={12} /></button>
+                          {r.propia && <button className="btn btn-ghost btn-sm text-[10.5px]" title="Quitar su meta propia: vuelve al reparto (meta ÷ equipo)" onClick={() => quitarPersonal(r.v.id)}>Quitar</button>}
+                          <button className="btn btn-ghost btn-sm" title="Cancelar" onClick={() => setEditSeller(null)}><Icon name="close" size={12} /></button>
+                        </div>
+                      ) : (
+                        <div className="meta flex items-center justify-end gap-1">
+                          <span style={cumplio ? { color: 'var(--ok)' } : undefined}>{cumplio ? '¡Meta cumplida!' : `faltan ${fmtK(r.meta - r.total)}`}</span>
+                          <span className="text-tx-3" title={r.propia ? 'Meta propia capturada para esta persona' : 'Reparto: meta del equipo ÷ vendedores'}>· meta {fmtK(r.meta)}{r.propia ? '' : ' (reparto)'}</span>
+                          {canEdit && <button className="btn btn-ghost btn-sm py-0 px-1" title={`Fijar la meta de ${r.v.name} para ${ymLabel(ym)}`} onClick={e => { e.stopPropagation(); startEditPersonal(r.v.id) }}><Icon name="edit" size={11} /></button>}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )
@@ -337,7 +384,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
             <thead><tr><th>Vendedor</th><th className="num">Ventas</th><th className="num">Total vendido</th><th className="num">Ticket promedio</th><th className="num">Meta personal</th><th className="num">% de su meta</th><th className="num">% del equipo</th></tr></thead>
             <tbody>
               {porVendedor.filter(r => esMio({ seller: r.v.id })).map(r => {
-                const pctMeta = metaPersonal > 0 ? (r.total / metaPersonal) * 100 : 0
+                const pctMeta = r.meta > 0 ? (r.total / r.meta) * 100 : 0
                 return (
                   <tr key={r.v.id}>
                     <td className="text-[12.5px] font-semibold text-tx-1">
@@ -347,7 +394,9 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
                     <td className="num">{r.n}</td>
                     <td className="num text-[12.5px] font-semibold">{fmtMoney(r.total)}</td>
                     <td className="num text-[12.5px]">{r.n > 0 ? fmtMoney(r.total / r.n) : '—'}</td>
-                    <td className="num text-[12.5px] text-tx-2">{fmtMoney(metaPersonal)}</td>
+                    <td className="num text-[12.5px] text-tx-2" title={r.propia ? 'Meta propia' : 'Reparto (meta ÷ equipo)'}>
+                      {fmtMoney(r.meta)}{r.propia && <span className="text-[10px] text-acc ml-1" title="Meta propia capturada">●</span>}
+                    </td>
                     <td className="num font-semibold" style={{ color: pctMeta >= 100 ? 'var(--ok)' : pctMeta >= 50 ? 'var(--tx-0)' : 'var(--warn)' }}>{pctMeta.toFixed(1)}%</td>
                     <td className="num text-[12.5px] text-tx-2">{vendido > 0 ? ((r.total / vendido) * 100).toFixed(1) : '0.0'}%</td>
                   </tr>

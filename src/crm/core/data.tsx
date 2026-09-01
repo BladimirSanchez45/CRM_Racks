@@ -92,6 +92,10 @@ export const isDireccion = (role?: Role | null) => role === 'direccion'
 export const SALES_MANAGER_EMAILS = ['jcastaneda@ccracksmexico.com']
 export const isSalesManager = (u?: { email?: string } | null) =>
   !!u?.email && SALES_MANAGER_EMAILS.includes(u.email.toLowerCase())
+/** Quién captura las metas de venta (del equipo y por persona):
+ *  admin, superadmin, dirección y el gerente de ventas (Javier). */
+export const canEditSalesGoals = (u?: { role?: Role; email?: string } | null) =>
+  !!u && (isAdminRole(u.role) || isDireccion(u.role) || isSalesManager(u))
 /** Rol Ingeniería: por ahora SOLO ve proyectos (solo lectura). Se ampliará después. */
 export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 /** Rol Marketing: por ahora SOLO ve el módulo de Estadísticas por origen (solo lectura). */
@@ -181,6 +185,10 @@ const MXN = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN',
 const MXN2 = MXN
 export const fmtMoney = (n?: number) => MXN.format(n || 0)
 export const fmtMoney2 = (n?: number) => MXN2.format(n || 0)
+/** Captura de montos: el estado guarda solo dígitos y el input los muestra como
+ *  dinero ("$919,540"). `moneyDigits` limpia lo tecleado; `fmtMoneyInput` lo pinta. */
+export const moneyDigits = (s: string) => s.replace(/[^0-9]/g, '')
+export const fmtMoneyInput = (digits: string) => (digits ? '$' + Number(digits).toLocaleString('es-MX') : '')
 export const fmtK = (n?: number | null) => {
   if (n == null) return '—'
   if (Math.abs(n) >= 1e6) return '$' + (n / 1e6).toFixed(2) + 'M'
@@ -232,12 +240,17 @@ export const cityAbbr = (city?: string) => {
 export const docOK = (name: string) => ({ name, ok: true })
 export const docNo = () => ({ name: '', ok: false })
 
-/** Llave de un documento SIMPLE del proyecto (excluye las listas: evidencia y órdenes de compra). */
-export type DocKey = Exclude<keyof Project['docs'], 'evidencia' | 'ordenCompra'>
+/** Llave de un documento SIMPLE del proyecto (excluye las listas: cotizaciones,
+ *  excels, evidencia y órdenes de compra). */
+export type DocKey = Exclude<keyof Project['docs'], 'cotizacion' | 'excel' | 'evidencia' | 'ordenCompra'>
+/** Llave de un documento de LISTA del proyecto que captura el usuario (varios archivos). */
+export type DocListKey = 'cotizacion' | 'excel'
+/** Máximo de archivos por lista (cotizaciones PDF / excels) en un proyecto,
+ *  igual que las cotizaciones de un prospecto. */
+export const MAX_DOCS_LISTA = 3
 /** Etiquetas de los documentos simples de un proyecto, en orden.
- *  (Órdenes de compra y Evidencia se manejan aparte como listas.) */
+ *  (Cotizaciones, Excels, Órdenes de compra y Evidencia se manejan aparte como listas.) */
 export const DOC_LABELS: { key: DocKey; label: string }[] = [
-  { key: 'cotizacion', label: 'Cotización' },
   { key: 'layout', label: 'Lay out' },
   { key: 'anticipo', label: 'Anticipo' },
   { key: 'finiquito', label: 'Finiquito' },
@@ -246,11 +259,14 @@ export const DOC_LABELS: { key: DocKey; label: string }[] = [
 ]
 
 /** Conteo de documentos completos de un proyecto (de 7).
- *  Las órdenes de compra son una lista: cuentan como "1 hecho" si hay al menos una. */
+ *  Cotizaciones y órdenes de compra son listas: cuentan como "1 hecho" si hay
+ *  al menos una. (El Excel es opcional y no cuenta.) */
 export function docCount(p: Project) {
   const d = p.docs
-  const simples = [d.cotizacion, d.layout, d.anticipo, d.finiquito, d.remision, d.cartaFin]
-  const done = simples.filter(x => x.ok).length + ((d.ordenCompra?.length ?? 0) > 0 ? 1 : 0)
+  const simples = [d.layout, d.anticipo, d.finiquito, d.remision, d.cartaFin]
+  const done = simples.filter(x => x.ok).length
+    + ((d.cotizacion || []).some(x => x.ok) ? 1 : 0)
+    + ((d.ordenCompra?.length ?? 0) > 0 ? 1 : 0)
   return { done, total: 7 }
 }
 
@@ -290,7 +306,7 @@ const initial: AppState = {
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
   movementLists: [], movements: [], campaigns: [], bankTxs: [], cfdiDocs: [], prospects: [], agendaEvents: [], warehouse: [],
   invFamilies: [], invItems: [], invMoves: [],
-  settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {} },
+  settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {}, salesGoalsPersonal: {} },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
 }
@@ -1426,6 +1442,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'SET_SETTINGS', settings: { ...s.settings, salesGoals } })
         persist([() => saveSetting('sales_goals', salesGoals)]); return
       }
+      case 'SAVE_SALES_GOAL_PERSONAL': {
+        if (!canEditSalesGoals(s.currentUser)) return
+        const mes = { ...(s.settings.salesGoalsPersonal[action.month] ?? {}), [action.sellerId]: action.goal }
+        const salesGoalsPersonal = { ...s.settings.salesGoalsPersonal, [action.month]: mes }
+        rawDispatch({ type: 'SET_SETTINGS', settings: { ...s.settings, salesGoalsPersonal } })
+        persist([() => saveSetting('sales_goals_personal', salesGoalsPersonal)]); return
+      }
 
       /* ---- Inventario ---- */
       case 'SAVE_INV_FAMILY': {
@@ -1831,6 +1854,23 @@ export const sel = {
     if (g[ym] != null) return g[ym]
     const prev = Object.keys(g).filter(k => k < ym).sort().pop()
     return prev ? g[prev] : SALES_GOAL_DEFAULT
+  },
+  /** Meta personal CAPTURADA para un vendedor en un mes, con la misma herencia:
+   *  la de ese mes o la del mes anterior más reciente con captura para él.
+   *  `undefined` = no tiene meta propia (usa el reparto). */
+  salesGoalPersonalExplicit: (state: AppState, ym: string, sellerId: string): number | undefined => {
+    const g = state.settings.salesGoalsPersonal
+    const k = Object.keys(g).filter(m => m <= ym && g[m][sellerId] !== undefined).sort().pop()
+    const v = k ? g[k][sellerId] : undefined
+    return v != null && v > 0 ? v : undefined
+  },
+  /** Meta personal EFECTIVA de un vendedor: la capturada o, si no hay, el
+   *  reparto (meta del equipo ÷ vendedores que participan). */
+  salesGoalFor: (state: AppState, ym: string, sellerId: string): number => {
+    const own = sel.salesGoalPersonalExplicit(state, ym, sellerId)
+    if (own != null) return own
+    const n = sel.vendedoresMeta(state).length
+    return n > 0 ? sel.salesGoal(state, ym) / n : 0
   },
   /* ---- Almacén ---- */
   /** Cola ACTIVA (por iniciar + en proceso), en el orden que definió almacén. */
