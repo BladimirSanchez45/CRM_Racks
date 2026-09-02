@@ -871,12 +871,22 @@ export function OrdersPage() {
 
   // Estado de cuenta del proveedor filtrado: descarga un PDF con las OC que se
   // ven en la tabla (respeta también estatus/búsqueda) y sus totales.
+  // Con "Elegir OCs" activo, entran SOLO las palomeadas (p. ej. "de la 2173 en
+  // adelante"): en ese modo el clic en la fila palomea en vez de abrir el detalle.
   const [genEdoCta, setGenEdoCta] = React.useState(false)
+  const [selEC, setSelEC] = React.useState<Set<string> | null>(null)   // null = modo apagado
+  const toggleEC = (id: string) => setSelEC(s => {
+    if (!s) return s
+    const n = new Set(s)
+    if (n.has(id)) n.delete(id); else n.add(id)
+    return n
+  })
+  const ocsEdoCta = selEC ? list.filter(o => selEC.has(o.id)) : list
   const downloadEstadoCuenta = async () => {
-    if (!fSupplier || genEdoCta) return
+    if (!fSupplier || genEdoCta || ocsEdoCta.length === 0) return
     setGenEdoCta(true)
     try {
-      const blob = await buildEstadoCuentaPdf(state, fSupplier, list)
+      const blob = await buildEstadoCuentaPdf(state, fSupplier, ocsEdoCta)
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
       a.download = `EstadoCuenta_${(supplierName || 'proveedor').replace(/[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/g, '_')}_${TODAY_ISO}.pdf`
@@ -966,12 +976,20 @@ export function OrdersPage() {
               <button className={!fStatus ? 'on' : ''} onClick={() => setFStatus('')}>Todas</button>
               {OC_STATES.map(s => <button key={s} className={fStatus === s ? 'on' : ''} onClick={() => setFStatus(s)}>{s}</button>)}
             </div>
-            <Select value={fSupplier} onChange={e => setFSupplier(e.target.value)} className="w-auto min-w-[180px]">
+            <Select value={fSupplier} onChange={e => { setFSupplier(e.target.value); setSelEC(null) }} className="w-auto min-w-[180px]">
               <option value="">Todos los proveedores</option>
               {supplierOpts.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
             </Select>
-            {fSupplier && <button className="btn btn-ghost btn-sm" disabled={genEdoCta} onClick={downloadEstadoCuenta} title={`Descarga el estado de cuenta en PDF de ${supplierName}`}><Icon name="download" size={13} /> {genEdoCta ? 'Generando…' : 'Estado de cuenta'}</button>}
-            {(fStatus || fSupplier || q || sort.dir !== 0) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier(''); setQ(''); setSort({ key: '', dir: 0 }) }}><Icon name="close" size={13} /> Limpiar</button>}
+            {fSupplier && (
+              <button className={'btn btn-sm ' + (selEC ? 'btn-primary' : 'btn-ghost')} onClick={() => setSelEC(s => s ? null : new Set())}
+                title={selEC ? 'Salir del modo selección' : 'Palomea qué OC entran al estado de cuenta'}>
+                <Icon name={selEC ? 'close' : 'check'} size={13} /> {selEC ? `Elegir OCs (${selEC.size})` : 'Elegir OCs'}
+              </button>
+            )}
+            {fSupplier && <button className="btn btn-ghost btn-sm" disabled={genEdoCta || ocsEdoCta.length === 0} onClick={downloadEstadoCuenta}
+              title={selEC ? `Descarga el estado de cuenta en PDF de ${supplierName} SOLO con las ${ocsEdoCta.length} OC palomeadas` : `Descarga el estado de cuenta en PDF de ${supplierName} con las OC visibles en la tabla`}>
+              <Icon name="download" size={13} /> {genEdoCta ? 'Generando…' : selEC ? `Estado de cuenta (${ocsEdoCta.length})` : 'Estado de cuenta'}</button>}
+            {(fStatus || fSupplier || q || sort.dir !== 0) && <button className="btn btn-ghost btn-sm" onClick={() => { setFStatus(''); setFSupplier(''); setQ(''); setSort({ key: '', dir: 0 }); setSelEC(null) }}><Icon name="close" size={13} /> Limpiar</button>}
             <span className="meta">{list.length} de {orders.length}</span>
           </div>
 
@@ -979,6 +997,12 @@ export function OrdersPage() {
             <div className="overflow-x-auto">
               <table className="tbl">
                 <thead><tr>
+                  {selEC && (
+                    <th className="w-[30px]" title="Palomear todas / ninguna">
+                      <input type="checkbox" className="cursor-pointer" checked={list.length > 0 && list.every(o => selEC.has(o.id))}
+                        onChange={e => setSelEC(e.target.checked ? new Set(list.map(o => o.id)) : new Set())} />
+                    </th>
+                  )}
                   {sortableTh('number', 'OC', '')}<th>Fecha</th><th>Proveedor</th><th>Descripción</th><th>Condiciones</th>
                   {sortableTh('amount', 'Monto')}{sortableTh('paid', 'Pagado')}{sortableTh('balance', 'Saldo')}{sortableTh('pct', '%')}
                   <th>Entrega est.</th><th className="num">Días</th><th>Estatus</th><th>Responsable</th>
@@ -991,7 +1015,8 @@ export function OrdersPage() {
                     const pct = sel.ocPct(state, o)
                     const eta = o.deliveryDate ? daysBetween(o.deliveryDate) : null
                     return (
-                      <tr key={o.id} onClick={() => setDetail(o)}>
+                      <tr key={o.id} onClick={() => selEC ? toggleEC(o.id) : setDetail(o)} title={selEC ? 'Clic para palomear esta OC' : undefined}>
+                        {selEC && <td className="w-[30px]"><input type="checkbox" className="cursor-pointer" checked={selEC.has(o.id)} onChange={() => toggleEC(o.id)} onClick={e => e.stopPropagation()} /></td>}
                         <td><span className="mono text-acc font-semibold">{o.number}</span></td>
                         <td className="num text-tx-2 text-[12px]">{fmtDateShort(o.date)}</td>
                         <td className="text-[12.5px]">{supplier ? supplier.name : '—'}</td>
