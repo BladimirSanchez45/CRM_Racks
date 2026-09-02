@@ -236,10 +236,19 @@ function RejectProjectModal({ project, onDone, onClose }: { project: Project; on
   const ocs = sel.ordersForProject(state, project.id).length
   const cobros = sel.clientPaymentsForProject(state, project.id).length
   const prospecto = state.prospects.find(x => x.convertedProjectId === project.id)
-  const ok = reason.trim().length >= 5
+  // Si era un DUPLICADO, el prospecto sigue Vendido y se religa al proyecto que se
+  // queda. Candidatos: los demás proyectos del mismo cliente (o todos, si no hay).
+  const mismoCliente = state.projects.filter(x => x.id !== project.id && x.client === project.client)
+  const candidatos = mismoCliente.length ? mismoCliente : state.projects.filter(x => x.id !== project.id)
+  const [prAction, setPrAction] = React.useState<'espera' | 'relink'>(() => mismoCliente.length ? 'relink' : 'espera')
+  const [relinkTo, setRelinkTo] = React.useState(mismoCliente[0]?.id || '')
+  const ok = reason.trim().length >= 5 && (!prospecto || prAction === 'espera' || !!relinkTo)
   const doReject = () => {
     if (!ok) return
-    dispatch({ type: 'REJECT_PROJECT', id: project.id, reason: reason.trim() })
+    dispatch({
+      type: 'REJECT_PROJECT', id: project.id, reason: reason.trim(),
+      ...(prospecto ? { prospecto: prAction, relinkTo: prAction === 'relink' ? relinkTo : undefined } : {}),
+    })
     onClose(); onDone()
   }
   return (
@@ -256,7 +265,28 @@ function RejectProjectModal({ project, onDone, onClose }: { project: Project; on
           Ojo: tiene {[ocs > 0 ? `${ocs} orden${ocs === 1 ? '' : 'es'} de compra` : '', cobros > 0 ? `${cobros} cobro${cobros === 1 ? '' : 's'} del cliente` : ''].filter(Boolean).join(' y ')} ligados; se conservan pero quedarán sin proyecto.
         </p>
       )}
-      {prospecto && <p className="m-0 mb-3 text-[12.5px] text-tx-2 leading-normal">El prospecto <b>{prospecto.name}</b> volverá a "En espera" para no perder el lead.</p>}
+      {prospecto && (
+        <div className="mb-3">
+          <div className="label-k mb-1.5">Prospecto ligado: {prospecto.name}</div>
+          <label className="flex items-center gap-2 text-[12.5px] text-tx-1 cursor-pointer mb-1.5">
+            <input type="radio" name="pr-reject" checked={prAction === 'espera'} onChange={() => setPrAction('espera')} />
+            La venta no se concretó → vuelve a <b>"En espera"</b>
+          </label>
+          <label className="flex items-center gap-2 text-[12.5px] text-tx-1 cursor-pointer">
+            <input type="radio" name="pr-reject" checked={prAction === 'relink'} onChange={() => setPrAction('relink')} />
+            Este proyecto era un <b>duplicado</b> → sigue Vendido, ligado a:
+          </label>
+          {prAction === 'relink' && (
+            <div className="mt-1.5 ml-6">
+              <Select value={relinkTo} onChange={e => setRelinkTo(e.target.value)}>
+                <option value="">Selecciona el proyecto que se queda…</option>
+                {candidatos.map(x => <option key={x.id} value={x.id}>{x.code} · {sel.clientName(state, x.client)}{x.sistemaVendido ? ` · ${x.sistemaVendido}` : ''}</option>)}
+              </Select>
+              {!mismoCliente.length && <div className="meta mt-1">No hay otro proyecto de este cliente; elige de la lista completa.</div>}
+            </div>
+          )}
+        </div>
+      )}
       <Field label="Motivo del rechazo (obligatorio)">
         <TextArea autoFocus rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="Ej. El cliente canceló la compra / se capturó por error / se recotizará…" />
       </Field>

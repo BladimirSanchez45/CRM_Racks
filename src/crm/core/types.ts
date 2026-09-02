@@ -844,9 +844,11 @@ export type Action =
   | { type: 'MOVE_STAGE'; id: string; stage: StageId }
   | { type: 'SAVE_PROJECT'; project: ProjectInput }
   | { type: 'DELETE_PROJECT'; id: string }
-  // Rechazar un proyecto CON MOTIVO: lo elimina, deja rastro en Actividad, avisa a los
-  // admins y regresa a "En espera" el prospecto del que nació (si aplica).
-  | { type: 'REJECT_PROJECT'; id: string; reason: string }
+  // Rechazar un proyecto CON MOTIVO: lo elimina, deja rastro en Actividad y avisa a los
+  // admins y al vendedor dueño. `prospecto` decide qué pasa con el prospecto ligado:
+  // 'espera' (default) = vuelve a "En espera" (la venta no se concretó);
+  // 'relink' = sigue Vendido apuntando a `relinkTo` (el rechazado era un DUPLICADO).
+  | { type: 'REJECT_PROJECT'; id: string; reason: string; prospecto?: 'espera' | 'relink'; relinkTo?: string }
   | { type: 'SAVE_SUPPLIER'; supplier: SupplierInput }
   | { type: 'TOGGLE_SUPPLIER'; id: string }
   | { type: 'DELETE_SUPPLIER'; id: string }
