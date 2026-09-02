@@ -25,6 +25,7 @@ const KIND_ICON: Record<NotificationKind, IconName> = {
   movement_changed: 'box',
   client_pending: 'clients',
   project_stage_moved: 'kanban',
+  project_rejected: 'alert',
   warehouse_queued: 'pkg',
   warehouse_done: 'pkg',
 }

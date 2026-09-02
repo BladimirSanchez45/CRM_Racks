@@ -692,6 +692,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'REMOVE_PROJECT', id: action.id })
         persist([() => apiDeleteProject(action.id)]); return
 
+      // Rechazar un proyecto: lo ELIMINA con motivo. Queda rastro en Actividad,
+      // se avisa a los admins y, si nació de un prospecto, este vuelve a "En espera"
+      // para no perder el lead. Las OC y cobros ligados NO se tocan (conservan su folio).
+      case 'REJECT_PROJECT': {
+        const proj = s.projects.find(p => p.id === action.id); if (!proj) return
+        const thunks: (() => Promise<void>)[] = []
+        const pr = s.prospects.find(x => x.convertedProjectId === action.id)
+        if (pr) {
+          const upd: Prospect = { ...pr, convertedProjectId: undefined, resultado: 'En espera', updated: nowISO() }
+          rawDispatch({ type: 'UPSERT_PROSPECT', prospect: upd })
+          thunks.push(() => saveProspect(upd))
+        }
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'close', who: whoName(s), txt: `rechazó el proyecto · Motivo: ${action.reason}`, tgt: proj.code, kind: 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        notify(s.users.filter(u => isAdminRole(u.role) && u.active && u.id !== s.currentUser?.id), {
+          kind: 'project_rejected',
+          title: `Proyecto rechazado: ${proj.code}`,
+          body: `${whoName(s)} lo rechazó · ${sel.clientName(s, proj.client)} · Motivo: ${action.reason}`,
+        })
+        rawDispatch({ type: 'REMOVE_PROJECT', id: action.id })
+        thunks.push(() => apiDeleteProject(action.id))
+        persist(thunks); return
+      }
+
       case 'SAVE_SUPPLIER': {
         const full: Supplier = { ...(action.supplier as Supplier), id: action.supplier.id ?? uid('s') }
         rawDispatch({ type: 'UPSERT_SUPPLIER', supplier: full })

@@ -227,6 +227,43 @@ export function ServiceRow({ label, supplierId, budget, cost, state, payments }:
 }
 
 /* ---------- Project detail drawer ---------- */
+/** Modal de rechazo de un proyecto: pide el MOTIVO (obligatorio) y lo elimina.
+ *  El motivo queda en Actividad, se avisa a los admins y el prospecto de origen
+ *  (si lo hay) regresa a "En espera". */
+function RejectProjectModal({ project, onDone, onClose }: { project: Project; onDone: () => void; onClose: () => void }) {
+  const { state, dispatch } = useStore()
+  const [reason, setReason] = React.useState('')
+  const ocs = sel.ordersForProject(state, project.id).length
+  const cobros = sel.clientPaymentsForProject(state, project.id).length
+  const prospecto = state.prospects.find(x => x.convertedProjectId === project.id)
+  const ok = reason.trim().length >= 5
+  const doReject = () => {
+    if (!ok) return
+    dispatch({ type: 'REJECT_PROJECT', id: project.id, reason: reason.trim() })
+    onClose(); onDone()
+  }
+  return (
+    <Modal width={480} icon="alert" title={`Rechazar ${project.code}`} sub={sel.clientName(state, project.client)} onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <button className={'btn btn-danger' + (!ok ? ' opacity-50' : '')} disabled={!ok} onClick={doReject}><Icon name="close" size={14} /> Rechazar proyecto</button>
+      </>}>
+      <p className="m-0 mb-3 text-tx-1 leading-normal text-[13px]">
+        El proyecto se <b>elimina</b> y deja de contar en gráficas y metas. El motivo queda registrado en Actividad y se avisa a los administradores.
+      </p>
+      {(ocs > 0 || cobros > 0) && (
+        <p className="m-0 mb-3 text-[12.5px] leading-normal" style={{ color: 'var(--warn)' }}>
+          Ojo: tiene {[ocs > 0 ? `${ocs} orden${ocs === 1 ? '' : 'es'} de compra` : '', cobros > 0 ? `${cobros} cobro${cobros === 1 ? '' : 's'} del cliente` : ''].filter(Boolean).join(' y ')} ligados; se conservan pero quedarán sin proyecto.
+        </p>
+      )}
+      {prospecto && <p className="m-0 mb-3 text-[12.5px] text-tx-2 leading-normal">El prospecto <b>{prospecto.name}</b> volverá a "En espera" para no perder el lead.</p>}
+      <Field label="Motivo del rechazo (obligatorio)">
+        <TextArea autoFocus rows={3} value={reason} onChange={e => setReason(e.target.value)} placeholder="Ej. El cliente canceló la compra / se capturó por error / se recotizará…" />
+      </Field>
+    </Modal>
+  )
+}
+
 export function ProjectDetail({ project, onClose, onEdit, historial = false }: { project: Project; onClose: () => void; onEdit: () => void; historial?: boolean }) {
   const { state, dispatch } = useStore()
   // Ventas, dirección e ingeniería: ver sin registrar/editar cobros ni mover etapa.
@@ -279,6 +316,11 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
   const removeDocLista = (k: DocListKey, i: number) =>
     dispatch({ type: 'SAVE_PROJECT', project: { ...p, docs: { ...p.docs, [k]: (p.docs[k] || []).filter((_, idx) => idx !== i) } } })
 
+  // Rechazar (eliminar con motivo): misma regla que editar — admin siempre;
+  // ventas solo SU proyecto mientras siga en Registro.
+  const [reject, setReject] = React.useState(false)
+  const canReject = !historial && canEditProject(state.currentUser, p)
+
   return (
     <Modal width={760} onClose={onClose}
       title={<span className="flex items-center gap-3">{p.code} <StageBadge stage={p.stage} withNum /></span>}
@@ -292,6 +334,7 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
         </>
       ) : (
         <>
+          {canReject && <button className="btn btn-ghost" style={{ color: 'var(--danger)' }} title="Elimina el proyecto dejando el motivo en Actividad" onClick={() => setReject(true)}><Icon name="close" size={15} /> Rechazar</button>}
           {canEditProject(state.currentUser, p) && <button className="btn btn-ghost" onClick={onEdit}><Icon name="edit" size={15} /> Editar datos</button>}
           {/* Recalcular comisiones de un proyecto finalizado (admin): útil si cambió el vendedor u overrides. */}
           {isAdminRole(state.currentUser?.role) && p.stage === 'finalizado' && (
@@ -528,6 +571,7 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
       </div>
 
       {cobro && <CobroForm project={p} cobro={'id' in cobro ? cobro : undefined} onClose={() => setCobro(null)} readOnly={readOnly} />}
+      {reject && <RejectProjectModal project={p} onClose={() => setReject(false)} onDone={onClose} />}
     </Modal>
   )
 }

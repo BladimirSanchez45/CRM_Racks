@@ -444,6 +444,7 @@ export type NotificationKind =
   | 'movement_changed'           // dirección modificó (agregó/editó/eliminó) la lista → se avisa al creador
   | 'client_pending'             // un vendedor propuso un cliente nuevo → se avisa a los administradores
   | 'project_stage_moved'        // el proyecto cambió de etapa → se avisa a SU vendedor
+  | 'project_rejected'           // se rechazó (eliminó) un proyecto con motivo → se avisa a los admins
   | 'warehouse_queued'           // entró un proyecto a la cola de almacén → se avisa a Almacén
   | 'warehouse_done'             // almacén terminó un proyecto → se avisa a logística y al vendedor
 
@@ -843,6 +844,9 @@ export type Action =
   | { type: 'MOVE_STAGE'; id: string; stage: StageId }
   | { type: 'SAVE_PROJECT'; project: ProjectInput }
   | { type: 'DELETE_PROJECT'; id: string }
+  // Rechazar un proyecto CON MOTIVO: lo elimina, deja rastro en Actividad, avisa a los
+  // admins y regresa a "En espera" el prospecto del que nació (si aplica).
+  | { type: 'REJECT_PROJECT'; id: string; reason: string }
   | { type: 'SAVE_SUPPLIER'; supplier: SupplierInput }
   | { type: 'TOGGLE_SUPPLIER'; id: string }
   | { type: 'DELETE_SUPPLIER'; id: string }
