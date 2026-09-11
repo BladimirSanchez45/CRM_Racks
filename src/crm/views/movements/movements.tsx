@@ -3,10 +3,10 @@
 //  Cada semana (jueves) el admin arma una lista con su nombre, su saldo de
 //  cuenta y sus movimientos; la envía y Dirección la autoriza.
 //  Lista: Borrador → (admin envía) Pendiente → (dirección) Autorizada | Rechazada
-//  Total de la lista = subtotal + 5.3% (comisión bancaria fija).
+//  Total de la lista = subtotal + comisión bancaria (5.3% antes del 10-sep-2026, 4.5% desde entonces).
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, TODAY_ISO, isAdminRole, isDireccion, COMISION_BANCARIA } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, TODAY_ISO, isAdminRole, isDireccion, comisionBancaria, comisionBancariaLabel } from '../../core/data'
 import { signedDocUrl } from '../../core/api'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
@@ -26,10 +26,10 @@ const listBadge = (l: MovementList) =>
     : <Badge color={LIST_STATUS_COLOR[l.status]}>{l.status}</Badge>
 const movBadge = (s: MovementStatus) => <Badge color={MOV_STATUS_COLOR[s]}>{s}</Badge>
 
-const listTotals = (movs: Movement[]) => {
+const listTotals = (list: MovementList, movs: Movement[]) => {
   // Los movimientos eliminados por Dirección (borrado suave) no suman.
   const subtotal = movs.filter(m => m.changedByDireccion !== 'removed').reduce((a, m) => a + (m.amount || 0), 0)
-  const comision = subtotal * COMISION_BANCARIA
+  const comision = subtotal * comisionBancaria(list)
   return { subtotal, comision, total: subtotal + comision }
 }
 
@@ -177,17 +177,20 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
   const dirReview = isDir && isPendiente                          // dirección revisa/edita la lista enviada
   const canEditMov = adminEdit || dirReview                       // quién puede agregar/editar/eliminar movimientos
   const canAuthorize = isDir && isPendiente                       // dirección decide cuando está pendiente
+  // Una lista Autorizada se puede revertir a Pendiente para seguir editándola (salvo si ya está pagada).
+  const canReopen = (isAdmin || isDir) && list.status === 'Autorizada'
 
   const [movForm, setMovForm] = React.useState<Movement | {} | null>(null)
   const [editList, setEditList] = React.useState(false)
   const [delList, setDelList] = React.useState(false)
   const [rejectList, setRejectList] = React.useState(false)
+  const [reopenList, setReopenList] = React.useState(false)
   const [reason, setReason] = React.useState('')
   const [rejectMov, setRejectMov] = React.useState<Movement | null>(null)
   const [movReason, setMovReason] = React.useState('')
 
   const movs = state.movements.filter(m => m.listId === list.id).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))
-  const { subtotal, comision, total } = listTotals(movs)
+  const { subtotal, comision, total } = listTotals(list, movs)
   const saldoDespues = list.bankBalance - total
   const creator = sel.userName(state, list.createdBy)
   const downloadComprobante = async () => {
@@ -208,6 +211,11 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
           <button className="btn btn-ghost" onClick={() => setRejectList(true)}><Icon name="close" size={14} /> Rechazar lista</button>
           <button className="btn btn-primary" onClick={() => dispatch({ type: 'DECIDE_MOVEMENT_LIST', id: list.id, approve: true })}><Icon name="check" size={15} /> Autorizar lista</button>
         </>)}
+        {canReopen && (
+          <button className={'btn btn-ghost' + (list.comprobantePath ? ' opacity-50' : '')} disabled={!!list.comprobantePath}
+            title={list.comprobantePath ? 'La lista ya está pagada: quita el comprobante para poder revertirla' : 'Regresa la lista a Pendiente para seguir editándola'}
+            onClick={() => setReopenList(true)}><Icon name="edit" size={14} /> Revertir autorización</button>
+        )}
       </div>
 
       <div className="grid grid-cols-4 gap-3.5 mb-4">
@@ -218,7 +226,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
         <div className="bg-bg-1 border border-line rounded-[10px] p-3.5">
           <div className="label-k">Total de la lista</div>
           <div className="font-display font-extrabold text-[20px] mt-0.5">{fmtMoney(total)}</div>
-          <div className="meta mt-0.5">incluye 5.3%</div>
+          <div className="meta mt-0.5">incluye {comisionBancariaLabel(list)}</div>
         </div>
         <div className="bg-bg-1 border border-line rounded-[10px] p-3.5">
           <div className="label-k">Saldo tras la lista</div>
@@ -310,7 +318,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
             {movs.length > 0 && (
               <tfoot>
                 <tr><td colSpan={2}></td><td className="text-right text-tx-2 text-[12.5px]">Subtotal</td><td className="num text-[13px]">{fmtMoney2(subtotal)}</td><td></td></tr>
-                <tr><td colSpan={2}></td><td className="text-right text-tx-2 text-[12px]">Comisión 5.3%</td><td className="num text-tx-2 text-[12px]">{fmtMoney2(comision)}</td><td></td></tr>
+                <tr><td colSpan={2}></td><td className="text-right text-tx-2 text-[12px]">Comisión {comisionBancariaLabel(list)}</td><td className="num text-tx-2 text-[12px]">{fmtMoney2(comision)}</td><td></td></tr>
                 <tr><td colSpan={2}></td><td className="text-right font-display font-bold">Total</td><td className="num font-display font-bold text-[15px]">{fmtMoney2(total)}</td><td></td></tr>
               </tfoot>
             )}
@@ -321,6 +329,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
 
       {movForm && <MovementForm listId={list.id} movement={'id' in movForm ? movForm : undefined} onClose={() => setMovForm(null)} />}
       {editList && <MovementListForm list={list} prefillBalance={list.bankBalance} onClose={() => setEditList(false)} />}
+      {reopenList && <Confirm title="Revertir autorización" message={`¿Revertir la autorización de "${list.name}"? Vuelve a Pendiente para que se pueda editar y Dirección tendrá que autorizarla de nuevo.`} onConfirm={() => { dispatch({ type: 'REOPEN_MOVEMENT_LIST', id: list.id }); setReopenList(false) }} onClose={() => setReopenList(false)} />}
       {delList && <Confirm title="Eliminar lista" message={`¿Eliminar "${list.name}" y sus ${movs.length} movimientos?`} danger onConfirm={() => { dispatch({ type: 'DELETE_MOVEMENT_LIST', id: list.id }); onBack() }} onClose={() => setDelList(false)} />}
       {rejectList && (
         <Modal width={420} icon="alert" title="Rechazar lista" onClose={() => setRejectList(false)}
@@ -404,7 +413,7 @@ export function MovementsPage({ openId, onConsumed }: { openId?: string | null; 
             <tbody>
               {lists.map(l => {
                 const ms = movsOf(l.id)
-                const { total } = listTotals(ms)
+                const { total } = listTotals(l, ms)
                 return (
                 <tr key={l.id} onClick={() => setSelectedId(l.id)}>
                   <td className="text-[12.5px] font-semibold text-tx-1">{l.name}</td>

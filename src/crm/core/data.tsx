@@ -133,8 +133,12 @@ export const canSeeAllProspects = (u?: { role?: Role; title?: string } | null): 
   return PUESTOS_VENTAS_GLOBAL.includes(normTitle(u.title))
 }
 
-/** Comisión bancaria fija sobre la lista de movimientos "por fuera" (total = subtotal × (1 + esto)). */
-export const COMISION_BANCARIA = 0.053
+/** Comisión bancaria sobre la lista de movimientos "por fuera" (total = subtotal × (1 + tasa)).
+ *  Bajó de 5.3% a 4.5% el 2026-09-10: las listas con fecha anterior conservan el 5.3%. */
+const COMISION_BANCARIA_CAMBIO = '2026-09-10'
+export const comisionBancaria = (list: { date: string }) => ((list.date || '') >= COMISION_BANCARIA_CAMBIO ? 0.045 : 0.053)
+/** Etiqueta para la UI ("4.5%"), derivada de la tasa para que no se desfasen. */
+export const comisionBancariaLabel = (list: { date: string }) => `${+(comisionBancaria(list) * 100).toFixed(2)}%`
 
 /* ---- Umbrales de alarma del INVENTARIO ----
    Son fijos para todas las claves (no hay mínimo por clave): a partir de aquí
@@ -1095,7 +1099,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const thunks: (() => Promise<void>)[] = [() => saveMovementList(updated)]
         const movs = s.movements.filter(m => m.listId === list.id)
         const subtotal = movs.reduce((a, m) => a + (m.amount || 0), 0)
-        const total = subtotal * (1 + COMISION_BANCARIA)
+        const total = subtotal * (1 + comisionBancaria(list))
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `envió la lista "${list.name}" a autorización`, tgt: fmtMoney(total), kind: 'money' }
         rawDispatch({ type: 'PUSH_ACTIVITY', activity })
         thunks.push(() => saveActivity(activity))
@@ -1104,7 +1108,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         notify(dir, {
           kind: 'movements_submitted',
           title: `Lista por autorizar: ${list.name}`,
-          body: `${whoName(s)} envió "${list.name}" con ${movs.length} movimientos por ${fmtMoney(total)} (incluye 5.3%). Requiere tu autorización.`,
+          body: `${whoName(s)} envió "${list.name}" con ${movs.length} movimientos por ${fmtMoney(total)} (incluye ${comisionBancariaLabel(list)}). Requiere tu autorización.`,
           movementListId: list.id, actorName: whoName(s),
         })
         persist(thunks); return
@@ -1147,6 +1151,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           if (proj && proj.stage === 'finalizado') finalProjects.set(proj.id, proj)
         }
         for (const proj of finalProjects.values()) regenCommissions(proj, thunks, { ...s, movements: next })
+        persist(thunks); return
+      }
+      case 'REOPEN_MOVEMENT_LIST': {
+        // Revierte una lista Autorizada a Pendiente para poder seguir editándola; Dirección la vuelve a
+        // autorizar. No aplica si ya está pagada (con comprobante): primero hay que quitarlo.
+        const list = s.movementLists.find(l => l.id === action.id)
+        if (!list || list.status !== 'Autorizada' || list.comprobantePath) return
+        const reopened: MovementList = { ...list, status: 'Pendiente', authorizedBy: undefined, decidedAt: undefined }
+        rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: reopened })
+        const thunks: (() => Promise<void>)[] = [() => saveMovementList(reopened)]
+        // Sus movimientos autorizados vuelven a Pendiente (los rechazados y los eliminados se respetan).
+        let next = s.movements
+        for (const m of s.movements.filter(x => x.listId === list.id && x.status === 'Autorizado' && x.changedByDireccion !== 'removed')) {
+          const um: Movement = { ...m, status: 'Pendiente', authorizedBy: undefined, decidedAt: undefined }
+          rawDispatch({ type: 'UPSERT_MOVEMENT', movement: um })
+          thunks.push(() => saveMovement(um))
+          next = upsertBy(next, um)
+        }
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'doc', who: whoName(s), txt: `revirtió la autorización de la lista "${list.name}"`, tgt: list.name, kind: 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        // Avisa a Dirección (debe volver a autorizarla) y al creador, excepto a quien la revirtió.
+        const me = s.currentUser?.id
+        const dest = s.users.filter(u => u.active && u.id !== me && (u.role === 'direccion' || u.id === list.createdBy))
+        notify(dest, {
+          kind: 'movement_changed',
+          title: `Lista reabierta: ${list.name}`,
+          body: `${whoName(s)} revirtió la autorización de "${list.name}". Vuelve a Pendiente y requiere autorizarse de nuevo.`,
+          movementListId: list.id, actorName: whoName(s),
+        })
+        // Los movimientos dejan de estar autorizados: recalcula comisiones de proyectos finalizados ligados.
+        const finalProjects = new Map<string, Project>()
+        for (const m of next.filter(x => x.listId === list.id && x.projectId)) {
+          const proj = s.projects.find(p => p.id === m.projectId)
+          if (proj && proj.stage === 'finalizado') finalProjects.set(proj.id, proj)
+        }
+        for (const proj of finalProjects.values()) regenCommissions(proj, thunks, { ...s, movements: next, movementLists: upsertBy(s.movementLists, reopened) })
         persist(thunks); return
       }
       case 'SET_LIST_COMPROBANTE': {

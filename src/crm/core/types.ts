@@ -881,6 +881,8 @@ export type Action =
   | { type: 'SUBMIT_MOVEMENT_LIST'; id: string }
   /** Decisión de dirección sobre la LISTA completa (autorizar/rechazar todo). */
   | { type: 'DECIDE_MOVEMENT_LIST'; id: string; approve: boolean; reason?: string }
+  /** Revierte una lista Autorizada (sin comprobante) a Pendiente para seguir editándola. */
+  | { type: 'REOPEN_MOVEMENT_LIST'; id: string }
   /** Sube/quita el comprobante de pago de la lista (al subirlo, descuenta utilidad). */
   | { type: 'SET_LIST_COMPROBANTE'; id: string; comprobante?: string; comprobantePath?: string }
   | { type: 'SAVE_MOVEMENT'; movement: MovementInput }
