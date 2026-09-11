@@ -329,7 +329,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
 
       {movForm && <MovementForm listId={list.id} movement={'id' in movForm ? movForm : undefined} onClose={() => setMovForm(null)} />}
       {editList && <MovementListForm list={list} prefillBalance={list.bankBalance} onClose={() => setEditList(false)} />}
-      {reopenList && <Confirm title="Revertir autorización" message={`¿Revertir la autorización de "${list.name}"? Vuelve a Pendiente para que se pueda editar y Dirección tendrá que autorizarla de nuevo.`} onConfirm={() => { dispatch({ type: 'REOPEN_MOVEMENT_LIST', id: list.id }); setReopenList(false) }} onClose={() => setReopenList(false)} />}
+      {reopenList && <Confirm title="Revertir autorización" message={`¿Revertir la autorización de "${list.name}"? Vuelve a Pendiente para que se pueda editar y Dirección tendrá que autorizarla de nuevo.`} confirmLabel="Revertir" danger={false} onConfirm={() => { dispatch({ type: 'REOPEN_MOVEMENT_LIST', id: list.id }); setReopenList(false) }} onClose={() => setReopenList(false)} />}
       {delList && <Confirm title="Eliminar lista" message={`¿Eliminar "${list.name}" y sus ${movs.length} movimientos?`} danger onConfirm={() => { dispatch({ type: 'DELETE_MOVEMENT_LIST', id: list.id }); onBack() }} onClose={() => setDelList(false)} />}
       {rejectList && (
         <Modal width={420} icon="alert" title="Rechazar lista" onClose={() => setRejectList(false)}
