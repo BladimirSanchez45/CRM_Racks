@@ -5,13 +5,17 @@
 //  Convención de colores del plano: vigas en rojo/naranja, marcos en azul.
 //
 //  Reglas (todas relativas al largo típico de viga, así no dependen de la escala):
-//   - Viga: trazo rojo recto y largo. Su contorno viene dibujado con 2 líneas
-//     paralelas muy juntas, que se emparejan como UNA viga.
-//   - Marco: barra azul perpendicular a las vigas que toca extremos de viga en al
-//     menos dos posiciones distintas (frente y fondo del rack). Así se descartan
-//     postes sueltos y las miniaturas del cuadro de datos.
-//   - Una viga cuenta si tiene marco en al menos uno de sus extremos; las demás
-//     quedan como "dudosas" para que la persona decida.
+//   - Viga: trazo rojo recto y largo. Su perfil viene dibujado con 2 o 3 líneas
+//     paralelas muy juntas, que se agrupan como UNA viga.
+//   - Marco: barra azul perpendicular a las vigas que toca extremos de viga en sus
+//     dos puntas (frente y fondo del rack). Se descartan las barras mucho más
+//     cortas que el marco típico (distanciadores, cajones de poste) y las mucho
+//     más largas (postes de un alzado dibujado en la misma hoja).
+//   - Una viga cuenta si tiene marco en al menos uno de sus extremos. Los racks
+//     aislados muy pequeños (dibujos de detalle) y los trazos sin marco quedan
+//     como "dudosos" para que la persona decida.
+//   - Alzado: vigas apiladas (una por nivel) sin marco de planta; de ahí salen
+//     los niveles y, con los postes, la altura del marco.
 // ============================================================
 
 export type Seg = { x1: number; y1: number; x2: number; y2: number; color: string }
@@ -20,25 +24,26 @@ export type TextItem = { str: string; x: number; y: number; angle: number; heigh
 export type Axis = 'h' | 'v'
 /** Tramo recto alineado a un eje: `pos` es la coordenada fija y [a0, a1] el rango sobre el eje. */
 export type Line = { axis: Axis; pos: number; a0: number; a1: number }
-/** `w`: separación entre los 2 trazos del contorno (0 si la viga viene como una sola línea). */
+/** `w`: ancho del perfil dibujado (0 si la viga viene como una sola línea). */
 export type Beam = Line & { id: string; len: number; w: number }
 /** Marco visto en planta. `count` > 1 cuando una sola barra cubre dos racks espalda con espalda. */
 export type Frame = Line & { id: string; count: number }
 export type BeamGroup = { len: number; mm: number | null; ids: string[] }
-/** Hoja de ALZADO: las vigas se ven apiladas (una por nivel) entre dos postes. */
+/** ALZADO: las vigas se ven apiladas (una por nivel) entre dos postes. */
 export type Elevation = {
   levels: number             // niveles = vigas apiladas en una misma pila
   stacks: Beam[][]           // las pilas que dieron ese número (para resaltarlas y corregirlas)
-  frameHeightMm: number | null // cota más grande de la hoja: en un alzado, la altura del marco
+  frameHeightMm: number | null // altura del marco: largo del poste a escala, o la cota más grande
 }
 export type Detection = {
   kind: 'planta' | 'alzado' | 'none'
   beams: Beam[]              // vigas confirmadas (con marco en algún extremo)
-  doubtful: Beam[]           // trazos tipo viga sin marco: no cuentan salvo que se incluyan a mano
+  doubtful: Beam[]           // trazos tipo viga sin marco o racks aislados muy pequeños: no cuentan salvo que se incluyan a mano
   frames: Frame[]
   mmPerUnit: number | null   // escala estimada a partir de las cotas (null si no se pudo)
   looseBeams: string[]       // vigas confirmadas con un extremo sin marco (revisar)
-  elevation: Elevation | null // solo cuando la hoja se leyó como alzado
+  elevation: Elevation | null // niveles/altura leídos de un alzado (en esta hoja u otra)
+  dimsMm: number[]           // valores de las cotas "NNNNmm" de la hoja (para ajustar largos)
 }
 
 const lenOf = (l: Line) => l.a1 - l.a0
@@ -88,10 +93,11 @@ function dedupe(lines: Line[], tol: number): Line[] {
   })
 }
 
-/** Empareja los dos trazos del contorno de cada viga (dos líneas paralelas muy juntas).
- *  Recorre por posición: cada línea se une con la siguiente paralela más cercana que la
- *  traslape casi completa; así, en racks espalda con espalda, 4 líneas juntas dan 2 vigas. */
-function pairBeams(lines: Line[], tol: number): Beam[] {
+/** Agrupa las líneas paralelas del perfil de cada viga (2 o 3 trazos muy juntos con el mismo
+ *  tramo) en UNA viga. Recorre por posición encadenando la siguiente línea cercana; la cadena se
+ *  corta si el hueco crece mucho respecto a los huecos internos del perfil: así, en racks espalda
+ *  con espalda, la viga de fondo de un rack y la del vecino no se funden aunque estén cerca. */
+function chainBeams(lines: Line[], tol: number): Beam[] {
   const out: Beam[] = []
   for (const axis of ['h', 'v'] as const) {
     const ls = lines.filter(l => l.axis === axis).sort((a, b) => a.pos - b.pos || a.a0 - b.a0)
@@ -99,17 +105,22 @@ function pairBeams(lines: Line[], tol: number): Beam[] {
     for (let i = 0; i < ls.length; i++) {
       if (used[i]) continue
       used[i] = 1
-      const a = ls[i], La = lenOf(a), maxW = 0.08 * La
-      let p = -1
+      // Ancho máximo del perfil completo (medido desde la primera línea): así dos vigas de fondo
+      // que se tocan en racks espalda con espalda no se funden en una.
+      const a = ls[i], La = lenOf(a), maxW = 0.06 * La
+      const chain = [a]
+      let last = a, maxGap = 0
       for (let j = i + 1; j < ls.length && ls[j].pos - a.pos <= maxW; j++) {
-        const b = ls[j], Lb = lenOf(b)
-        if (used[j] || b.pos - a.pos < tol) continue   // misma línea (colineal): no es su pareja
-        if (Math.abs(La - Lb) <= 0.2 * La && overlap(a, b) >= 0.8 * Math.min(La, Lb)) { p = j; break }
+        const b = ls[j], Lb = lenOf(b), gap = b.pos - last.pos
+        if (used[j] || gap < tol) continue   // misma línea (colineal): no es parte del perfil
+        if (Math.abs(La - Lb) > 0.2 * La || overlap(a, b) < 0.8 * Math.min(La, Lb)) continue
+        if (chain.length >= 2 && gap > 3 * maxGap) break
+        used[j] = 1
+        chain.push(b); last = b; maxGap = Math.max(maxGap, gap)
       }
-      const b = p >= 0 ? ls[p] : a
-      if (p >= 0) used[p] = 1
-      const a0 = (a.a0 + b.a0) / 2, a1 = (a.a1 + b.a1) / 2
-      out.push({ axis, pos: (a.pos + b.pos) / 2, a0, a1, id: '', len: a1 - a0, w: b.pos - a.pos })
+      const a0 = chain.reduce((s, l) => s + l.a0, 0) / chain.length
+      const a1 = chain.reduce((s, l) => s + l.a1, 0) / chain.length
+      out.push({ axis, pos: (a.pos + last.pos) / 2, a0, a1, id: '', len: a1 - a0, w: last.pos - a.pos })
     }
   }
   return out
@@ -147,12 +158,14 @@ function endGrid(beams: Beam[], cell: number) {
   }
 }
 
-function detectFrames(lines: Line[], beams: Beam[], Lmed: number): Frame[] {
+/** Marcos de planta a partir de las barras azules. Devuelve también los `posts`: barras mucho
+ *  más largas que el marco típico (postes de un alzado dibujado en la hoja). */
+function detectFrames(lines: Line[], beams: Beam[], Lmed: number): { frames: Frame[]; posts: Line[] } {
   const tEnd = 0.1 * Lmed     // qué tan cerca del extremo de una viga debe pasar el marco
   const tSpan = 0.04 * Lmed   // holgura en las puntas de la barra del marco
   const tJoin = 0.08 * Lmed   // trazos paralelos a esta distancia son el mismo marco (contorno, postes)
   const touched = endGrid(beams, tEnd)
-  const cand = lines.filter(l => { const L = lenOf(l); return L >= 0.05 * Lmed && L <= 2 * Lmed })
+  const cand = lines.filter(l => { const L = lenOf(l); return L >= 0.05 * Lmed && L <= 4 * Lmed })
 
   // Une trazos paralelos cercanos que se traslapan: contorno doble de la barra y lados de los postes.
   const parent = cand.map((_, i) => i)
@@ -173,12 +186,14 @@ function detectFrames(lines: Line[], beams: Beam[], Lmed: number): Frame[] {
     if (g) g.push(l); else groups.set(r, [l])
   })
 
-  const frames: Frame[] = []
+  const bars: Line[] = []
+  const accepted: Frame[] = []
   for (const g of groups.values()) {
     // La barra del marco es el trazo más largo del grupo (los postes son cortos).
     const main = g.reduce((a, b) => (lenOf(b) > lenOf(a) ? b : a))
-    const bars = g.filter(l => lenOf(l) >= 0.8 * lenOf(main))
-    const bar: Line = { axis: main.axis, pos: bars.reduce((s, l) => s + l.pos, 0) / bars.length, a0: main.a0, a1: main.a1 }
+    const wide = g.filter(l => lenOf(l) >= 0.8 * lenOf(main))
+    const bar: Line = { axis: main.axis, pos: wide.reduce((s, l) => s + l.pos, 0) / wide.length, a0: main.a0, a1: main.a1 }
+    bars.push(bar)
     const hits = touched(bar, tEnd, tSpan).sort((a, b) => a - b)
     const distinct: number[] = []
     for (const p of hits) if (!distinct.length || p - distinct[distinct.length - 1] > 0.02 * Lmed) distinct.push(p)
@@ -186,9 +201,14 @@ function detectFrames(lines: Line[], beams: Beam[], Lmed: number): Frame[] {
     // barra. Descarta líneas azules que solo cruzan trazos rojos (p. ej. del cuadro de datos).
     const tNear = Math.max(0.1 * Lmed, 0.15 * lenOf(bar))
     if (distinct.length < 2 || Math.abs(distinct[0] - bar.a0) > tNear || Math.abs(bar.a1 - distinct[distinct.length - 1]) > tNear) continue
-    frames.push({ ...bar, id: '', count: Math.max(1, Math.round(distinct.length / 2)) })
+    accepted.push({ ...bar, id: '', count: Math.max(1, Math.round(distinct.length / 2)) })
   }
-  return frames
+  // El marco típico mide lo que el fondo del rack: fuera lo mucho más corto (distanciadores,
+  // cajones de poste) y lo mucho más largo (postes de alzado, que sí sirven para la altura).
+  const Fmed = median(accepted.map(lenOf))
+  const frames = Fmed ? accepted.filter(f => lenOf(f) >= 0.4 * Fmed && lenOf(f) <= 3 * Fmed) : []
+  const posts = Fmed ? bars.filter(b => lenOf(b) > 3 * Fmed) : bars
+  return { frames, posts }
 }
 
 /** ¿Hay un marco en el extremo (x, y) de una viga con eje `axis`? */
@@ -198,19 +218,25 @@ function frameIndex(frames: Frame[], Lmed: number) {
     f.axis !== axis && Math.abs(f.pos - end) <= tEnd && pos >= f.a0 - tEnd && pos <= f.a1 + tEnd)
 }
 
-/** Escala (mm por unidad del PDF) a partir de las cotas "NNNNmm" y su línea de cota. */
-function estimateScale(texts: TextItem[], dark: Line[]): number | null {
-  // Solo las cotas del dibujo principal: las de las miniaturas del cuadro de datos usan
-  // letra varias veces más chica y darían una escala equivocada.
+/** Valores de las cotas "NNNNmm" con letra de tamaño normal (no de miniatura). */
+function dimValues(texts: TextItem[]): { mm: number; t: TextItem }[] {
   const dims = texts.filter(t => /\d\s*mm/i.test(t.str))
   const hMax = Math.max(0, ...dims.map(t => t.height))
-  const found: { mm: number; L: number }[] = []
+  const out: { mm: number; t: TextItem }[] = []
   for (const t of dims) {
     if (t.height < 0.4 * hMax) continue
     const m = /(\d+(?:[.,]\d+)?)\s*mm/i.exec(t.str)
-    if (!m) continue
-    const mm = parseFloat(m[1].replace(',', '.'))
-    const L = mm > 0 ? dimLength(t, dark) : null
+    const mm = m ? parseFloat(m[1].replace(',', '.')) : NaN
+    if (mm > 0) out.push({ mm, t })
+  }
+  return out
+}
+
+/** Escala (mm por unidad del PDF) a partir de las cotas y su línea de cota. */
+function estimateScale(dims: { mm: number; t: TextItem }[], dark: Line[]): number | null {
+  const found: { mm: number; L: number }[] = []
+  for (const { mm, t } of dims) {
+    const L = dimLength(t, dark)
     if (L) found.push({ mm, L })
   }
   if (found.length < 2) return null
@@ -249,32 +275,45 @@ function dimLength(t: TextItem, dark: Line[]): number | null {
   return bestL || null
 }
 
-/** Lee la hoja como ALZADO: agrupa las vigas en pilas (mismo tramo, distinta altura) y toma
- *  como niveles el tamaño de pila más frecuente. Se usa solo cuando no hubo planta. */
-function detectElevation(cands: Beam[], texts: TextItem[]): Elevation | null {
+/** Ajusta un largo estimado al valor exacto de una cota del plano si alguna queda a ≤3 %. */
+export function snapToDim(mm: number, dimsMm: number[]): number {
+  let best: number | null = null
+  for (const d of dimsMm) if (Math.abs(d - mm) <= 0.03 * mm && (best == null || Math.abs(d - mm) < Math.abs(best - mm))) best = d
+  return best != null ? Math.round(best * 10) / 10 : Math.round(mm / 10) * 10
+}
+
+/** Lee un ALZADO: agrupa las vigas sin marco en pilas (mismo tramo, distinta altura) y toma
+ *  como niveles el tamaño de pila más frecuente. Se ignoran pilas sueltas de 2 vigas (suelen
+ *  ser miniaturas del cuadro de datos): hacen falta al menos 3 vigas apiladas en total. */
+function detectElevation(cands: Beam[], posts: Line[], mmPerUnit: number | null, dimsMm: number[]): Elevation | null {
   const stacks: Beam[][] = []
   for (const b of cands) {
     const tol = 0.05 * b.len
     const s = stacks.find(st => st[0].axis === b.axis && Math.abs(st[0].a0 - b.a0) <= tol && Math.abs(st[0].a1 - b.a1) <= tol)
     if (s) s.push(b); else stacks.push([b])
   }
-  const real = stacks.filter(s => s.length >= 2)
+  // Una pila de niveles tiene sus vigas a alturas parejas: se descartan las pilas con huecos
+  // muy dispares (piezas sueltas alineadas por casualidad) o con vigas encimadas.
+  const regular = (s: Beam[]) => {
+    const ps = s.map(b => b.pos).sort((a, b) => a - b)
+    const gaps = ps.slice(1).map((p, i) => p - ps[i])
+    const g = median(gaps)
+    // Niveles a menos del 10 % del largo de la viga no son niveles (rayado, miniaturas).
+    return g > 0.1 * s[0].len && Math.min(...gaps) >= 0.4 * g && Math.max(...gaps) <= 2.5 * g
+  }
+  const real = stacks.filter(s => s.length >= 2 && regular(s))
   if (!real.length) return null
   // Vota cada pila por su tamaño, ponderado por cuántas vigas trae; empate → la más alta.
   const votes = new Map<number, number>()
   for (const s of real) votes.set(s.length, (votes.get(s.length) ?? 0) + s.length)
   const levels = [...votes.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0]
   const chosen = real.filter(s => s.length === levels)
+  if (chosen.flat().length < 3) return null
   chosen.flat().forEach((b, i) => { b.id = `e${i}` })
-  // Altura del marco: la cota más grande de la hoja (con letra de tamaño normal, no de miniatura).
-  const dims = texts.filter(t => /\d\s*mm/i.test(t.str))
-  const hMax = Math.max(0, ...dims.map(t => t.height))
-  let frameHeightMm: number | null = null
-  for (const t of dims) {
-    if (t.height < 0.4 * hMax) continue
-    const v = parseFloat((/(\d+(?:[.,]\d+)?)\s*mm/i.exec(t.str)?.[1] ?? '').replace(',', '.'))
-    if (v > (frameHeightMm ?? 0)) frameHeightMm = v
-  }
+  // Altura del marco: el poste más largo a escala; si no hay escala, la cota más grande de la hoja.
+  const postLen = Math.max(0, ...posts.map(lenOf))
+  const frameHeightMm = postLen && mmPerUnit ? snapToDim(postLen * mmPerUnit, dimsMm)
+    : dimsMm.length ? Math.max(...dimsMm) : null
   return { levels, stacks: chosen, frameHeightMm }
 }
 
@@ -289,18 +328,41 @@ export function elevationLevels(stacks: Beam[][], isOn: (id: string) => boolean)
   return [...votes.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? 0
 }
 
+const bbox = (l: Line) => (l.axis === 'h' ? { x0: l.a0, x1: l.a1, y0: l.pos, y1: l.pos } : { x0: l.pos, x1: l.pos, y0: l.a0, y1: l.a1 })
+
 /** Filtro: ¿la línea cae dentro del rectángulo que envuelve a `ref` (con margen `pad`)? */
 function inZone(ref: Line[], pad: number) {
-  const box = (l: Line) => (l.axis === 'h' ? [l.a0, l.a1, l.pos, l.pos] : [l.pos, l.pos, l.a0, l.a1])
   let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
   for (const l of ref) {
-    const [ax0, ax1, ay0, ay1] = box(l)
-    x0 = Math.min(x0, ax0); x1 = Math.max(x1, ax1); y0 = Math.min(y0, ay0); y1 = Math.max(y1, ay1)
+    const b = bbox(l)
+    x0 = Math.min(x0, b.x0); x1 = Math.max(x1, b.x1); y0 = Math.min(y0, b.y0); y1 = Math.max(y1, b.y1)
   }
   return (l: Line) => {
-    const [ax0, ax1, ay0, ay1] = box(l)
-    return ax0 >= x0 - pad && ax1 <= x1 + pad && ay0 >= y0 - pad && ay1 <= y1 + pad
+    const b = bbox(l)
+    return b.x0 >= x0 - pad && b.x1 <= x1 + pad && b.y0 >= y0 - pad && b.y1 <= y1 + pad
   }
+}
+
+/** Agrupa las vigas en racks por cercanía (huecos de hasta `gap`). */
+function clusters(beams: Beam[], gap: number): Beam[][] {
+  const parent = beams.map((_, i) => i)
+  const find = (i: number): number => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i }
+  const bs = beams.map(bbox)
+  for (let i = 0; i < beams.length; i++) {
+    for (let j = i + 1; j < beams.length; j++) {
+      const a = bs[i], b = bs[j]
+      const dx = Math.max(0, Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1))
+      const dy = Math.max(0, Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1))
+      if (dx <= gap && dy <= gap) parent[find(i)] = find(j)
+    }
+  }
+  const out = new Map<number, Beam[]>()
+  beams.forEach((b, i) => {
+    const r = find(i)
+    const g = out.get(r)
+    if (g) g.push(b); else out.set(r, [b])
+  })
+  return [...out.values()]
 }
 
 export function detectLayout(segs: Seg[], texts: TextItem[]): Detection {
@@ -312,53 +374,70 @@ export function detectLayout(segs: Seg[], texts: TextItem[]): Detection {
     if (!l || lenOf(l) <= 0) continue
     if (k === 'beam') beamL.push(l); else if (k === 'frame') frameL.push(l); else darkL.push(l)
   }
-  const mmPerUnit = estimateScale(texts, darkL)
-  if (!beamL.length) return { kind: 'none', beams: [], doubtful: [], frames: [], mmPerUnit, looseBeams: [], elevation: null }
+  const dims = dimValues(texts)
+  const dimsMm = [...new Set(dims.map(d => d.mm))]
+  const mmPerUnit = estimateScale(dims, darkL)
+  const empty: Detection = { kind: 'none', beams: [], doubtful: [], frames: [], mmPerUnit, looseBeams: [], elevation: null, dimsMm }
+  if (!beamL.length) return empty
 
   // Largo de referencia: percentil 90 de los trazos rojos (las vigas dominan esa cola).
-  // Se descartan los trazos mucho más cortos: tapas del contorno y miniaturas del cuadro de datos.
+  // Se descartan los trazos mucho más cortos: tapas del perfil y miniaturas del cuadro de datos.
   const Lref = percentile(beamL.map(lenOf), 0.9)
   const tol = Lref * 0.002
-  const paired = pairBeams(dedupe(beamL, tol).filter(l => lenOf(l) >= 0.25 * Lref), tol)
-  // El perfil de la viga (separación entre sus 2 trazos) mide casi lo mismo en todo el plano;
-  // en las miniaturas del cuadro de datos es varias veces más delgado: se descartan.
-  const Wref = percentile(paired.filter(b => b.w > 0).map(b => b.w), 0.9)
-  const cands = paired.filter(b => b.w === 0 || b.w >= 0.4 * Wref)
+  const chained = chainBeams(dedupe(beamL, tol).filter(l => lenOf(l) >= 0.25 * Lref), tol)
+  // El perfil de la viga mide casi lo mismo en todo el plano; en las miniaturas del cuadro de
+  // datos es varias veces más delgado: se descartan.
+  const Wref = percentile(chained.filter(b => b.w > 0).map(b => b.w), 0.9)
+  const cands = chained.filter(b => b.w === 0 || b.w >= 0.4 * Wref)
   const Lmed = median(cands.map(b => b.len))
-  const frames = detectFrames(dedupe(frameL, tol), cands, Lmed)
-  frames.forEach((f, i) => { f.id = `f${i}` })
+  const { frames, posts } = detectFrames(dedupe(frameL, tol), cands, Lmed)
 
   const hasFrame = frameIndex(frames, Lmed)
-  const beams: Beam[] = [], doubtful: Beam[] = [], looseBeams: string[] = []
-  for (const b of cands) {
-    const e0 = hasFrame(b.axis, b.a0, b.pos), e1 = hasFrame(b.axis, b.a1, b.pos)
-    if (e0 || e1) {
-      b.id = `b${beams.length}`
-      beams.push(b)
-      if (!(e0 && e1)) looseBeams.push(b.id)
-    } else {
-      doubtful.push(b)
-    }
+  let confirmed: Beam[] = []
+  const unconfirmed: Beam[] = []
+  for (const b of cands) (hasFrame(b.axis, b.a0, b.pos) || hasFrame(b.axis, b.a1, b.pos) ? confirmed : unconfirmed).push(b)
+
+  // Racks aislados muy pequeños (p. ej. el módulo de un dibujo de detalle) pasan a dudosos:
+  // se muestran, pero solo cuentan si la persona los incluye.
+  const minCluster = Math.max(3, 0.03 * confirmed.length)
+  const demoted: Beam[] = []
+  if (confirmed.length) {
+    const keep: Beam[] = []
+    for (const c of clusters(confirmed, Lmed)) (c.length >= minCluster ? keep : demoted).push(...c)
+    confirmed = keep
   }
-  // Sin planta, se intenta leer la hoja como alzado (niveles y altura del marco).
-  const elevation = beams.length ? null : detectElevation(cands, texts)
-  const kind = beams.length ? 'planta' : elevation ? 'alzado' : 'none'
-  // Las dudosas solo se muestran dentro de la zona del dibujo (las del cuadro de datos no).
-  // En un alzado no aplican; si la hoja no se entendió, se muestran todas para incluirlas a mano.
-  const shown = kind === 'planta' ? doubtful.filter(inZone(beams, 0.3 * Lmed)) : kind === 'alzado' ? [] : doubtful
+  // Solo quedan los marcos que tocan alguna viga confirmada.
+  const touched = endGrid(confirmed, 0.1 * Lmed)
+  const liveFrames = frames.filter(f => touched(f, 0.1 * Lmed, 0.04 * Lmed).length > 0)
+  liveFrames.forEach((f, i) => { f.id = `f${i}` })
+
+  const looseBeams: string[] = []
+  confirmed.forEach((b, i) => {
+    b.id = `b${i}`
+    if (!(hasFrame(b.axis, b.a0, b.pos) && hasFrame(b.axis, b.a1, b.pos))) looseBeams.push(b.id)
+  })
+
+  // Alzado (en esta hoja o dibujado como detalle junto a la planta): sale de las vigas sin marco.
+  const elevation = detectElevation(unconfirmed, posts, mmPerUnit, dimsMm)
+  const inElev = new Set(elevation?.stacks.flat() ?? [])
+  const kind = confirmed.length ? 'planta' : elevation ? 'alzado' : 'none'
+  // Dudosas que se muestran: los racks pequeños demotados siempre; los trazos sueltos solo dentro
+  // de la zona del dibujo (los del cuadro de datos no). Si la hoja no se entendió, todos.
+  const loose = unconfirmed.filter(b => !inElev.has(b))
+  const shown = kind === 'planta' ? [...demoted, ...loose.filter(inZone(confirmed, 0.3 * Lmed))] : kind === 'alzado' ? [] : loose
   shown.forEach((b, i) => { b.id = `d${i}` })
-  return { kind, beams, doubtful: shown, frames, mmPerUnit, looseBeams, elevation }
+  return { kind, beams: confirmed, doubtful: shown, frames: liveFrames, mmPerUnit, looseBeams, elevation, dimsMm }
 }
 
-/** Agrupa vigas por largo (±3%). `lenOf` en unidades del PDF; `mm` con la escala dada. */
-export function groupBeams(beams: Beam[], mmPerUnit: number | null): BeamGroup[] {
+/** Agrupa vigas por largo (±3%). `mm` con la escala dada, ajustado a las cotas del plano. */
+export function groupBeams(beams: Beam[], mmPerUnit: number | null, dimsMm: number[] = []): BeamGroup[] {
   const sorted = [...beams].sort((a, b) => a.len - b.len)
   const out: BeamGroup[] = []
   let cur: Beam[] = []
   const flush = () => {
     if (!cur.length) return
     const len = median(cur.map(b => b.len))
-    out.push({ len, mm: mmPerUnit ? Math.round((len * mmPerUnit) / 10) * 10 : null, ids: cur.map(b => b.id) })
+    out.push({ len, mm: mmPerUnit ? snapToDim(len * mmPerUnit, dimsMm) : null, ids: cur.map(b => b.id) })
     cur = []
   }
   for (const b of sorted) {

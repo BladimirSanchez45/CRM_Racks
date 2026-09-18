@@ -11,7 +11,7 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs
 import { Icon } from '../../core/icons'
 import { Field, Input, KPI } from '../../core/ui'
 import { extractPageGeometry } from './extract'
-import { detectLayout, elevationLevels, groupBeams, type BeamGroup, type Detection, type Line } from './detect'
+import { detectLayout, elevationLevels, groupBeams, snapToDim, type BeamGroup, type Detection, type Line } from './detect'
 
 type PageInfo = { n: number; det: Detection; w: number; h: number; m: number[] }
 
@@ -147,7 +147,8 @@ export function LayoutsPage() {
       setDoc(d); setLoadingTask(lt); setPages(infos); setPageIdx(plan); setFileName(file.name); setZoom(1)
       setToggled(new Set()); setGroupMm({}); setAdjFrames(''); setAdjBeams('')
       // Datos del cuadro del plano; los niveles y la altura también pueden venir del alzado.
-      const nivelesCuadro = /niveles?\s*:?\s*(\d{1,2})\b/i.exec(text)?.[1]
+      // "Niveles: 5" o "Piso + 03 niveles".
+      const nivelesCuadro = (/niveles?\s*:?\s*(\d{1,2})\b/i.exec(text) ?? /\b(\d{1,2})\s*niveles?\b/i.exec(text))?.[1]?.replace(/^0+(?=\d)/, '')
       setLevels(nivelesCuadro ?? (elev ? String(elev.levels) : ''))
       setFrameH(elev?.frameHeightMm ? String(elev.frameHeightMm) : '')
       setMeta({ cliente: /cliente\s*:\s*([^\n]+)/i.exec(text)?.[1].trim() || undefined, plano: /plano\s*:\s*(\S+)/i.exec(text)?.[1], nivelesCuadro })
@@ -183,7 +184,8 @@ export function LayoutsPage() {
   const plan = planIdx >= 0 ? pages[planIdx] : undefined
   const det = plan?.det
   const view = pages[pageIdx]
-  const elevPage = pages.find(p => p.det.elevation)
+  // Niveles/altura: de preferencia una hoja que sea solo alzado; si no, el alzado de detalle de la planta.
+  const elevPage = pages.find(p => p.det.kind === 'alzado') ?? pages.find(p => p.det.elevation)
   const key = (n: number, id: string) => `${n}:${id}`
   const isOnIn = (t: Set<string>, n: number, id: string, byDefault: boolean) => (t.has(key(n, id)) ? !byDefault : byDefault)
   const isOn = (n: number, id: string, byDefault: boolean) => isOnIn(toggled, n, id, byDefault)
@@ -220,7 +222,7 @@ export function LayoutsPage() {
   }
   const beams = plan && det ? [...det.beams.filter(b => isOn(plan.n, b.id, true)), ...det.doubtful.filter(b => isOn(plan.n, b.id, false))] : []
   const frames = plan && det ? det.frames.filter(f => isOn(plan.n, f.id, true)) : []
-  const groups = groupBeams(beams, det?.mmPerUnit ?? null)
+  const groups = groupBeams(beams, det?.mmPerUnit ?? null, det?.dimsMm ?? [])
   const nAdjF = parseInt(adjFrames) || 0
   const nAdjB = parseInt(adjBeams) || 0
   const frameCount = frames.reduce((s, f) => s + f.count, 0) + nAdjF
@@ -228,7 +230,7 @@ export function LayoutsPage() {
   const lv = Math.max(0, parseInt(levels) || 0)
   const groupKey = (g: BeamGroup) => String(Math.round(g.len))
   const mmOf = (g: BeamGroup) => groupMm[groupKey(g)] ?? (g.mm != null ? String(g.mm) : '')
-  const approxMm = (len: number) => (det?.mmPerUnit ? ` ≈ ${Math.round((len * det.mmPerUnit) / 10) * 10} mm` : '')
+  const approxMm = (len: number) => (det?.mmPerUnit ? ` ≈ ${snapToDim(len * det.mmPerUnit, det.dimsMm)} mm` : '')
   const levelsMismatch = elevation && meta.nivelesCuadro && String(elevation.levels) !== meta.nivelesCuadro
 
   const summary = () => {
@@ -393,6 +395,7 @@ export function LayoutsPage() {
                   <LegendItem color={C.doubtful} dashed>Dudosa (no cuenta)</LegendItem>
                   <LegendItem color={C.frame}>Marco</LegendItem>
                   <LegendItem color={C.off} dashed>Quitada</LegendItem>
+                  {view?.det.elevation && <LegendItem color={C.level}>Nivel (alzado de detalle)</LegendItem>}
                   <span className="meta">Clic en una pieza para quitarla o incluirla · arrastra para mover el plano.</span>
                 </>)}
               </div>
