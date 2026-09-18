@@ -28,6 +28,7 @@ import { MovementsPage } from './views/movements/movements'
 import { EstadisticasPage } from './views/estadisticas/estadisticas'
 import { SalesStatsPage } from './views/ventas_stats/ventas_stats'
 import { CampaignsPage } from './views/campaigns/campaigns'
+import { LayoutsPage } from './views/layouts/layouts'
 import { AdminPage } from './views/admin/admin'
 import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
@@ -37,7 +38,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'agenda' | 'almacen' | 'inventario' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'admin' | 'settings'
+type Route = 'dashboard' | 'agenda' | 'almacen' | 'inventario' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'layouts' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -61,6 +62,8 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'historial',   label: 'Historial',    icon: 'box',  roles: ['admin', 'superadmin', 'direccion'], section: 'Comercial' },
   { id: 'clients',     label: 'Clientes',     icon: 'clients',     section: 'Comercial' },
   { id: 'commissions', label: 'Comisiones',   icon: 'commissions', section: 'Comercial' },
+  // Conteo de layout: sube el PDF del plano y cuenta marcos y vigas (herramienta, no guarda datos).
+  { id: 'layouts',     label: 'Conteo de layout', icon: 'ruler',   section: 'Comercial' },
   { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers',   section: 'Compras' },
   { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders',  section: 'Compras' },
   // Almacén: su cola de trabajo. La ven almacén, admin y dirección (lectura).
@@ -89,7 +92,7 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // Asignación/Remisiones (operación de logística). El superadmin sí ve todo.
   admin: [
     'dashboard', 'agenda', 'estadisticas', 'ventas_stats', 'campaigns',
-    'projects', 'historial', 'clients', 'commissions',
+    'projects', 'historial', 'clients', 'commissions', 'layouts',
     'suppliers', 'orders', 'almacen', 'inventario',
     'payments', 'cobranza', 'internal_payments', 'movements',
     'admin', 'settings',
@@ -97,12 +100,12 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // Almacén: SOLO su cola de trabajo y su inventario (+ panel recortado, agenda
   // y configuración). Nada de proyectos, pagos, comisiones ni movimientos.
   almacen: ['dashboard', 'almacen', 'inventario', 'agenda', 'ventas_stats', 'settings'],
-  ventas: ['dashboard', 'agenda', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'settings'],
+  ventas: ['dashboard', 'agenda', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'layouts', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
   logistica: ['dashboard', 'agenda', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'ventas_stats', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
-  ingenieria: ['dashboard', 'agenda', 'projects', 'ventas_stats', 'settings'],
+  ingenieria: ['dashboard', 'agenda', 'projects', 'ventas_stats', 'layouts', 'settings'],
   // Marketing: Estadísticas por origen, Campañas y Prospectos (solo lectura, ve a
   // todo el equipo) + agenda, metas y configuración personal.
   marketing: ['agenda', 'prospectos', 'estadisticas', 'campaigns', 'ventas_stats', 'settings'],
@@ -121,7 +124,7 @@ const TITLES: Record<Route, string> = {
   orders: 'Órdenes de Compra', almacen: 'Almacén', inventario: 'Inventario', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   estadisticas: 'Estadísticas por origen', ventas_stats: 'Metas de venta', campaigns: 'Campañas',
-  admin: 'Administración', settings: 'Configuración',
+  layouts: 'Conteo de layout', admin: 'Administración', settings: 'Configuración',
 }
 
 /* ---- accent helpers ---- */
@@ -262,6 +265,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       // Metas de venta: admin/dirección y ventas (ROLE_ROUTES acota al resto); la edición la gobierna la vista.
       case 'ventas_stats': return <SalesStatsPage onOpenProject={onOpenProject} />
       case 'campaigns':   return <CampaignsPage />
+      case 'layouts':     return <LayoutsPage />
       case 'settings':    return <SettingsPage />
       case 'admin':       return isAdminRole(me?.role) ? <AdminPage /> : <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       default: return null

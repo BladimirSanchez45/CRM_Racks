@@ -130,13 +130,13 @@ const sellerNameOf = (state: AppState, id: string) => {
 }
 
 /** Días transcurridos desde el último contacto (para el "Seguimiento"). */
-function seguimiento(p: Prospect): { label: string; color: string } {
-  if (!p.ultimoContacto) return { label: '—', color: 'var(--tx-3)' }
+function seguimiento(p: Prospect): { label: string; color: string; dias: number | null } {
+  if (!p.ultimoContacto) return { label: '—', color: 'var(--tx-3)', dias: null }
   const d = daysBetween(p.ultimoContacto)
   const dias = d == null ? null : -d   // daysBetween(pasado) es negativo → días transcurridos
-  if (dias == null) return { label: '—', color: 'var(--tx-3)' }
-  if (dias <= 0) return { label: 'Al día', color: 'var(--ok)' }
-  return { label: `${dias} día${dias === 1 ? '' : 's'}`, color: dias <= 2 ? 'var(--warn)' : 'var(--danger)' }
+  if (dias == null) return { label: '—', color: 'var(--tx-3)', dias: null }
+  if (dias <= 0) return { label: 'Al día', color: 'var(--ok)', dias: 0 }
+  return { label: `${dias} día${dias === 1 ? '' : 's'}`, color: dias <= 2 ? 'var(--warn)' : 'var(--danger)', dias }
 }
 
 /* ============================================================
@@ -407,6 +407,10 @@ export function ProspectosPage() {
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
   const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })
+  // Orden por columna. Clic en "Seguimiento": 1º mayor→menor, 2º menor→mayor, 3º sin orden.
+  const [sort, setSort] = React.useState<{ key: string; dir: number }>({ key: '', dir: 0 })
+  const toggleSort = (key: string) => setSort(s =>
+    s.key !== key ? { key, dir: -1 } : s.dir === -1 ? { key, dir: 1 } : { key: '', dir: 0 })
   const tabla = useFitTableHeight()
 
   const sellerName = (id: string) => sellerNameOf(state, id)
@@ -433,6 +437,11 @@ export function ProspectosPage() {
     }
     return true
   })
+  // Orden por "Seguimiento" = días sin contacto; sin contacto cuenta como el mayor rezago.
+  if (sort.key === 'seguimiento') {
+    const dias = (p: Prospect) => seguimiento(p).dias ?? 1e9
+    rows.sort((a, b) => (dias(a) - dias(b)) * sort.dir)
+  }
 
   // Opciones de vendedor (ids presentes en los prospectos VISIBLES).
   const sellerOpts = [...new Set(visibles.map(p => p.seller).filter(Boolean))]
@@ -573,7 +582,10 @@ export function ProspectosPage() {
           <table className="tbl">
             <thead><tr>
               <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
-              <th>Fecha asig.</th><th>Estado</th><th>Últ. contacto</th><th>Seguimiento</th>
+              <th>Fecha asig.</th><th>Estado</th><th>Últ. contacto</th>
+              <th className="sortable" onClick={() => toggleSort('seguimiento')} title="Ordenar por días sin contacto" style={{ whiteSpace: 'nowrap' }}>
+                Seguimiento{sort.key === 'seguimiento' && <span className="text-acc"> {sort.dir < 0 ? '▼' : '▲'}</span>}
+              </th>
               <th className="num">Costo</th><th>Resultado</th><th>Calidad</th><th>Sistema</th><th>Anuncio</th><th></th>
             </tr></thead>
             <tbody>
