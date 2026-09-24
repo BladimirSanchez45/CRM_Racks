@@ -1484,8 +1484,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const thunks: (() => Promise<void>)[] = [() => saveWarehouseItem(updated)]
         const ord = s.orders.find(o => o.id === item.orderId)
         const proj = ord?.projectId ? s.projects.find(p => p.id === ord.projectId) : undefined
-        if (action.status === 'listo' && item.status !== 'listo' && ord) {
-          // Al terminar se avisa a LOGÍSTICA (coordina el envío) y al VENDEDOR del proyecto.
+        if (action.status === 'preparado' && item.status !== 'preparado' && ord) {
+          // Al quedar LISTO en almacén se avisa a LOGÍSTICA (coordina el envío) y al VENDEDOR del proyecto.
           const logi = s.users.filter(u => u.role === 'logistica' && u.active && u.id !== s.currentUser?.id)
           const vendedor = proj ? s.users.filter(u => u.id === proj.seller && u.active && u.id !== s.currentUser?.id) : []
           notify([...logi, ...vendedor], {
@@ -1500,6 +1500,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const activity: Activity = {
             id: uid('a'), t: nowISO(), icon: 'pkg', who: whoName(s),
             txt: `marcó listo en almacén${proj ? ` (${proj.code})` : ''}`, tgt: ord.number, kind: 'done',
+          }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        if (action.status === 'listo' && item.status !== 'listo' && ord) {
+          // Terminado = ya salió de almacén; solo queda registro en la actividad.
+          const activity: Activity = {
+            id: uid('a'), t: nowISO(), icon: 'truck', who: whoName(s),
+            txt: `dio salida de almacén${proj ? ` (${proj.code})` : ''}`, tgt: ord.number, kind: 'done',
           }
           rawDispatch({ type: 'PUSH_ACTIVITY', activity })
           thunks.push(() => saveActivity(activity))
@@ -1976,14 +1985,18 @@ export const sel = {
     const proceso = q.filter(w => w.status === 'proceso')
     const pendiente = q.filter(w => w.status === 'pendiente')
     const pausado = q.filter(w => w.status === 'pausado')
+    // Lo ya preparado ("Listo") sigue en la cola hasta que sale, pero ya no es carga.
+    const preparado = q.filter(w => w.status === 'preparado')
+    const carga = q.filter(w => w.status !== 'preparado')
     return {
       proceso: proceso.length,
       pendiente: pendiente.length,
       pausado: pausado.length,
+      preparado: preparado.length,
       total: q.length,
-      sinClasificar: q.filter(w => !sel.warehouseClasificado(w)).length,
+      sinClasificar: carga.filter(w => !sel.warehouseClasificado(w)).length,
       // Los días son enteros (lo que sale el mismo día cuenta como 1).
-      dias: q.reduce((a, w) => a + sel.warehouseDays(state, w), 0),
+      dias: carga.reduce((a, w) => a + sel.warehouseDays(state, w), 0),
       diasProceso: proceso.reduce((a, w) => a + sel.warehouseDays(state, w), 0),
     }
   },

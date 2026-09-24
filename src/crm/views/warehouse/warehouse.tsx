@@ -24,10 +24,12 @@ const STATUS_META: Record<WarehouseStatus, { label: string; color: string }> = {
   pendiente: { label: 'Por iniciar', color: 'var(--tx-2)' },
   proceso:   { label: 'En proceso',  color: 'var(--warn)' },
   pausado:   { label: 'Pausado',     color: 'var(--st-5)' },
-  listo:     { label: 'Listo',       color: 'var(--ok)' },
+  // "Listo" = preparado en almacén, esperando salir. "Terminado" = ya salió (deja la cola).
+  preparado: { label: 'Listo',       color: 'var(--ok)' },
+  listo:     { label: 'Terminado',   color: 'var(--acc)' },
 }
 /** Orden en que se ofrecen los estatus en el selector. */
-const STATUSES: WarehouseStatus[] = ['pendiente', 'proceso', 'pausado', 'listo']
+const STATUSES: WarehouseStatus[] = ['pendiente', 'proceso', 'pausado', 'preparado', 'listo']
 
 /** ¿Este usuario puede MOVER la cola? Almacén (dueño del proceso) y admin. */
 const canManageWarehouse = (role?: string | null) => role === 'almacen' || role === 'admin' || role === 'superadmin'
@@ -368,26 +370,28 @@ export function WarehousePage() {
   // Arrastre para reordenar: qué fila se arrastra y sobre cuál está parada.
   const [dragId, setDragId] = React.useState<string | null>(null)
   const [overIndex, setOverIndex] = React.useState<number | null>(null)
-  // Candado al cerrar: la OC que se quiere marcar lista pero aún no tiene
-  // descontado su material del inventario.
-  const [pendiente, setPendiente] = React.useState<{ item: WarehouseItem; order: Order } | null>(null)
+  // Candado al cerrar: la OC que se quiere marcar lista/terminada pero aún no tiene
+  // descontado su material del inventario (y a qué estatus iba).
+  const [pendiente, setPendiente] = React.useState<{ item: WarehouseItem; order: Order; status: WarehouseStatus } | null>(null)
   const [consumoOc, setConsumoOc] = React.useState<Order | null>(null)
 
   const queue = sel.warehouseQueue(state)
   const done = sel.warehouseDone(state)
   const load = sel.warehouseLoad(state)
 
-  const marcarListo = (item: WarehouseItem) =>
-    dispatch({ type: 'SET_WAREHOUSE_STATUS', id: item.id, status: 'listo' })
-  /** Cambio de estado con candado: al pasar a "listo" se revisa que el material
-   *  ya se haya descontado del inventario. No bloquea —hay OC cuyo material no
-   *  sale de almacén— pero obliga a decidirlo a propósito. */
+  const marcar = (item: WarehouseItem, status: WarehouseStatus) =>
+    dispatch({ type: 'SET_WAREHOUSE_STATUS', id: item.id, status })
+  // "Listo" (preparado) y "Terminado" (salió) son los estatus en que el material ya se ocupó.
+  const yaOcupado = (s: WarehouseStatus) => s === 'preparado' || s === 'listo'
+  /** Cambio de estado con candado: al pasar a "Listo" o "Terminado" se revisa que el
+   *  material ya se haya descontado del inventario. No bloquea —hay OC cuyo material
+   *  no sale de almacén— pero obliga a decidirlo a propósito. */
   const cambiarEstado = (item: WarehouseItem, status: WarehouseStatus) => {
     const order = state.orders.find(o => o.id === item.orderId)
-    const faltaConsumo = status === 'listo' && item.status !== 'listo' && order
+    const faltaConsumo = yaOcupado(status) && !yaOcupado(item.status) && order
       && state.invItems.length > 0 && !sel.invConsumoCapturado(state, order.id)
-    if (faltaConsumo) { setPendiente({ item, order }); return }
-    dispatch({ type: 'SET_WAREHOUSE_STATUS', id: item.id, status })
+    if (faltaConsumo) { setPendiente({ item, order, status }); return }
+    marcar(item, status)
   }
 
   const endDrag = () => { setDragId(null); setOverIndex(null) }
@@ -400,7 +404,7 @@ export function WarehousePage() {
     <div>
       <SecTitle title="Almacén" sub="Cola de trabajo por prioridad" />
 
-      <div className="grid grid-cols-4 gap-3.5 mb-5">
+      <div className="grid grid-cols-5 gap-3.5 mb-5">
         <div className="kpi kpi-accent">
           <div className="k-label">Días de trabajo</div>
           <div className="k-val text-[26px]">{load.dias}</div>
@@ -408,6 +412,7 @@ export function WarehousePage() {
         </div>
         <div className="kpi"><div className="k-label">En proceso</div><div className="k-val text-[26px] text-warn">{load.proceso}</div><div className="k-foot">{load.diasProceso} días</div></div>
         <div className="kpi"><div className="k-label">Por iniciar / pausados</div><div className="k-val text-[26px]">{load.pendiente}<span className="text-[17px] text-tx-2"> / {load.pausado}</span></div><div className="k-foot">esperando turno</div></div>
+        <div className="kpi"><div className="k-label">Listos</div><div className="k-val text-[26px] text-ok">{load.preparado}</div><div className="k-foot">preparados, esperan salir</div></div>
         <div className="kpi"><div className="k-label">Sin clasificar</div><div className="k-val text-[26px]" style={{ color: load.sinClasificar ? 'var(--warn)' : undefined }}>{load.sinClasificar}</div><div className="k-foot">no suman a la carga</div></div>
       </div>
 
@@ -485,8 +490,8 @@ export function WarehousePage() {
             <button className="btn btn-ghost" onClick={() => setPendiente(null)}>Cancelar</button>
             <div className="flex-1"></div>
             <button className="btn btn-ghost" title="El inventario se queda como está"
-              onClick={() => { marcarListo(pendiente.item); setPendiente(null) }}>
-              Marcar listo sin descontar
+              onClick={() => { marcar(pendiente.item, pendiente.status); setPendiente(null) }}>
+              Marcar {STATUS_META[pendiente.status].label.toLowerCase()} sin descontar
             </button>
             <button className="btn btn-primary" onClick={() => setConsumoOc(pendiente.order)}>
               <Icon name="pkg" size={15} /> Capturar consumo
@@ -506,7 +511,7 @@ export function WarehousePage() {
       {/* Al guardar el consumo, la OC queda lista en el mismo movimiento. */}
       {consumoOc && (
         <ConsumoModal order={consumoOc}
-          onSaved={() => { if (pendiente) marcarListo(pendiente.item) }}
+          onSaved={() => { if (pendiente) marcar(pendiente.item, pendiente.status) }}
           onClose={() => { setConsumoOc(null); setPendiente(null) }} />
       )}
     </div>
@@ -553,9 +558,10 @@ export function WarehouseLoadCard() {
           <div style={{ width: `${100 - pct}%`, background: 'var(--acc)', opacity: 0.35 }}></div>
         </div>
 
-        {(load.pausado > 0 || load.sinClasificar > 0) && (
+        {(load.pausado > 0 || load.preparado > 0 || load.sinClasificar > 0) && (
           <div className="meta mt-2.5 flex flex-col gap-0.5">
             {load.pausado > 0 && <span>{load.pausado} pausado{load.pausado === 1 ? '' : 's'}: ya arrancaron pero están detenidos.</span>}
+            {load.preparado > 0 && <span>{load.preparado} listo{load.preparado === 1 ? '' : 's'} en almacén: ya preparado{load.preparado === 1 ? '' : 's'}, espera{load.preparado === 1 ? '' : 'n'} salir.</span>}
             {load.sinClasificar > 0 && <span>{load.sinClasificar} sin clasificar: aún no suma{load.sinClasificar === 1 ? '' : 'n'} días.</span>}
           </div>
         )}
@@ -627,6 +633,12 @@ export function WarehouseLoadStrip() {
             <span className="text-[12.5px]"><b>{load.pausado}</b> pausado{load.pausado === 1 ? '' : 's'}</span>
           </>
         )}
+        {load.preparado > 0 && (
+          <>
+            <span className="text-tx-3">·</span>
+            <span className="text-[12.5px]"><b className="text-ok">{load.preparado}</b> listo{load.preparado === 1 ? '' : 's'}</span>
+          </>
+        )}
         <span className="text-tx-3">·</span>
         <span className="text-[12.5px]"><b className="text-acc">{load.dias}</b> días de trabajo acumulados</span>
         {load.sinClasificar > 0 && (
@@ -688,7 +700,8 @@ export function WarehouseDashboard({ onNavigate }: { onNavigate: (route: string)
 
   // Lo que está en proceso primero; después, lo que sigue en la fila.
   const enProceso = queue.filter(w => w.status === 'proceso')
-  const siguientes = queue.filter(w => w.status !== 'proceso').slice(0, 6)
+  // Lo ya preparado ("Listo") no está esperando turno: no va en "lo que sigue".
+  const siguientes = queue.filter(w => w.status !== 'proceso' && w.status !== 'preparado').slice(0, 6)
   const sinClasificar = queue.filter(w => !sel.warehouseClasificado(w))
   // Terminados en los últimos 7 días. `doneAt` es ISO completo, así que basta
   // comparar contra la fecha: '2026-08-03T…' >= '2026-07-27' funciona por texto.
@@ -726,7 +739,7 @@ export function WarehouseDashboard({ onNavigate }: { onNavigate: (route: string)
       <SecTitle title="Panel de almacén" sub="Tu carga de trabajo de hoy"
         right={<button className="btn btn-primary" onClick={() => onNavigate('almacen')}><Icon name="pkg" size={15} /> Ir a la cola</button>} />
 
-      <div className="grid grid-cols-4 gap-3.5 mb-5">
+      <div className="grid grid-cols-5 gap-3.5 mb-5">
         <div className="kpi kpi-accent">
           <div className="k-label">Días de trabajo</div>
           <div className="k-val text-[26px]">{load.dias}</div>
@@ -734,6 +747,7 @@ export function WarehouseDashboard({ onNavigate }: { onNavigate: (route: string)
         </div>
         <div className="kpi"><div className="k-label">En proceso</div><div className="k-val text-[26px] text-warn">{load.proceso}</div><div className="k-foot">{load.diasProceso} días</div></div>
         <div className="kpi"><div className="k-label">Por iniciar / pausados</div><div className="k-val text-[26px]">{load.pendiente}<span className="text-[17px] text-tx-2"> / {load.pausado}</span></div><div className="k-foot">esperando turno</div></div>
+        <div className="kpi"><div className="k-label">Listos</div><div className="k-val text-[26px] text-ok">{load.preparado}</div><div className="k-foot">preparados, esperan salir</div></div>
         <div className="kpi"><div className="k-label">Terminadas (7 días)</div><div className="k-val text-[26px] text-ok">{recientes.length}</div><div className="k-foot">de {done.length} en total</div></div>
       </div>
 

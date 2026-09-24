@@ -610,8 +610,10 @@ export type WarehouseSize = 'S' | 'M' | 'L'
 /** Estado dentro de la cola, que almacén cambia a mano. Puede haber VARIOS
  *  en 'proceso' a la vez. 'pausado' = ya se había arrancado y se detuvo (por
  *  ejemplo, para darle prioridad a otro): se distingue de 'pendiente', que
- *  nunca se ha tocado. Todo lo que no es 'listo' sigue contando como carga. */
-export type WarehouseStatus = 'pendiente' | 'proceso' | 'pausado' | 'listo'
+ *  nunca se ha tocado. 'preparado' ("Listo" en pantalla) = almacén ya lo tiene
+ *  preparado y espera a que salga: sigue en la cola pero ya no suma carga.
+ *  'listo' ("Terminado" en pantalla) = ya salió de almacén; deja la cola. */
+export type WarehouseStatus = 'pendiente' | 'proceso' | 'pausado' | 'preparado' | 'listo'
 
 /** Renglón de la cola de almacén: uno por ORDEN DE COMPRA.
  *  La unidad de trabajo de almacén es la OC (el material que llega de un
