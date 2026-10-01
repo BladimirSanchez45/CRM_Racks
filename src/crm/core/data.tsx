@@ -36,6 +36,9 @@ import type {
   InventoryFamily,
   InventoryItem,
   InventoryMove,
+  Employee,
+  VacationEntitlement,
+  VacationRequest,
 } from './types'
 import { WAREHOUSE_DAYS_DEFAULT, SALES_GOAL_DEFAULT } from './types'
 import {
@@ -58,6 +61,8 @@ import {
   saveInvFamily, deleteInvFamily as apiDeleteInvFamily,
   saveInvItem, saveInvItems, deleteInvItem as apiDeleteInvItem, saveInvMove,
   saveProspect, deleteProspect as apiDeleteProspect,
+  saveEmployee, deleteEmployee as apiDeleteEmployee,
+  saveVacEntitlement, deleteVacEntitlement as apiDeleteVacEntitlement, saveVacRequest,
   saveActivity, saveSetting,
   saveNotification, markNotificationRead, markAllNotificationsRead, subscribeToNotifications,
   subscribeToData,
@@ -310,6 +315,7 @@ const initial: AppState = {
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
   movementLists: [], movements: [], campaigns: [], bankTxs: [], cfdiDocs: [], prospects: [], agendaEvents: [], warehouse: [],
   invFamilies: [], invItems: [], invMoves: [],
+  employees: [], vacationEntitlements: [], vacationRequests: [],
   settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {}, salesGoalsPersonal: {} },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
@@ -456,6 +462,19 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'UPSERT_INV_ITEM': return { ...state, invItems: upsertBy(state.invItems, a.item) }
     case 'REMOVE_INV_ITEM': return { ...state, invItems: state.invItems.filter(i => i.id !== a.id) }
     case 'UPSERT_INV_MOVE': return { ...state, invMoves: upsertBy(state.invMoves, a.move) }
+    case 'UPSERT_EMPLOYEE': return { ...state, employees: upsertBy(state.employees, a.employee) }
+    case 'REMOVE_EMPLOYEE':
+      // Sus paquetes y solicitudes se van con él (la base hace CASCADE).
+      return {
+        ...state,
+        employees: state.employees.filter(e => e.id !== a.id),
+        vacationEntitlements: state.vacationEntitlements.filter(v => v.employeeId !== a.id),
+        vacationRequests: state.vacationRequests.filter(v => v.employeeId !== a.id),
+      }
+    case 'UPSERT_VACATION_ENTITLEMENT': return { ...state, vacationEntitlements: upsertBy(state.vacationEntitlements, a.entitlement) }
+    case 'REMOVE_VACATION_ENTITLEMENT': return { ...state, vacationEntitlements: state.vacationEntitlements.filter(v => v.id !== a.id) }
+    case 'UPSERT_VACATION_REQUEST': return { ...state, vacationRequests: upsertBy(state.vacationRequests, a.request) }
+    case 'REMOVE_VACATION_REQUEST': return { ...state, vacationRequests: state.vacationRequests.filter(v => v.id !== a.id) }
     case 'SET_SETTINGS': return { ...state, settings: a.settings }
     case 'PUSH_ACTIVITY': return { ...state, activity: [a.activity, ...state.activity].slice(0, 40) }
     case 'UPSERT_NOTIFICATION': return { ...state, notifications: upsertBy(state.notifications, a.notification) }
@@ -638,11 +657,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const thunks: (() => Promise<void>)[] = [() => saveProject(updated)]
         // Su vendedor se entera de que le movieron el proyecto de etapa.
         notifySellerStage(s, proj, action.stage, whoName(s))
-        if (action.stage === 'finalizado' && !s.commissions.some(c => c.projectId === action.id)) {
-          // Principal (vendedor) + override de cada persona con override, según el estado actual.
-          for (const cm of buildCommissions(s, updated)) {
-            rawDispatch({ type: 'UPSERT_COMMISSION', commission: cm })
-            thunks.push(() => saveCommission(cm))
+        if (action.stage === 'finalizado') {
+          // Regenera SIEMPRE al finalizar (no solo la primera vez): si el proyecto se
+          // regresó de etapa y vuelve a finalizar, las comisiones renacen con la
+          // utilidad ACTUAL. regenCommissions preserva pagadas y ajustes manuales.
+          regenCommissions(updated, thunks)
+        } else if (proj.stage === 'finalizado') {
+          // Salió de "finalizado": sus comisiones PENDIENTES se retiran (no hay nada
+          // que pagar de un proyecto que no ha terminado; renacen al refinalizar).
+          // Las PAGADAS se conservan: son historial de dinero realmente entregado.
+          for (const c of s.commissions.filter(c => c.projectId === proj.id && c.status === 'pending')) {
+            rawDispatch({ type: 'REMOVE_COMMISSION', id: c.id })
+            thunks.push(() => deleteCommission(c.id))
           }
         }
         const stg = STAGE_MAP[action.stage]
@@ -1746,6 +1772,109 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => saveAgendaEvent(updated)]); return
       }
 
+      /* ---- Vacaciones ---- */
+      case 'SAVE_EMPLOYEE': {
+        const full: Employee = {
+          ...(action.employee as Employee),
+          id: action.employee.id ?? uid('emp'),
+          createdAt: action.employee.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_EMPLOYEE', employee: full })
+        persist([() => saveEmployee(full)]); return
+      }
+      case 'DELETE_EMPLOYEE': {
+        rawDispatch({ type: 'REMOVE_EMPLOYEE', id: action.id })
+        persist([() => apiDeleteEmployee(action.id)]); return
+      }
+      case 'SAVE_VACATION_ENTITLEMENT': {
+        const full: VacationEntitlement = {
+          ...(action.entitlement as VacationEntitlement),
+          id: action.entitlement.id ?? uid('vce'),
+          createdAt: action.entitlement.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_VACATION_ENTITLEMENT', entitlement: full })
+        persist([() => saveVacEntitlement(full)]); return
+      }
+      case 'DELETE_VACATION_ENTITLEMENT': {
+        rawDispatch({ type: 'REMOVE_VACATION_ENTITLEMENT', id: action.id })
+        persist([() => apiDeleteVacEntitlement(action.id)]); return
+      }
+      case 'SAVE_VACATION_REQUEST': {
+        const isNew = !action.request.id || !s.vacationRequests.some(r => r.id === action.request.id)
+        const full: VacationRequest = {
+          ...(action.request as VacationRequest),
+          id: action.request.id ?? uid('vr'),
+          status: action.request.status ?? 'Pendiente',
+          requestedBy: action.request.requestedBy ?? s.currentUser?.id,
+          createdAt: action.request.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_VACATION_REQUEST', request: full })
+        const thunks: (() => Promise<void>)[] = [() => saveVacRequest(full)]
+        const emp = s.employees.find(e => e.id === full.employeeId)
+        if (isNew && full.status === 'Pendiente') {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'sun', who: whoName(s), txt: `solicitó vacaciones (${full.days} día${full.days !== 1 ? 's' : ''})`, tgt: emp?.name ?? '', kind: 'info' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+          // Avisa a quienes aprueban: admin, superadmin y dirección.
+          const gestores = s.users.filter(u => u.active && u.id !== s.currentUser?.id && (isAdminRole(u.role) || isDireccion(u.role)))
+          notify(gestores, {
+            kind: 'vacation_requested',
+            title: `Vacaciones por aprobar: ${emp?.name ?? '—'}`,
+            body: `${whoName(s)} solicitó ${full.days} día${full.days !== 1 ? 's' : ''} (${fmtDate(full.startDate)} → ${fmtDate(full.endDate)}). Requiere aprobación.`,
+            ...(s.currentUser?.name ? { actorName: s.currentUser.name } : {}),
+          })
+        }
+        persist(thunks); return
+      }
+      case 'DECIDE_VACATION_REQUEST': {
+        const req = s.vacationRequests.find(r => r.id === action.id); if (!req || req.status !== 'Pendiente') return
+        const thunks: (() => Promise<void>)[] = []
+        const updated: VacationRequest = {
+          ...req,
+          status: action.approve ? 'Aprobada' : 'Rechazada',
+          decidedBy: s.currentUser?.id,
+          decidedAt: nowISO(),
+          ...(action.approve ? {} : { rejectReason: action.reason ?? '' }),
+        }
+        rawDispatch({ type: 'UPSERT_VACATION_REQUEST', request: updated })
+        thunks.push(() => saveVacRequest(updated))
+        // Al aprobar, consume los días FIFO empezando por el paquete que vence antes.
+        // Si el saldo no alcanza, el excedente cae en el ÚLTIMO paquete (queda en
+        // negativo, visible, para que el gestor lo ajuste — el vencimiento es suave).
+        if (action.approve) {
+          const paquetes = sel.vacEntitlementsFor(s, req.employeeId)
+          let restante = req.days
+          for (let i = 0; i < paquetes.length && restante > 0; i++) {
+            const p = paquetes[i]
+            const disponible = p.days - p.daysTaken - p.daysPaid
+            const usa = i === paquetes.length - 1 ? restante : Math.max(0, Math.min(disponible, restante))
+            if (usa <= 0) continue
+            restante -= usa
+            const upd: VacationEntitlement = { ...p, daysTaken: p.daysTaken + usa }
+            rawDispatch({ type: 'UPSERT_VACATION_ENTITLEMENT', entitlement: upd })
+            thunks.push(() => saveVacEntitlement(upd))
+          }
+        }
+        const emp = s.employees.find(e => e.id === req.employeeId)
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: action.approve ? 'check' : 'close', who: whoName(s), txt: `${action.approve ? 'aprobó' : 'rechazó'} vacaciones (${req.days} día${req.days !== 1 ? 's' : ''})`, tgt: emp?.name ?? '', kind: action.approve ? 'done' : 'info' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        // Avisa al dueño (si su empleado tiene usuario ligado) y a quien capturó, sin duplicar.
+        const destinos = new Set<string>()
+        if (emp?.userId) destinos.add(emp.userId)
+        if (req.requestedBy) destinos.add(req.requestedBy)
+        destinos.delete(s.currentUser?.id ?? '')
+        notify([...destinos].map(id => ({ id })), {
+          kind: 'vacation_decided',
+          title: `Vacaciones ${action.approve ? 'aprobadas' : 'rechazadas'}: ${emp?.name ?? '—'}`,
+          body: action.approve
+            ? `${whoName(s)} aprobó ${req.days} día${req.days !== 1 ? 's' : ''} del ${fmtDate(req.startDate)} al ${fmtDate(req.endDate)}.`
+            : `${whoName(s)} rechazó la solicitud del ${fmtDate(req.startDate)} al ${fmtDate(req.endDate)}.${action.reason ? ` Motivo: ${action.reason}` : ''}`,
+          ...(s.currentUser?.name ? { actorName: s.currentUser.name } : {}),
+        })
+        persist(thunks); return
+      }
+
       case 'SAVE_PROSPECT': {
         const full: Prospect = {
           ...(action.prospect as Prospect),
@@ -1867,6 +1996,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'warehouse_queue': rawDispatch({ type: 'REMOVE_WAREHOUSE_ITEM', id: c.id }); break
           case 'inventory_families': rawDispatch({ type: 'REMOVE_INV_FAMILY', id: c.id }); break
           case 'inventory_items':    rawDispatch({ type: 'REMOVE_INV_ITEM', id: c.id }); break
+          case 'employees':          rawDispatch({ type: 'REMOVE_EMPLOYEE', id: c.id }); break
+          case 'vacation_entitlements': rawDispatch({ type: 'REMOVE_VACATION_ENTITLEMENT', id: c.id }); break
+          case 'vacation_requests':  rawDispatch({ type: 'REMOVE_VACATION_REQUEST', id: c.id }); break
         }
       } else {
         switch (c.table) {
@@ -1891,6 +2023,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'inventory_families': rawDispatch({ type: 'UPSERT_INV_FAMILY', family: c.row }); break
           case 'inventory_items':    rawDispatch({ type: 'UPSERT_INV_ITEM', item: c.row }); break
           case 'inventory_moves':    rawDispatch({ type: 'UPSERT_INV_MOVE', move: c.row }); break
+          case 'employees':          rawDispatch({ type: 'UPSERT_EMPLOYEE', employee: c.row }); break
+          case 'vacation_entitlements': rawDispatch({ type: 'UPSERT_VACATION_ENTITLEMENT', entitlement: c.row }); break
+          case 'vacation_requests':  rawDispatch({ type: 'UPSERT_VACATION_REQUEST', request: c.row }); break
         }
       }
     })
@@ -2165,6 +2300,71 @@ export const sel = {
   internalPaymentsForProject: (state: AppState, pid: string) =>
     state.internalPayments.filter(p => p.projectId === pid),
   userName: (state: AppState, id: string) => (state.users.find(u => u.id === id) || ({} as User)).name || '—',
+
+  /* ---- Vacaciones ---- */
+  /** Empleado ligado al usuario (para "mis vacaciones"). */
+  employeeForUser: (state: AppState, userId?: string) =>
+    userId ? state.employees.find(e => e.userId === userId && e.active) : undefined,
+  /** Paquetes de un empleado en orden de consumo FIFO: primero el que vence antes
+   *  (sin vencimiento al final), y a igualdad, el más viejo. */
+  vacEntitlementsFor: (state: AppState, empId: string) =>
+    state.vacationEntitlements.filter(v => v.employeeId === empId).sort((a, b) => {
+      if (a.expiresOn && b.expiresOn && a.expiresOn !== b.expiresOn) return a.expiresOn < b.expiresOn ? -1 : 1
+      if (!!a.expiresOn !== !!b.expiresOn) return a.expiresOn ? -1 : 1
+      return a.createdAt < b.createdAt ? -1 : 1
+    }),
+  /** Solicitudes de un empleado, de la más reciente a la más vieja. */
+  vacRequestsFor: (state: AppState, empId: string) =>
+    state.vacationRequests.filter(r => r.employeeId === empId).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)),
+  /** Saldo de un empleado. `vencidos` = disponibles dentro de paquetes ya vencidos
+   *  (alerta: NO se descuentan solos, el gestor decide). */
+  vacBalance: (state: AppState, empId: string) => {
+    const pk = state.vacationEntitlements.filter(v => v.employeeId === empId)
+    const asignados = pk.reduce((a, v) => a + v.days, 0)
+    const tomados = pk.reduce((a, v) => a + v.daysTaken, 0)
+    const pagados = pk.reduce((a, v) => a + v.daysPaid, 0)
+    const vencidos = pk.filter(v => v.expiresOn && v.expiresOn < TODAY_ISO)
+      .reduce((a, v) => a + Math.max(0, v.days - v.daysTaken - v.daysPaid), 0)
+    return { asignados, tomados, pagados, disponibles: asignados - tomados - pagados, vencidos }
+  },
+}
+
+/* ---- Vacaciones: helpers ---- */
+/** Días de vacaciones por AÑOS de servicio cumplidos (LFT 2023, "vacaciones dignas"):
+ *  año 1 → 12, +2 por año hasta 20 en el año 5; después +2 por cada bloque de 5
+ *  (años 6-10 → 22, 11-15 → 24, …). Es el DEFAULT sugerido; el gestor puede ajustar. */
+export function diasVacacionesLFT(anios: number): number {
+  if (anios <= 0) return 0
+  if (anios <= 5) return 10 + 2 * anios
+  return 22 + 2 * Math.floor((anios - 6) / 5)
+}
+/** Años de servicio CUMPLIDOS a la fecha dada (default hoy). */
+export function aniosServicio(hireDate: string, at: string = TODAY_ISO): number {
+  if (!hireDate) return 0
+  const h = new Date(hireDate + 'T00:00:00'), a = new Date(at + 'T00:00:00')
+  let y = a.getFullYear() - h.getFullYear()
+  if (a.getMonth() < h.getMonth() || (a.getMonth() === h.getMonth() && a.getDate() < h.getDate())) y--
+  return Math.max(0, y)
+}
+/** Próximo aniversario de ingreso (ISO) a partir de hoy. */
+export function proximoAniversario(hireDate: string): string {
+  const h = new Date(hireDate + 'T00:00:00')
+  const now = new Date(TODAY_ISO + 'T00:00:00')
+  const d = new Date(now.getFullYear(), h.getMonth(), h.getDate())
+  if (d <= now) d.setFullYear(d.getFullYear() + 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+/** Días HÁBILES (L-V) de un rango inclusivo; 0 si el rango es inválido. */
+export function businessDaysLV(start: string, end: string): number {
+  if (!start || !end || end < start) return 0
+  let n = 0
+  const d = new Date(start + 'T00:00:00'), fin = new Date(end + 'T00:00:00')
+  while (d <= fin) {
+    const dow = d.getDay()
+    if (dow !== 0 && dow !== 6) n++
+    d.setDate(d.getDate() + 1)
+  }
+  return n
 }
 
 /** Siguiente folio consecutivo con prefijo (ej. nextFolio(remisiones, 'REM') → "REM-2026-001"). */

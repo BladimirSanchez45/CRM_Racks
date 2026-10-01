@@ -88,7 +88,9 @@ export function PaymentsPage() {
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: solo lectura
   const [form, setForm] = React.useState<Payment | {} | null>(null)
   const [fStatus, setFStatus] = React.useState('')
+  const [q, setQ] = React.useState('')
 
+  const needle = q.trim().toLowerCase()
   const rows = state.payments
     .map(p => {
       const order = sel.order(state, p.orderId)
@@ -98,6 +100,9 @@ export function PaymentsPage() {
     })
     .filter(r => r.order)
     .filter(r => !fStatus || r.p.status === fStatus)
+    .filter(r => !needle ||
+      `${r.order!.number} ${r.project?.code || ''} ${r.project ? sel.clientName(state, r.project.client) : ''} ${r.supplier?.name || ''} ${r.p.method || ''} ${r.p.comments || ''} ${r.p.amount}`
+        .toLowerCase().includes(needle))
     .sort((a, b) => (a.p.date < b.p.date ? 1 : -1))
   const totalProg = state.payments.filter(p => p.status === 'Programado').reduce((a, p) => a + p.amount, 0)
   const totalPaid = state.payments.filter(p => p.status === 'Pagado').reduce((a, p) => a + p.amount, 0)
@@ -119,11 +124,16 @@ export function PaymentsPage() {
       </div>
 
       <div className="flex gap-2 mb-3.5 items-center flex-wrap">
+        <div className="relative flex-[1_1_240px] max-w-[320px]">
+          <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+          <input className="input pl-[34px]" placeholder="Buscar OC, proyecto, proveedor, ref…" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
         <span className="label-k">Filtrar:</span>
         <div className="seg">
           <button className={!fStatus ? 'on' : ''} onClick={() => setFStatus('')}>Todos</button>
           {PAY_STATES.map(s => <button key={s} className={fStatus === s ? 'on' : ''} onClick={() => setFStatus(s)}>{s}</button>)}
         </div>
+        {(q || fStatus) && <button className="btn btn-ghost btn-sm" onClick={() => { setQ(''); setFStatus('') }}><Icon name="close" size={13} /> Limpiar</button>}
         <span className="meta">{rows.length} de {state.payments.length}</span>
       </div>
 
@@ -152,7 +162,7 @@ export function PaymentsPage() {
             </tbody>
           </table>
         </div>
-        {rows.length === 0 && <Empty icon="money">Sin abonos registrados</Empty>}
+        {rows.length === 0 && <Empty icon="money">{q || fStatus ? 'Ningún abono coincide con el filtro' : 'Sin abonos registrados'}</Empty>}
       </div>
 
       {form && <PaymentForm payment={'id' in form ? form : undefined} onClose={() => setForm(null)} readOnly={readOnly} />}

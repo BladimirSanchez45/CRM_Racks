@@ -447,6 +447,8 @@ export type NotificationKind =
   | 'project_rejected'           // se rechazó (eliminó) un proyecto con motivo → se avisa a los admins
   | 'warehouse_queued'           // entró un proyecto a la cola de almacén → se avisa a Almacén
   | 'warehouse_done'             // almacén terminó un proyecto → se avisa a logística y al vendedor
+  | 'vacation_requested'         // alguien solicitó vacaciones → se avisa a admin/superadmin/dirección
+  | 'vacation_decided'           // se aprobó/rechazó la solicitud → se avisa al solicitante
 
 /** Notificación dirigida a un usuario concreto (a diferencia del feed de
  *  actividad, que es global). Se entrega por id de usuario destinatario. */
@@ -463,6 +465,55 @@ export interface Notification {
   movementId?: string     // movimiento relacionado (para abrir el detalle)
   movementListId?: string // lista de movimientos relacionada (para abrir el detalle)
   actorName?: string      // quién la originó
+}
+
+/* ============================================================
+   VACACIONES — empleados, paquetes de días y solicitudes
+   ============================================================ */
+
+/** Trabajador (RH). No todos tienen login: `userId` liga al usuario del CRM
+ *  cuando existe (así ve y pide lo suyo); sin userId, lo gestiona un admin. */
+export interface Employee {
+  id: string
+  name: string
+  hireDate: string        // ISO (fecha de entrada)
+  userId?: string         // usuario del CRM ligado (opcional)
+  active: boolean
+  createdAt: string
+}
+
+/** PAQUETE de días de vacaciones. Cada aniversario genera uno (LFT, editable).
+ *  Saldo del paquete = days − daysTaken − daysPaid. El vencimiento es SUAVE:
+ *  pasar la fecha solo alerta en la UI, nunca descuenta solo. */
+export interface VacationEntitlement {
+  id: string
+  employeeId: string
+  label: string           // "Año 5 (2026)", "Saldo inicial…"
+  days: number            // otorgados
+  daysTaken: number       // tomados (descanso)
+  daysPaid: number        // pagados en nómina
+  obtainedOn?: string     // aniversario que lo generó (ISO)
+  expiresOn?: string      // aniversario + 6 meses (ISO)
+  notes: string
+  createdAt: string
+}
+
+export type VacationRequestStatus = 'Pendiente' | 'Aprobada' | 'Rechazada' | 'Cancelada'
+
+/** Solicitud de vacaciones (flujo espejo de pagos internos). */
+export interface VacationRequest {
+  id: string
+  employeeId: string
+  startDate: string       // ISO
+  endDate: string         // ISO
+  days: number            // hábiles L-V del rango
+  notes: string
+  status: VacationRequestStatus
+  requestedBy?: string    // usuario que capturó (el empleado o un admin)
+  decidedBy?: string
+  decidedAt?: string
+  rejectReason?: string
+  createdAt: string
 }
 
 /** Anuncio dentro de una campaña de marketing. Toma un trozo del presupuesto total
@@ -760,6 +811,9 @@ export interface AppState {
   invFamilies: InventoryFamily[]
   invItems: InventoryItem[]
   invMoves: InventoryMove[]
+  employees: Employee[]
+  vacationEntitlements: VacationEntitlement[]
+  vacationRequests: VacationRequest[]
   settings: AppSettings
   activity: Activity[]
   notifications: Notification[]
@@ -838,6 +892,20 @@ export type InventoryItemInput = Omit<InventoryItem, 'id' | 'qty' | 'counted' | 
   qty?: number
   counted?: boolean
   updatedAt?: string
+}
+export type EmployeeInput = Omit<Employee, 'id' | 'createdAt'> & {
+  id?: string
+  createdAt?: string
+}
+export type VacationEntitlementInput = Omit<VacationEntitlement, 'id' | 'createdAt'> & {
+  id?: string
+  createdAt?: string
+}
+export type VacationRequestInput = Omit<VacationRequest, 'id' | 'status' | 'requestedBy' | 'createdAt'> & {
+  id?: string
+  status?: VacationRequestStatus
+  requestedBy?: string
+  createdAt?: string
 }
 
 /** Acciones del store. */
@@ -940,6 +1008,14 @@ export type Action =
    *  conteo de un solo golpe. Es lo que permite llenar la matriz escribiendo encima,
    *  sin dar de alta nada por separado. */
   | { type: 'INV_COUNT_CELL'; familyId: string; rowId: string; colId: string; counted: number }
+  /* ---- Vacaciones ---- */
+  | { type: 'SAVE_EMPLOYEE'; employee: EmployeeInput }
+  | { type: 'DELETE_EMPLOYEE'; id: string }
+  | { type: 'SAVE_VACATION_ENTITLEMENT'; entitlement: VacationEntitlementInput }
+  | { type: 'DELETE_VACATION_ENTITLEMENT'; id: string }
+  | { type: 'SAVE_VACATION_REQUEST'; request: VacationRequestInput }
+  /** Decisión del gestor (admin/superadmin/dirección): aprobar consume días FIFO. */
+  | { type: 'DECIDE_VACATION_REQUEST'; id: string; approve: boolean; reason?: string }
   | { type: 'SAVE_AGENDA_EVENT'; event: AgendaEventInput }
   | { type: 'DELETE_AGENDA_EVENT'; id: string }
   | { type: 'TOGGLE_AGENDA_DONE'; id: string; userId?: string }   // userId: en qué agenda se marca (compartidas); por defecto, la propia
@@ -996,6 +1072,12 @@ export type StateAction =
   | { type: 'UPSERT_INV_ITEM'; item: InventoryItem }
   | { type: 'REMOVE_INV_ITEM'; id: string }
   | { type: 'UPSERT_INV_MOVE'; move: InventoryMove }
+  | { type: 'UPSERT_EMPLOYEE'; employee: Employee }
+  | { type: 'REMOVE_EMPLOYEE'; id: string }
+  | { type: 'UPSERT_VACATION_ENTITLEMENT'; entitlement: VacationEntitlement }
+  | { type: 'REMOVE_VACATION_ENTITLEMENT'; id: string }
+  | { type: 'UPSERT_VACATION_REQUEST'; request: VacationRequest }
+  | { type: 'REMOVE_VACATION_REQUEST'; id: string }
   | { type: 'UPSERT_PROSPECT'; prospect: Prospect }
   | { type: 'REMOVE_PROSPECT'; id: string }
   | { type: 'SET_SETTINGS'; settings: AppSettings }

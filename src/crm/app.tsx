@@ -30,6 +30,7 @@ import { SalesStatsPage } from './views/ventas_stats/ventas_stats'
 import { CampaignsPage } from './views/campaigns/campaigns'
 import { LayoutsPage } from './views/layouts/layouts'
 import { AdminPage } from './views/admin/admin'
+import { VacacionesPage } from './views/vacaciones/vacaciones'
 import { NotificationsBell } from './views/notifications/notifications'
 import { SettingsPage } from './views/settings/settings'
 import { LoginPage } from './views/login/login'
@@ -38,7 +39,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'agenda' | 'almacen' | 'inventario' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'layouts' | 'admin' | 'settings'
+type Route = 'dashboard' | 'agenda' | 'vacaciones' | 'almacen' | 'inventario' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'layouts' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -47,6 +48,8 @@ const SECTIONS = ['General', 'Comercial', 'Marketing', 'Compras', 'Logística', 
 type Section = typeof SECTIONS[number]
 const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; adminOnly?: boolean; roles?: Role[]; section: Section }[] = [
   { id: 'dashboard',   label: 'Panel',        icon: 'dashboard',   section: 'General' },
+  // Vacaciones: TODOS los roles (cada quien lo suyo; admin/super/dirección gestionan).
+  { id: 'vacaciones',  label: 'Vacaciones',   icon: 'sun',         section: 'General' },
   // OJO: 'agenda' NO va aquí a propósito: se entra desde el botón del topbar
   // (junto al de modo oscuro). Sí sigue listada en ROLE_ROUTES porque esa lista
   // gobierna la navegación permitida por rol, no solo el menú lateral.
@@ -91,7 +94,7 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // Admin: todo MENOS Prospectos/Perdidos (comercial de ventas) y
   // Asignación/Remisiones (operación de logística). El superadmin sí ve todo.
   admin: [
-    'dashboard', 'agenda', 'estadisticas', 'ventas_stats', 'campaigns',
+    'dashboard', 'agenda', 'vacaciones', 'estadisticas', 'ventas_stats', 'campaigns',
     'projects', 'historial', 'clients', 'commissions', 'layouts',
     'suppliers', 'orders', 'almacen', 'inventario',
     'payments', 'cobranza', 'internal_payments', 'movements',
@@ -99,16 +102,16 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   ],
   // Almacén: SOLO su cola de trabajo y su inventario (+ panel recortado, agenda
   // y configuración). Nada de proyectos, pagos, comisiones ni movimientos.
-  almacen: ['dashboard', 'almacen', 'inventario', 'agenda', 'ventas_stats', 'settings'],
-  ventas: ['dashboard', 'agenda', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'layouts', 'settings'],
+  almacen: ['dashboard', 'almacen', 'inventario', 'agenda', 'vacaciones', 'ventas_stats', 'settings'],
+  ventas: ['dashboard', 'agenda', 'vacaciones', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'layouts', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
-  logistica: ['dashboard', 'agenda', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'ventas_stats', 'settings'],
+  logistica: ['dashboard', 'agenda', 'vacaciones', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'ventas_stats', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
-  ingenieria: ['dashboard', 'agenda', 'projects', 'ventas_stats', 'layouts', 'settings'],
+  ingenieria: ['dashboard', 'agenda', 'vacaciones', 'projects', 'ventas_stats', 'layouts', 'settings'],
   // Marketing: Estadísticas por origen, Campañas y Prospectos (solo lectura, ve a
   // todo el equipo) + agenda, metas y configuración personal.
-  marketing: ['agenda', 'prospectos', 'estadisticas', 'campaigns', 'ventas_stats', 'settings'],
+  marketing: ['agenda', 'vacaciones', 'prospectos', 'estadisticas', 'campaigns', 'ventas_stats', 'settings'],
 }
 /** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
 const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
@@ -120,7 +123,7 @@ const landingRoute = (role?: Role | null): Route => {
   return allowed[0] ?? 'dashboard'
 }
 const TITLES: Record<Route, string> = {
-  dashboard: 'Panel general', agenda: 'Agenda', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
+  dashboard: 'Panel general', agenda: 'Agenda', vacaciones: 'Vacaciones', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
   orders: 'Órdenes de Compra', almacen: 'Almacén', inventario: 'Inventario', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   estadisticas: 'Estadísticas por origen', ventas_stats: 'Metas de venta', campaigns: 'Campañas',
@@ -245,6 +248,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
     switch (r) {
       case 'dashboard':   return <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'agenda':      return <AgendaPage onOpenProject={onOpenProject} />
+      case 'vacaciones':  return <VacacionesPage />
       case 'almacen':     return <WarehousePage />
       case 'inventario':  return <InventoryPage />
       case 'prospectos':  return <ProspectosPage />
@@ -295,7 +299,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
           <button className="icon-btn" onClick={() => setTweak('light', !t.light)} title={t.light ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}>
             <Icon name={t.light ? 'sun' : 'moon'} size={17} />
           </button>
-          <NotificationsBell onOpenProject={onOpenProject} onOpenInternalPayment={(id) => { setRoute('internal_payments'); setOpenIPId(id) }} onOpenMovements={(id) => { setRoute('movements'); setOpenMovId(id) }} onOpenClients={() => setRoute('clients')} />
+          <NotificationsBell onOpenProject={onOpenProject} onOpenInternalPayment={(id) => { setRoute('internal_payments'); setOpenIPId(id) }} onOpenMovements={(id) => { setRoute('movements'); setOpenMovId(id) }} onOpenClients={() => setRoute('clients')} onOpenVacaciones={() => setRoute('vacaciones')} />
         </header>
         <main className="content blueprint">
           <div className="content-inner" key={route}>{page()}</div>

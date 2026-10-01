@@ -373,6 +373,7 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
   const [detail, setDetail] = React.useState<InternalPayment | null>(null)
   const [form, setForm] = React.useState<InternalPayment | {} | null>(null)
   const [fStatus, setFStatus] = React.useState('')
+  const [q, setQ] = React.useState('')
 
   // Abrir un pago concreto al llegar desde una notificación ("Ver pago").
   React.useEffect(() => {
@@ -383,8 +384,16 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openId])
 
+  const needle = q.trim().toLowerCase()
   const rows = state.internalPayments
     .filter(p => !fStatus || p.status === fStatus)
+    .filter(p => {
+      if (!needle) return true
+      const proj = p.projectId ? state.projects.find(x => x.id === p.projectId) : undefined
+      const supplier = p.supplierId ? sel.supplier(state, p.supplierId) : undefined
+      return `${p.concept} ${p.category} ${proj?.code || ''} ${proj ? sel.clientName(state, proj.client) : ''} ${supplier?.name || ''} ${sel.userName(state, p.requestedBy)} ${p.amount}`
+        .toLowerCase().includes(needle)
+    })
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
 
   const pendientes = state.internalPayments.filter(p => p.status === 'Pendiente')
@@ -419,11 +428,16 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
       </div>
 
       <div className="flex gap-2 mb-3.5 items-center flex-wrap">
+        <div className="relative flex-[1_1_240px] max-w-[320px]">
+          <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
+          <input className="input pl-[34px]" placeholder="Buscar concepto, proyecto, proveedor…" value={q} onChange={e => setQ(e.target.value)} />
+        </div>
         <span className="label-k">Filtrar:</span>
         <div className="seg">
           <button className={!fStatus ? 'on' : ''} onClick={() => setFStatus('')}>Todos</button>
           {(Object.keys(STATUS_COLOR) as InternalPaymentStatus[]).map(s => <button key={s} className={fStatus === s ? 'on' : ''} onClick={() => setFStatus(s)}>{s}</button>)}
         </div>
+        {(q || fStatus) && <button className="btn btn-ghost btn-sm" onClick={() => { setQ(''); setFStatus('') }}><Icon name="close" size={13} /> Limpiar</button>}
         <span className="meta">{rows.length} de {state.internalPayments.length}</span>
       </div>
 
@@ -449,7 +463,7 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
             </tbody>
           </table>
         </div>
-        {rows.length === 0 && <Empty icon="money">Sin pagos internos registrados</Empty>}
+        {rows.length === 0 && <Empty icon="money">{q || fStatus ? 'Ningún pago coincide con el filtro' : 'Sin pagos internos registrados'}</Empty>}
       </div>
 
       {detail && <InternalPaymentDetail payment={state.internalPayments.find(x => x.id === detail.id)!} onEdit={editFromDetail} onClose={() => setDetail(null)} />}

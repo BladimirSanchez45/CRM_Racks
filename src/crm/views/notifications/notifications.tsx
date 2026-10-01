@@ -28,6 +28,8 @@ const KIND_ICON: Record<NotificationKind, IconName> = {
   project_rejected: 'alert',
   warehouse_queued: 'pkg',
   warehouse_done: 'pkg',
+  vacation_requested: 'sun',
+  vacation_decided: 'sun',
 }
 
 /** Fecha relativa amigable ("hace 5 min"). */
@@ -43,7 +45,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString('es-MX')
 }
 
-export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpenMovements, onOpenClients }: { onOpenProject: (p: Project) => void; onOpenInternalPayment?: (id: string) => void; onOpenMovements?: (id: string | null) => void; onOpenClients?: () => void }) {
+export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpenMovements, onOpenClients, onOpenVacaciones }: { onOpenProject: (p: Project) => void; onOpenInternalPayment?: (id: string) => void; onOpenMovements?: (id: string | null) => void; onOpenClients?: () => void; onOpenVacaciones?: () => void }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
   const [open, setOpen] = React.useState(false)
@@ -101,6 +103,8 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
   const isMov = detail?.kind === 'movements_submitted' || detail?.kind === 'movement_decided' || detail?.kind === 'movement_changed'
   // Notificación de cliente por aprobar: lleva a la vista de Clientes.
   const isClient = detail?.kind === 'client_pending'
+  // Vacaciones (solicitud o decisión): lleva a la vista de Vacaciones.
+  const isVac = detail?.kind === 'vacation_requested' || detail?.kind === 'vacation_decided'
   // Cambio de etapa del proyecto (avisa a su vendedor).
   const isStage = detail?.kind === 'project_stage_moved'
 
@@ -171,7 +175,12 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
                 <Icon name="box" size={15} /> Ver lista
               </button>
             )}
-            {!isIP && !isMov && project && (
+            {isVac && onOpenVacaciones && (
+              <button className="btn btn-primary" onClick={() => { onOpenVacaciones(); setDetail(null) }}>
+                <Icon name="sun" size={15} /> Ver vacaciones
+              </button>
+            )}
+            {!isIP && !isMov && !isVac && project && (
               <button className="btn btn-primary" onClick={() => { onOpenProject(project); setDetail(null) }}>
                 <Icon name="kanban" size={15} /> Ver proyecto
               </button>
@@ -205,6 +214,8 @@ export function NotificationsBell({ onOpenProject, onOpenInternalPayment, onOpen
             </div>
           ) : isClient ? (
             <div className="meta">Ve a <b>Clientes</b> para aprobar o rechazar el cliente propuesto.</div>
+          ) : isVac ? (
+            <div className="meta">Ve a <b>Vacaciones</b> para {detail.kind === 'vacation_requested' ? 'aprobar o rechazar la solicitud' : 'ver el detalle de tu solicitud'}.</div>
           ) : (
             <div className="meta">El proyecto ya no está disponible.</div>
           )}

@@ -9,6 +9,7 @@ import type {
   ClientPayment, Commission, Activity, Notification, AppState,
   Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
   AgendaEvent, WarehouseItem, InventoryFamily, InventoryItem, InventoryMove, BankTransaction, CfdiDoc,
+  Employee, VacationEntitlement, VacationRequest,
 } from './types'
 import { WAREHOUSE_DAYS_DEFAULT } from './types'
 
@@ -771,6 +772,81 @@ export async function saveInvItems(items: InventoryItem[]): Promise<void> {
 export const deleteInvItem = (id: string) => removeRow('inventory_items', id)
 export const saveInvMove = (m: InventoryMove) => upsert('inventory_moves', invMoveRow(m))
 
+/* ---- Vacaciones: empleados, paquetes de días y solicitudes ----
+   Las lecturas van con `sinTabla`: mientras no se corra step31_vacaciones.sql
+   el módulo llega vacío en vez de tumbar el loadAll() de todo el CRM. */
+function mapEmployee(r: any): Employee {
+  return {
+    id: r.id, name: r.name ?? '', hireDate: r.hire_date ?? '',
+    ...(r.user_id ? { userId: r.user_id } : {}),
+    active: !!r.active, createdAt: r.created_at ?? '',
+  }
+}
+function employeeRow(e: Employee): Record<string, unknown> {
+  return {
+    id: e.id, name: e.name, hire_date: e.hireDate,
+    user_id: e.userId ?? null, active: e.active, created_at: e.createdAt,
+  }
+}
+function mapVacEntitlement(r: any): VacationEntitlement {
+  return {
+    id: r.id, employeeId: r.employee_id ?? '', label: r.label ?? '',
+    days: Number(r.days ?? 0), daysTaken: Number(r.days_taken ?? 0), daysPaid: Number(r.days_paid ?? 0),
+    ...(r.obtained_on ? { obtainedOn: r.obtained_on } : {}),
+    ...(r.expires_on ? { expiresOn: r.expires_on } : {}),
+    notes: r.notes ?? '', createdAt: r.created_at ?? '',
+  }
+}
+function vacEntitlementRow(v: VacationEntitlement): Record<string, unknown> {
+  return {
+    id: v.id, employee_id: v.employeeId, label: v.label,
+    days: v.days, days_taken: v.daysTaken, days_paid: v.daysPaid,
+    obtained_on: orNull(v.obtainedOn), expires_on: orNull(v.expiresOn),
+    notes: v.notes, created_at: v.createdAt,
+  }
+}
+function mapVacRequest(r: any): VacationRequest {
+  return {
+    id: r.id, employeeId: r.employee_id ?? '', startDate: r.start_date ?? '', endDate: r.end_date ?? '',
+    days: Number(r.days ?? 0), notes: r.notes ?? '', status: r.status ?? 'Pendiente',
+    ...(r.requested_by ? { requestedBy: r.requested_by } : {}),
+    ...(r.decided_by ? { decidedBy: r.decided_by } : {}),
+    ...(r.decided_at ? { decidedAt: r.decided_at } : {}),
+    ...(r.reject_reason ? { rejectReason: r.reject_reason } : {}),
+    createdAt: r.created_at ?? '',
+  }
+}
+function vacRequestRow(v: VacationRequest): Record<string, unknown> {
+  return {
+    id: v.id, employee_id: v.employeeId, start_date: v.startDate, end_date: v.endDate,
+    days: v.days, notes: v.notes, status: v.status,
+    requested_by: v.requestedBy ?? null, decided_by: v.decidedBy ?? null,
+    decided_at: v.decidedAt ?? null, reject_reason: orNull(v.rejectReason),
+    created_at: v.createdAt,
+  }
+}
+export const fetchEmployees = (): Promise<Employee[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('employees').select('*').order('name')
+  if (error) throw error
+  return (data ?? []).map(mapEmployee)
+}, 'employees')
+export const fetchVacEntitlements = (): Promise<VacationEntitlement[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('vacation_entitlements').select('*').order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map(mapVacEntitlement)
+}, 'vacation_entitlements')
+export const fetchVacRequests = (): Promise<VacationRequest[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('vacation_requests').select('*').order('created_at', { ascending: false })
+  if (error) throw error
+  return (data ?? []).map(mapVacRequest)
+}, 'vacation_requests')
+export const saveEmployee = (e: Employee) => upsert('employees', employeeRow(e))
+export const deleteEmployee = (id: string) => removeRow('employees', id)
+export const saveVacEntitlement = (v: VacationEntitlement) => upsert('vacation_entitlements', vacEntitlementRow(v))
+export const deleteVacEntitlement = (id: string) => removeRow('vacation_entitlements', id)
+export const saveVacRequest = (v: VacationRequest) => upsert('vacation_requests', vacRequestRow(v))
+export const deleteVacRequest = (id: string) => removeRow('vacation_requests', id)
+
 /* ---- Prospectos / leads (CRM previo a Proyectos) ---- */
 function mapProspect(r: any): Prospect {
   return {
@@ -968,6 +1044,9 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   inventory_families: mapInvFamily,
   inventory_items: mapInvItem,
   inventory_moves: mapInvMove,
+  employees: mapEmployee,
+  vacation_entitlements: mapVacEntitlement,
+  vacation_requests: mapVacRequest,
 }
 
 /** Suscripción Realtime (WebSocket) a TODAS las tablas operativas. Por cada cambio
@@ -1041,12 +1120,14 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, employees, vacationEntitlements, vacationRequests, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
       fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchBankTxs(), fetchCfdiDocs(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(),
-      fetchInvFamilies(), fetchInvItems(), fetchInvMoves(), fetchSettings(), fetchActivity(), fetchNotifications(),
+      fetchInvFamilies(), fetchInvItems(), fetchInvMoves(),
+      fetchEmployees(), fetchVacEntitlements(), fetchVacRequests(),
+      fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, employees, vacationEntitlements, vacationRequests, settings, activity, notifications }
 }
