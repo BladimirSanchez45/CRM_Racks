@@ -186,7 +186,7 @@ function EntitlementForm({ employee, ent, onClose }: { employee: Employee; ent?:
         <Field label="Se obtienen el"><Input type="date" value={obtainedOn} onChange={e => { setObtainedOn(e.target.value); if (e.target.value) setExpiresOn(plusMonths(e.target.value, 6)) }} /></Field>
         <Field label="Días ya tomados"><Input type="number" min={0} value={taken} onChange={e => setTaken(e.target.value)} /></Field>
         <Field label="Vencen el (alerta, no descuenta)"><Input type="date" value={expiresOn} onChange={e => setExpiresOn(e.target.value)} /></Field>
-        <Field label="Días pagados en nómina"><Input type="number" min={0} value={paid} onChange={e => setPaid(e.target.value)} /></Field>
+        <Field label="Días por pagar en nómina"><Input type="number" min={0} value={paid} onChange={e => setPaid(e.target.value)} /></Field>
         <Field label="Notas"><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Ej. por pagar 1 en nómina" /></Field>
       </div>
     </Modal>
@@ -210,7 +210,7 @@ function EntitlementsModal({ employee, onClose }: { employee: Employee; onClose:
         </>}>
         {paquetes.length === 0 ? <Empty icon="layers">Sin paquetes. Agrega el primero (la LFT se sugiere sola).</Empty> : (
           <table className="tbl">
-            <thead><tr><th>Paquete</th><th className="num">Días</th><th className="num">Tomados</th><th className="num">Pagados</th><th className="num">Saldo</th><th>Vence</th><th></th></tr></thead>
+            <thead><tr><th>Paquete</th><th className="num">Días</th><th className="num">Tomados</th><th className="num">Por pagar</th><th className="num">Saldo</th><th>Vence</th><th></th></tr></thead>
             <tbody>
               {paquetes.map(p => {
                 const saldo = p.days - p.daysTaken - p.daysPaid
@@ -285,7 +285,7 @@ export function VacacionesPage() {
             <div className="kpi kpi-accent"><div className="k-label">Días disponibles</div><div className="k-val text-[26px]">{myBal!.disponibles}</div><div className="k-foot">de {myBal!.asignados} otorgados</div></div>
             <div className="kpi"><div className="k-label">Por vencer / vencidos</div><div className={'k-val text-[26px]' + (myBal!.vencidos > 0 ? ' text-warn' : '')}>{myBal!.vencidos}</div><div className="k-foot">se acuerdan con tu gestor</div></div>
             <div className="kpi"><div className="k-label">Tomados</div><div className="k-val text-[26px]">{myBal!.tomados}</div><div className="k-foot">días de descanso</div></div>
-            <div className="kpi"><div className="k-label">Pagados en nómina</div><div className="k-val text-[26px]">{myBal!.pagados}</div><div className="k-foot">días cobrados</div></div>
+            <div className="kpi"><div className="k-label">Por pagar en nómina</div><div className="k-val text-[26px]">{myBal!.pagados}</div><div className="k-foot">se pagan a fin de año</div></div>
           </div>
 
           <div className="card overflow-hidden">
@@ -434,7 +434,7 @@ export function VacacionesPage() {
                             <span className="mono">{pct}%</span>
                           </div>
                           <div className="bar"><i style={{ width: `${pct}%`, background: bal.disponibles < 0 ? 'var(--danger)' : 'var(--acc)' }}></i></div>
-                          <div className="meta text-[10.5px] mt-1">{bal.tomados} tomado{bal.tomados !== 1 ? 's' : ''} · {bal.pagados} pagado{bal.pagados !== 1 ? 's' : ''} en nómina</div>
+                          <div className="meta text-[10.5px] mt-1">{bal.tomados} tomado{bal.tomados !== 1 ? 's' : ''} · {bal.pagados} por pagar en nómina</div>
                         </td>
                         <td className="num">
                           <span className="font-display font-extrabold text-[21px] leading-none"
