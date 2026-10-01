@@ -483,15 +483,16 @@ export interface Employee {
 }
 
 /** PAQUETE de días de vacaciones. Cada aniversario genera uno (LFT, editable).
- *  Saldo del paquete = days − daysTaken − daysPaid. El vencimiento es SUAVE:
- *  pasar la fecha solo alerta en la UI, nunca descuenta solo. */
+ *  Saldo del paquete = days − daysTaken − daysPaid − daysSettled. El vencimiento
+ *  es SUAVE: pasar la fecha solo alerta en la UI, nunca descuenta solo. */
 export interface VacationEntitlement {
   id: string
   employeeId: string
   label: string           // "Año 5 (2026)", "Saldo inicial…"
   days: number            // otorgados
   daysTaken: number       // tomados (descanso)
-  daysPaid: number        // pagados en nómina
+  daysPaid: number        // POR PAGAR en nómina (comprometidos; se liquidan a fin de año)
+  daysSettled: number     // YA PAGADOS en nómina (liquidados): al pagarlos se mueven aquí
   obtainedOn?: string     // aniversario que lo generó (ISO)
   expiresOn?: string      // aniversario + 6 meses (ISO)
   notes: string
@@ -1013,6 +1014,8 @@ export type Action =
   | { type: 'DELETE_EMPLOYEE'; id: string }
   | { type: 'SAVE_VACATION_ENTITLEMENT'; entitlement: VacationEntitlementInput }
   | { type: 'DELETE_VACATION_ENTITLEMENT'; id: string }
+  // Nómina liquidó: mueve los días POR PAGAR a YA PAGADOS en todos los paquetes del trabajador.
+  | { type: 'SETTLE_VACATION_PAID'; employeeId: string }
   | { type: 'SAVE_VACATION_REQUEST'; request: VacationRequestInput }
   /** Decisión del gestor (admin/superadmin/dirección): aprobar consume días FIFO. */
   | { type: 'DECIDE_VACATION_REQUEST'; id: string; approve: boolean; reason?: string }

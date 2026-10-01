@@ -1799,6 +1799,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'REMOVE_VACATION_ENTITLEMENT', id: action.id })
         persist([() => apiDeleteVacEntitlement(action.id)]); return
       }
+      case 'SETTLE_VACATION_PAID': {
+        // Nómina liquidó (fin de año): mueve los días POR PAGAR a YA PAGADOS en
+        // todos los paquetes del trabajador. El disponible no cambia (ya estaban
+        // descontados); solo deja de aparecer como pendiente de pago.
+        const packs = s.vacationEntitlements.filter(v => v.employeeId === action.employeeId && v.daysPaid > 0)
+        if (!packs.length) return
+        const thunks: (() => Promise<void>)[] = []
+        let total = 0
+        for (const p of packs) {
+          const upd: VacationEntitlement = { ...p, daysSettled: (p.daysSettled || 0) + p.daysPaid, daysPaid: 0 }
+          rawDispatch({ type: 'UPSERT_VACATION_ENTITLEMENT', entitlement: upd })
+          thunks.push(() => saveVacEntitlement(upd))
+          total += p.daysPaid
+        }
+        const emp = s.employees.find(e => e.id === action.employeeId)
+        const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `marcó ${total} día${total !== 1 ? 's' : ''} de vacaciones como pagados en nómina`, tgt: emp?.name ?? '', kind: 'money' }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
+        persist(thunks); return
+      }
       case 'SAVE_VACATION_REQUEST': {
         const isNew = !action.request.id || !s.vacationRequests.some(r => r.id === action.request.id)
         const full: VacationRequest = {
@@ -2322,10 +2342,13 @@ export const sel = {
     const pk = state.vacationEntitlements.filter(v => v.employeeId === empId)
     const asignados = pk.reduce((a, v) => a + v.days, 0)
     const tomados = pk.reduce((a, v) => a + v.daysTaken, 0)
+    // `pagados` = POR PAGAR en nómina; `liquidados` = ya pagados. Ambos
+    // descuentan del disponible (están comprometidos o ya cobrados).
     const pagados = pk.reduce((a, v) => a + v.daysPaid, 0)
+    const liquidados = pk.reduce((a, v) => a + (v.daysSettled || 0), 0)
     const vencidos = pk.filter(v => v.expiresOn && v.expiresOn < TODAY_ISO)
-      .reduce((a, v) => a + Math.max(0, v.days - v.daysTaken - v.daysPaid), 0)
-    return { asignados, tomados, pagados, disponibles: asignados - tomados - pagados, vencidos }
+      .reduce((a, v) => a + Math.max(0, v.days - v.daysTaken - v.daysPaid - (v.daysSettled || 0)), 0)
+    return { asignados, tomados, pagados, liquidados, disponibles: asignados - tomados - pagados - liquidados, vencidos }
   },
 }
 

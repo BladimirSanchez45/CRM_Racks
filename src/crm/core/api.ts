@@ -792,6 +792,7 @@ function mapVacEntitlement(r: any): VacationEntitlement {
   return {
     id: r.id, employeeId: r.employee_id ?? '', label: r.label ?? '',
     days: Number(r.days ?? 0), daysTaken: Number(r.days_taken ?? 0), daysPaid: Number(r.days_paid ?? 0),
+    daysSettled: Number(r.days_settled ?? 0),
     ...(r.obtained_on ? { obtainedOn: r.obtained_on } : {}),
     ...(r.expires_on ? { expiresOn: r.expires_on } : {}),
     notes: r.notes ?? '', createdAt: r.created_at ?? '',
@@ -800,7 +801,7 @@ function mapVacEntitlement(r: any): VacationEntitlement {
 function vacEntitlementRow(v: VacationEntitlement): Record<string, unknown> {
   return {
     id: v.id, employee_id: v.employeeId, label: v.label,
-    days: v.days, days_taken: v.daysTaken, days_paid: v.daysPaid,
+    days: v.days, days_taken: v.daysTaken, days_paid: v.daysPaid, days_settled: v.daysSettled,
     obtained_on: orNull(v.obtainedOn), expires_on: orNull(v.expiresOn),
     notes: v.notes, created_at: v.createdAt,
   }

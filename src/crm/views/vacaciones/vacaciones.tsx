@@ -156,6 +156,7 @@ function EntitlementForm({ employee, ent, onClose }: { employee: Employee; ent?:
   const [days, setDays] = React.useState(String(ent?.days ?? sugeridos))
   const [taken, setTaken] = React.useState(String(ent?.daysTaken ?? 0))
   const [paid, setPaid] = React.useState(String(ent?.daysPaid ?? 0))
+  const [settled, setSettled] = React.useState(String(ent?.daysSettled ?? 0))
   const [obtainedOn, setObtainedOn] = React.useState(ent?.obtainedOn ?? aniv)
   const [expiresOn, setExpiresOn] = React.useState(ent?.expiresOn ?? plusMonths(aniv, 6))
   const [notes, setNotes] = React.useState(ent?.notes ?? '')
@@ -164,6 +165,7 @@ function EntitlementForm({ employee, ent, onClose }: { employee: Employee; ent?:
     dispatch({ type: 'SAVE_VACATION_ENTITLEMENT', entitlement: {
       ...ent, employeeId: employee.id, label: label.trim(),
       days: Math.round(+days || 0), daysTaken: Math.round(+taken || 0), daysPaid: Math.round(+paid || 0),
+      daysSettled: Math.round(+settled || 0),
       obtainedOn: obtainedOn || undefined, expiresOn: expiresOn || undefined, notes,
     } })
     onClose()
@@ -187,7 +189,10 @@ function EntitlementForm({ employee, ent, onClose }: { employee: Employee; ent?:
         <Field label="Días ya tomados"><Input type="number" min={0} value={taken} onChange={e => setTaken(e.target.value)} /></Field>
         <Field label="Vencen el (alerta, no descuenta)"><Input type="date" value={expiresOn} onChange={e => setExpiresOn(e.target.value)} /></Field>
         <Field label="Días por pagar en nómina"><Input type="number" min={0} value={paid} onChange={e => setPaid(e.target.value)} /></Field>
-        <Field label="Notas"><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Ej. por pagar 1 en nómina" /></Field>
+        {/* Cuando se liquidan (fin de año), el número se mueve de "por pagar" a "ya pagados":
+            el disponible no cambia, pero deja de aparecer como pendiente. */}
+        <Field label="Días ya pagados en nómina"><Input type="number" min={0} value={settled} onChange={e => setSettled(e.target.value)} /></Field>
+        <Field label="Notas" span={2}><Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Ej. por pagar 1 en nómina" /></Field>
       </div>
     </Modal>
   )
@@ -198,6 +203,7 @@ function EntitlementsModal({ employee, onClose }: { employee: Employee; onClose:
   const [edit, setEdit] = React.useState<VacationEntitlement | null>(null)
   const [adding, setAdding] = React.useState(false)
   const [del, setDel] = React.useState<VacationEntitlement | null>(null)
+  const [confirmSettle, setConfirmSettle] = React.useState(false)
   const paquetes = sel.vacEntitlementsFor(state, employee.id)
   const bal = sel.vacBalance(state, employee.id)
   return (
@@ -206,14 +212,20 @@ function EntitlementsModal({ employee, onClose }: { employee: Employee; onClose:
         footer={<>
           <button className="btn btn-ghost" onClick={onClose}>Cerrar</button>
           <div className="flex-1"></div>
+          {/* Nómina liquidó: pasa TODO lo "por pagar" de este trabajador a "ya pagados". */}
+          {bal.pagados > 0 && (
+            <button className="btn btn-ghost" onClick={() => setConfirmSettle(true)}>
+              <Icon name="money" size={14} /> Marcar {bal.pagados} por pagar como pagado{bal.pagados !== 1 ? 's' : ''}
+            </button>
+          )}
           <button className="btn btn-primary" onClick={() => setAdding(true)}><Icon name="plus" size={15} /> Agregar paquete</button>
         </>}>
         {paquetes.length === 0 ? <Empty icon="layers">Sin paquetes. Agrega el primero (la LFT se sugiere sola).</Empty> : (
           <table className="tbl">
-            <thead><tr><th>Paquete</th><th className="num">Días</th><th className="num">Tomados</th><th className="num">Por pagar</th><th className="num">Saldo</th><th>Vence</th><th></th></tr></thead>
+            <thead><tr><th>Paquete</th><th className="num">Días</th><th className="num">Tomados</th><th className="num">Por pagar</th><th className="num">Pagados</th><th className="num">Saldo</th><th>Vence</th><th></th></tr></thead>
             <tbody>
               {paquetes.map(p => {
-                const saldo = p.days - p.daysTaken - p.daysPaid
+                const saldo = p.days - p.daysTaken - p.daysPaid - (p.daysSettled || 0)
                 const vencido = !!p.expiresOn && p.expiresOn < TODAY_ISO
                 return (
                   <tr key={p.id}>
@@ -224,6 +236,7 @@ function EntitlementsModal({ employee, onClose }: { employee: Employee; onClose:
                     <td className="num">{p.days}</td>
                     <td className="num">{p.daysTaken}</td>
                     <td className="num">{p.daysPaid}</td>
+                    <td className="num">{p.daysSettled || 0}</td>
                     <td className={'num font-semibold ' + (saldo < 0 ? 'text-danger' : '')}>{saldo}</td>
                     <td>
                       {p.expiresOn
@@ -245,6 +258,12 @@ function EntitlementsModal({ employee, onClose }: { employee: Employee; onClose:
       {del && (
         <Confirm title="Eliminar paquete" message={`Se elimina "${del.label}" (${del.days} días) de ${employee.name}. Esta acción no se puede deshacer.`}
           onConfirm={() => { dispatch({ type: 'DELETE_VACATION_ENTITLEMENT', id: del.id }); setDel(null) }} onClose={() => setDel(null)} />
+      )}
+      {confirmSettle && (
+        <Confirm title="Marcar como pagados" confirmLabel="Marcar pagados"
+          message={`Se marcan ${bal.pagados} día${bal.pagados !== 1 ? 's' : ''} por pagar de ${employee.name} como ya pagados en nómina. Su saldo disponible no cambia.`}
+          onConfirm={() => { dispatch({ type: 'SETTLE_VACATION_PAID', employeeId: employee.id }); setConfirmSettle(false) }}
+          onClose={() => setConfirmSettle(false)} />
       )}
     </>
   )
@@ -285,7 +304,7 @@ export function VacacionesPage() {
             <div className="kpi kpi-accent"><div className="k-label">Días disponibles</div><div className="k-val text-[26px]">{myBal!.disponibles}</div><div className="k-foot">de {myBal!.asignados} otorgados</div></div>
             <div className="kpi"><div className="k-label">Por vencer / vencidos</div><div className={'k-val text-[26px]' + (myBal!.vencidos > 0 ? ' text-warn' : '')}>{myBal!.vencidos}</div><div className="k-foot">se acuerdan con tu gestor</div></div>
             <div className="kpi"><div className="k-label">Tomados</div><div className="k-val text-[26px]">{myBal!.tomados}</div><div className="k-foot">días de descanso</div></div>
-            <div className="kpi"><div className="k-label">Por pagar en nómina</div><div className="k-val text-[26px]">{myBal!.pagados}</div><div className="k-foot">se pagan a fin de año</div></div>
+            <div className="kpi"><div className="k-label">Por pagar en nómina</div><div className="k-val text-[26px]">{myBal!.pagados}</div>{myBal!.liquidados > 0 && <div className="k-foot">{myBal!.liquidados} ya pagado{myBal!.liquidados !== 1 ? 's' : ''}</div>}</div>
           </div>
 
           <div className="card overflow-hidden">
@@ -403,12 +422,12 @@ export function VacacionesPage() {
                   {equipo.map(e => {
                     const bal = sel.vacBalance(state, e.id)
                     const paquetes = sel.vacEntitlementsFor(state, e.id)
-                    const prox = paquetes.find(p => p.expiresOn && p.days - p.daysTaken - p.daysPaid > 0)
+                    const prox = paquetes.find(p => p.expiresOn && p.days - p.daysTaken - p.daysPaid - (p.daysSettled || 0) > 0)
                     const vencido = !!prox?.expiresOn && prox.expiresOn < TODAY_ISO
                     const diasAlVenc = prox?.expiresOn ? daysBetween(prox.expiresOn) : null
                     const porVencer = !vencido && diasAlVenc != null && diasAlVenc <= 45
                     const anios = aniosServicio(e.hireDate)
-                    const usados = bal.tomados + bal.pagados
+                    const usados = bal.tomados + bal.pagados + bal.liquidados
                     const pct = bal.asignados > 0 ? Math.min(100, Math.round((usados / bal.asignados) * 100)) : 0
                     return (
                       <tr key={e.id} className={!e.active ? 'opacity-50' : undefined}>
@@ -434,7 +453,7 @@ export function VacacionesPage() {
                             <span className="mono">{pct}%</span>
                           </div>
                           <div className="bar"><i style={{ width: `${pct}%`, background: bal.disponibles < 0 ? 'var(--danger)' : 'var(--acc)' }}></i></div>
-                          <div className="meta text-[10.5px] mt-1">{bal.tomados} tomado{bal.tomados !== 1 ? 's' : ''} · {bal.pagados} por pagar en nómina</div>
+                          <div className="meta text-[10.5px] mt-1">{bal.tomados} tomado{bal.tomados !== 1 ? 's' : ''} · {bal.pagados} por pagar en nómina{bal.liquidados > 0 ? ` · ${bal.liquidados} pagado${bal.liquidados !== 1 ? 's' : ''}` : ''}</div>
                         </td>
                         <td className="num">
                           <span className="font-display font-extrabold text-[21px] leading-none"
