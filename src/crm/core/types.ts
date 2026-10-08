@@ -153,6 +153,9 @@ export interface Order {
   projectId?: string        // proyecto asociado
   items?: OcItem[]          // lista de materiales (opcional)
   cancelled?: boolean       // override manual → Estatus "Cancelada"
+  /** Consumo de inventario resuelto A MANO (fuera del sistema): deja de aparecer
+   *  como pendiente en Inventario → Consumo por OC. No toca el kardex. */
+  consumoManual?: boolean
 }
 
 /** Estado de un cobro al cliente. */
@@ -446,7 +449,7 @@ export type NotificationKind =
   | 'project_stage_moved'        // el proyecto cambió de etapa → se avisa a SU vendedor
   | 'project_rejected'           // se rechazó (eliminó) un proyecto con motivo → se avisa a los admins
   | 'warehouse_queued'           // entró un proyecto a la cola de almacén → se avisa a Almacén
-  | 'warehouse_done'             // almacén terminó un proyecto → se avisa a logística y al vendedor
+  | 'warehouse_done'             // almacén dejó LISTA una OC (preparada, espera salir) → se avisa a logística y al vendedor
   | 'vacation_requested'         // alguien solicitó vacaciones → se avisa a admin/superadmin/dirección
   | 'vacation_decided'           // se aprobó/rechazó la solicitud → se avisa al solicitante
 
@@ -688,6 +691,7 @@ export interface WarehouseItem {
   notes?: string
   enteredAt: string        // ISO — cuándo cayó a la cola
   startedAt?: string       // ISO — al pasar a 'proceso'
+  readyAt?: string         // ISO — al pasar a 'preparado' ("Listo"); la imprime el sticker de salida
   doneAt?: string          // ISO — al pasar a 'listo'
 }
 /** Días de trabajo que vale cada talla (configurable en Administración). */
@@ -754,6 +758,17 @@ export interface InventoryMove {
   at: string                // ISO
 }
 
+/** PAQUETE (kit): nombre comercial que se arma con varias claves, p. ej.
+ *  "Nivel Mini" = 2 charolas + 2 vigas. NO tiene existencia propia: el stock
+ *  vive en sus piezas. Sirve para que una partida de OC que diga "12 niveles"
+ *  se descomponga sola en sus piezas al capturar el consumo. */
+export interface InventoryKit {
+  id: string
+  name: string
+  components: { itemId: string; qty: number }[]   // piezas por UN paquete
+  position: number
+}
+
 /* ---- AGENDA personal (pendientes, recordatorios y citas) ---- */
 
 /** Tipo de anotación en la agenda:
@@ -812,6 +827,9 @@ export interface AppState {
   invFamilies: InventoryFamily[]
   invItems: InventoryItem[]
   invMoves: InventoryMove[]
+  invKits: InventoryKit[]
+  /** OC con salida en el kardex (incluye lo que ya no cabe en los últimos movimientos cargados). */
+  invConsumedOrders: string[]
   employees: Employee[]
   vacationEntitlements: VacationEntitlement[]
   vacationRequests: VacationRequest[]
@@ -888,6 +906,10 @@ export type InventoryFamilyInput = Omit<InventoryFamily, 'id' | 'position'> & {
   id?: string
   position?: number
 }
+export type InventoryKitInput = Omit<InventoryKit, 'id' | 'position'> & {
+  id?: string
+  position?: number
+}
 export type InventoryItemInput = Omit<InventoryItem, 'id' | 'qty' | 'counted' | 'updatedAt'> & {
   id?: string
   qty?: number
@@ -924,6 +946,8 @@ export type Action =
   | { type: 'TOGGLE_SUPPLIER'; id: string }
   | { type: 'DELETE_SUPPLIER'; id: string }
   | { type: 'SAVE_ORDER'; order: OrderInput }
+  /** Marca/desmarca el consumo de inventario de la OC como resuelto a mano. */
+  | { type: 'SET_ORDER_CONSUMO_MANUAL'; id: string; manual: boolean }
   | { type: 'DELETE_ORDER'; id: string }
   | { type: 'SAVE_PAYMENT'; payment: PaymentInput }
   | { type: 'DELETE_PAYMENT'; id: string }
@@ -995,6 +1019,9 @@ export type Action =
   // Alta de clave o cambio de su mínimo/nombre. NUNCA toca la existencia.
   | { type: 'SAVE_INV_ITEM'; item: InventoryItemInput }
   | { type: 'DELETE_INV_ITEM'; id: string }
+  // Paquetes (kits): solo definición; no mueven existencia por sí mismos.
+  | { type: 'SAVE_INV_KIT'; kit: InventoryKitInput }
+  | { type: 'DELETE_INV_KIT'; id: string }
   /** Registra un movimiento: `delta` con signo. Es el ÚNICO camino por el que
    *  cambia la existencia (actualiza la clave y escribe el renglón del kardex). */
   | { type: 'INV_MOVE'; itemId: string; motivo: InventoryMotivo; delta: number; ref?: string; orderId?: string; projectId?: string }
@@ -1075,6 +1102,9 @@ export type StateAction =
   | { type: 'UPSERT_INV_ITEM'; item: InventoryItem }
   | { type: 'REMOVE_INV_ITEM'; id: string }
   | { type: 'UPSERT_INV_MOVE'; move: InventoryMove }
+  | { type: 'UPSERT_INV_KIT'; kit: InventoryKit }
+  | { type: 'REMOVE_INV_KIT'; id: string }
+  | { type: 'ADD_INV_CONSUMED_ORDER'; id: string }
   | { type: 'UPSERT_EMPLOYEE'; employee: Employee }
   | { type: 'REMOVE_EMPLOYEE'; id: string }
   | { type: 'UPSERT_VACATION_ENTITLEMENT'; entitlement: VacationEntitlement }

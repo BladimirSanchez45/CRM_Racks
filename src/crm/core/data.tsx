@@ -31,11 +31,11 @@ import type {
   CfdiDoc,
   Prospect,
   AgendaEvent,
-  WarehouseItem,
+  WarehouseItem, WarehouseStatus,
   WarehouseSize,
   InventoryFamily,
   InventoryItem,
-  InventoryMove,
+  InventoryMove, InventoryKit,
   Employee,
   VacationEntitlement,
   VacationRequest,
@@ -59,7 +59,7 @@ import {
   saveAgendaEvent, deleteAgendaEvent as apiDeleteAgendaEvent,
   saveWarehouseItem, deleteWarehouseItem as apiDeleteWarehouseItem,
   saveInvFamily, deleteInvFamily as apiDeleteInvFamily,
-  saveInvItem, saveInvItems, deleteInvItem as apiDeleteInvItem, saveInvMove,
+  saveInvItem, saveInvItems, deleteInvItem as apiDeleteInvItem, saveInvMove, saveInvKit, deleteInvKit as apiDeleteInvKit,
   saveProspect, deleteProspect as apiDeleteProspect,
   saveEmployee, deleteEmployee as apiDeleteEmployee,
   saveVacEntitlement, deleteVacEntitlement as apiDeleteVacEntitlement, saveVacRequest,
@@ -138,12 +138,23 @@ export const canSeeAllProspects = (u?: { role?: Role; title?: string } | null): 
   return PUESTOS_VENTAS_GLOBAL.includes(normTitle(u.title))
 }
 
+/** Etiquetas de los estatus de la cola de almacén (las comparten Almacén e Inventario). */
+export const WAREHOUSE_STATUS_LABEL: Record<WarehouseStatus, string> = {
+  pendiente: 'Por iniciar', proceso: 'En proceso', pausado: 'Pausado', preparado: 'Listo', listo: 'Terminado',
+}
+
 /** Comisión bancaria sobre la lista de movimientos "por fuera" (total = subtotal × (1 + tasa)).
  *  Bajó de 5.3% a 4.5% el 2026-09-10: las listas con fecha anterior conservan el 5.3%. */
 const COMISION_BANCARIA_CAMBIO = '2026-09-10'
 export const comisionBancaria = (list: { date: string }) => ((list.date || '') >= COMISION_BANCARIA_CAMBIO ? 0.045 : 0.053)
 /** Etiqueta para la UI ("4.5%"), derivada de la tasa para que no se desfasen. */
 export const comisionBancariaLabel = (list: { date: string }) => `${+(comisionBancaria(list) * 100).toFixed(2)}%`
+/** Totales de una lista de movimientos. Los eliminados por Dirección (borrado suave) no suman. */
+export const listTotals = (list: { date: string }, movs: Movement[]) => {
+  const subtotal = movs.filter(m => m.changedByDireccion !== 'removed').reduce((a, m) => a + (m.amount || 0), 0)
+  const comision = subtotal * comisionBancaria(list)
+  return { subtotal, comision, total: subtotal + comision }
+}
 
 /* ---- Umbrales de alarma del INVENTARIO ----
    Son fijos para todas las claves (no hay mínimo por clave): a partir de aquí
@@ -314,7 +325,7 @@ const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
   movementLists: [], movements: [], campaigns: [], bankTxs: [], cfdiDocs: [], prospects: [], agendaEvents: [], warehouse: [],
-  invFamilies: [], invItems: [], invMoves: [],
+  invFamilies: [], invItems: [], invMoves: [], invKits: [], invConsumedOrders: [],
   employees: [], vacationEntitlements: [], vacationRequests: [],
   settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {}, salesGoalsPersonal: {} },
   activity: [], notifications: [],
@@ -462,6 +473,9 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'UPSERT_INV_ITEM': return { ...state, invItems: upsertBy(state.invItems, a.item) }
     case 'REMOVE_INV_ITEM': return { ...state, invItems: state.invItems.filter(i => i.id !== a.id) }
     case 'UPSERT_INV_MOVE': return { ...state, invMoves: upsertBy(state.invMoves, a.move) }
+    case 'UPSERT_INV_KIT': return { ...state, invKits: upsertBy(state.invKits, a.kit) }
+    case 'REMOVE_INV_KIT': return { ...state, invKits: state.invKits.filter(k => k.id !== a.id) }
+    case 'ADD_INV_CONSUMED_ORDER': return state.invConsumedOrders.includes(a.id) ? state : { ...state, invConsumedOrders: [...state.invConsumedOrders, a.id] }
     case 'UPSERT_EMPLOYEE': return { ...state, employees: upsertBy(state.employees, a.employee) }
     case 'REMOVE_EMPLOYEE':
       // Sus paquetes y solicitudes se van con él (la base hace CASCADE).
@@ -774,8 +788,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'REMOVE_SUPPLIER', id: action.id })
         persist([() => apiDeleteSupplier(action.id)]); return
 
+      case 'SET_ORDER_CONSUMO_MANUAL': {
+        // Consumo resuelto fuera del sistema (descontado a mano o material que no pasa por
+        // inventario): la OC deja de aparecer como pendiente SIN tocar el kardex.
+        const o = s.orders.find(x => x.id === action.id)
+        if (!o || !!o.consumoManual === action.manual) return
+        const full: Order = { ...o, consumoManual: action.manual }
+        rawDispatch({ type: 'UPSERT_ORDER', order: full })
+        persist([() => saveOrder(full)]); return
+      }
       case 'SAVE_ORDER': {
-        const full: Order = { ...(action.order as Order), id: action.order.id ?? uid('oc') }
+        // La bandera de consumo a mano no la edita el formulario de la OC: se conserva la que ya tenía.
+        const prevOrder = action.order.id ? s.orders.find(o => o.id === action.order.id) : undefined
+        const full: Order = {
+          ...(action.order as Order), id: action.order.id ?? uid('oc'),
+          ...((action.order.consumoManual ?? prevOrder?.consumoManual) ? { consumoManual: true } : {}),
+        }
         rawDispatch({ type: 'UPSERT_ORDER', order: full })
         const thunks: (() => Promise<void>)[] = [() => saveOrder(full)]
         // Si la OC pertenece a un proyecto FINALIZADO, recalcula sus comisiones (cambia la utilidad).
@@ -1123,9 +1151,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const updated: MovementList = { ...list, status: 'Pendiente', sentAt: nowISO() }
         rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: updated })
         const thunks: (() => Promise<void>)[] = [() => saveMovementList(updated)]
-        const movs = s.movements.filter(m => m.listId === list.id)
-        const subtotal = movs.reduce((a, m) => a + (m.amount || 0), 0)
-        const total = subtotal * (1 + comisionBancaria(list))
+        const movs = s.movements.filter(m => m.listId === list.id && m.changedByDireccion !== 'removed')
+        const { total } = listTotals(list, movs)
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'money', who: whoName(s), txt: `envió la lista "${list.name}" a autorización`, tgt: fmtMoney(total), kind: 'money' }
         rawDispatch({ type: 'PUSH_ACTIVITY', activity })
         thunks.push(() => saveActivity(activity))
@@ -1140,7 +1167,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist(thunks); return
       }
       case 'DECIDE_MOVEMENT_LIST': {
-        const list = s.movementLists.find(l => l.id === action.id); if (!list) return
+        // Solo se decide una lista Pendiente: un segundo clic (o un enlace a una lista ya
+        // decidida) no debe volver a notificar ni duplicar la actividad.
+        const list = s.movementLists.find(l => l.id === action.id); if (!list || list.status !== 'Pendiente') return
         const updatedList: MovementList = {
           ...list,
           status: action.approve ? 'Autorizada' : 'Rechazada',
@@ -1150,12 +1179,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: updatedList })
         const thunks: (() => Promise<void>)[] = [() => saveMovementList(updatedList)]
         // Todos sus movimientos PENDIENTES pasan a Autorizado/Rechazado (los ya decididos y los eliminados se respetan).
-        let next = s.movements
         for (const m of s.movements.filter(x => x.listId === list.id && x.status === 'Pendiente' && x.changedByDireccion !== 'removed')) {
           const um: Movement = { ...m, status: action.approve ? 'Autorizado' : 'Rechazado', authorizedBy: s.currentUser?.id ?? '', decidedAt: nowISO(), ...(action.approve ? {} : { rejectReason: action.reason ?? '' }) }
           rawDispatch({ type: 'UPSERT_MOVEMENT', movement: um })
           thunks.push(() => saveMovement(um))
-          next = upsertBy(next, um)
         }
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: action.approve ? 'check' : 'close', who: whoName(s), txt: `${action.approve ? 'autorizó' : 'rechazó'} la lista "${list.name}"`, tgt: list.name, kind: action.approve ? 'done' : 'info' }
         rawDispatch({ type: 'PUSH_ACTIVITY', activity })
@@ -1170,13 +1197,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             movementListId: list.id, actorName: whoName(s),
           })
         }
-        // Recalcula comisiones de proyectos finalizados ligados a los movimientos de la lista.
-        const finalProjects = new Map<string, Project>()
-        for (const m of next.filter(x => x.listId === list.id && x.projectId)) {
-          const proj = s.projects.find(p => p.id === m.projectId)
-          if (proj && proj.stage === 'finalizado') finalProjects.set(proj.id, proj)
-        }
-        for (const proj of finalProjects.values()) regenCommissions(proj, thunks, { ...s, movements: next })
+        // Aquí NO se recalculan comisiones: la utilidad solo descuenta listas PAGADAS (con
+        // comprobante) y una lista recién decidida aún no lo está (ver SET_LIST_COMPROBANTE).
         persist(thunks); return
       }
       case 'REOPEN_MOVEMENT_LIST': {
@@ -1188,12 +1210,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: reopened })
         const thunks: (() => Promise<void>)[] = [() => saveMovementList(reopened)]
         // Sus movimientos autorizados vuelven a Pendiente (los rechazados y los eliminados se respetan).
-        let next = s.movements
         for (const m of s.movements.filter(x => x.listId === list.id && x.status === 'Autorizado' && x.changedByDireccion !== 'removed')) {
           const um: Movement = { ...m, status: 'Pendiente', authorizedBy: undefined, decidedAt: undefined }
           rawDispatch({ type: 'UPSERT_MOVEMENT', movement: um })
           thunks.push(() => saveMovement(um))
-          next = upsertBy(next, um)
         }
         const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'doc', who: whoName(s), txt: `revirtió la autorización de la lista "${list.name}"`, tgt: list.name, kind: 'info' }
         rawDispatch({ type: 'PUSH_ACTIVITY', activity })
@@ -1207,13 +1227,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           body: `${whoName(s)} revirtió la autorización de "${list.name}". Vuelve a Pendiente y requiere autorizarse de nuevo.`,
           movementListId: list.id, actorName: whoName(s),
         })
-        // Los movimientos dejan de estar autorizados: recalcula comisiones de proyectos finalizados ligados.
-        const finalProjects = new Map<string, Project>()
-        for (const m of next.filter(x => x.listId === list.id && x.projectId)) {
-          const proj = s.projects.find(p => p.id === m.projectId)
-          if (proj && proj.stage === 'finalizado') finalProjects.set(proj.id, proj)
-        }
-        for (const proj of finalProjects.values()) regenCommissions(proj, thunks, { ...s, movements: next, movementLists: upsertBy(s.movementLists, reopened) })
+        // Sin recálculo de comisiones: solo se revierten listas SIN comprobante, y esas nunca
+        // descontaron utilidad (ver projectMovementsCost).
         persist(thunks); return
       }
       case 'SET_LIST_COMPROBANTE': {
@@ -1243,7 +1258,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const parent = s.movementLists.find(l => l.id === action.movement.listId)
         // Dirección interviniendo una lista ya enviada (Pendiente): marca su cambio.
         const dirReview = isDireccion(s.currentUser?.role) && parent?.status === 'Pendiente'
-        const dirMark: Movement['changedByDireccion'] | undefined = dirReview
+        // Restaurar un movimiento eliminado (borrado suave) llega SIN marca: la anterior se descarta
+        // y el renglón vuelve a sumar, sea quien sea quien lo restaure.
+        const restoring = prev?.changedByDireccion === 'removed' && !(action.movement as Movement).changedByDireccion
+        const dirMark: Movement['changedByDireccion'] | undefined = restoring ? undefined : dirReview
           ? (isNew ? 'added' : (prev?.changedByDireccion === 'added' ? 'added' : 'edited'))
           : (action.movement as Movement).changedByDireccion
         const full: Movement = {
@@ -1490,7 +1508,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case 'MOVE_WAREHOUSE_ITEM': {
         const item = s.warehouse.find(w => w.id === action.id); if (!item) return
         // Solo se reordena la cola ACTIVA (lo terminado ya no compite por prioridad).
-        const activos = s.warehouse.filter(w => w.status !== 'listo').sort(byWhPosition)
+        const activos = sel.warehouseQueue(s)
         const position = positionAt(activos.filter(w => w.id !== action.id), action.toIndex)
         if (position === item.position) return
         const updated: WarehouseItem = { ...item, position }
@@ -1504,6 +1522,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           status: action.status,
           // Sella la primera vez que arranca y cuándo se terminó (o lo limpia al reabrir).
           ...(action.status === 'proceso' && !item.startedAt ? { startedAt: nowISO() } : {}),
+          // "Listo" sella readyAt la primera vez; se conserva al Terminar y se limpia al reabrir.
+          ...(action.status === 'preparado' ? { readyAt: item.readyAt ?? nowISO() } : action.status === 'listo' ? {} : { readyAt: undefined }),
           ...(action.status === 'listo' ? { doneAt: nowISO() } : { doneAt: undefined }),
         }
         rawDispatch({ type: 'UPSERT_WAREHOUSE_ITEM', item: updated })
@@ -1516,7 +1536,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           const vendedor = proj ? s.users.filter(u => u.id === proj.seller && u.active && u.id !== s.currentUser?.id) : []
           notify([...logi, ...vendedor], {
             kind: 'warehouse_done',
-            title: `Almacén terminó la OC ${ord.number}`,
+            title: `Almacén tiene lista la OC ${ord.number}`,
             body: proj
               ? `${proj.code} · ${sel.clientName(s, proj.client)} ya está listo en almacén.`
               : 'La orden de compra ya está lista en almacén.',
@@ -1595,6 +1615,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       case 'DELETE_INV_ITEM':
         rawDispatch({ type: 'REMOVE_INV_ITEM', id: action.id })
         persist([() => apiDeleteInvItem(action.id)]); return
+      case 'SAVE_INV_KIT': {
+        const full: InventoryKit = {
+          ...(action.kit as InventoryKit),
+          id: action.kit.id ?? uid('ik'),
+          position: action.kit.position ?? (s.invKits.reduce((m, k) => Math.max(m, k.position), 0) + 1000),
+        }
+        rawDispatch({ type: 'UPSERT_INV_KIT', kit: full })
+        persist([() => saveInvKit(full)]); return
+      }
+      case 'DELETE_INV_KIT':
+        rawDispatch({ type: 'REMOVE_INV_KIT', id: action.id })
+        persist([() => apiDeleteInvKit(action.id)]); return
 
       case 'INV_MOVE': {
         const item = s.invItems.find(i => i.id === action.itemId)
@@ -1712,6 +1744,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           piezas += -delta
         }
         if (!thunks.length) return
+        rawDispatch({ type: 'ADD_INV_CONSUMED_ORDER', id: action.orderId })
         const ord = s.orders.find(o => o.id === action.orderId)
         const activity: Activity = {
           id: uid('a'), t: nowISO(), icon: 'pkg', who: whoName(s),
@@ -2016,6 +2049,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'warehouse_queue': rawDispatch({ type: 'REMOVE_WAREHOUSE_ITEM', id: c.id }); break
           case 'inventory_families': rawDispatch({ type: 'REMOVE_INV_FAMILY', id: c.id }); break
           case 'inventory_items':    rawDispatch({ type: 'REMOVE_INV_ITEM', id: c.id }); break
+          case 'inventory_kits':     rawDispatch({ type: 'REMOVE_INV_KIT', id: c.id }); break
           case 'employees':          rawDispatch({ type: 'REMOVE_EMPLOYEE', id: c.id }); break
           case 'vacation_entitlements': rawDispatch({ type: 'REMOVE_VACATION_ENTITLEMENT', id: c.id }); break
           case 'vacation_requests':  rawDispatch({ type: 'REMOVE_VACATION_REQUEST', id: c.id }); break
@@ -2043,6 +2077,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'inventory_families': rawDispatch({ type: 'UPSERT_INV_FAMILY', family: c.row }); break
           case 'inventory_items':    rawDispatch({ type: 'UPSERT_INV_ITEM', item: c.row }); break
           case 'inventory_moves':    rawDispatch({ type: 'UPSERT_INV_MOVE', move: c.row }); break
+          case 'inventory_kits':     rawDispatch({ type: 'UPSERT_INV_KIT', kit: c.row }); break
           case 'employees':          rawDispatch({ type: 'UPSERT_EMPLOYEE', employee: c.row }); break
           case 'vacation_entitlements': rawDispatch({ type: 'UPSERT_VACATION_ENTITLEMENT', entitlement: c.row }); break
           case 'vacation_requests':  rawDispatch({ type: 'UPSERT_VACATION_REQUEST', request: c.row }); break
@@ -2115,7 +2150,7 @@ export const sel = {
     return n > 0 ? sel.salesGoal(state, ym) / n : 0
   },
   /* ---- Almacén ---- */
-  /** Cola ACTIVA (por iniciar + en proceso), en el orden que definió almacén. */
+  /** Cola ACTIVA (todo lo que no ha salido: por iniciar, en proceso, pausado y listo), en el orden que definió almacén. */
   warehouseQueue: (state: AppState) => state.warehouse.filter(w => w.status !== 'listo').sort(byWhPosition),
   /** Terminados, del más reciente al más viejo. */
   warehouseDone: (state: AppState) =>
@@ -2205,9 +2240,31 @@ export const sel = {
   /** Kardex completo ordenado (el fetch ya lo acota a los últimos movimientos). */
   invMovesRecientes: (state: AppState) =>
     [...state.invMoves].sort((a, b) => (a.at < b.at ? 1 : -1)),
-  /** ¿Ya se capturó el consumo de esta OC? (existe al menos una salida suya). */
+  /** ¿Hay salidas de esta OC en el kardex? (`invConsumedOrders` cubre lo que ya no cabe
+   *  en los últimos movimientos cargados.) */
+  invConsumoEnKardex: (state: AppState, orderId: string) =>
+    state.invConsumedOrders.includes(orderId)
+    || state.invMoves.some(m => m.orderId === orderId && m.motivo === 'Salida a proyecto'),
+  /** ¿Ya se resolvió el consumo de esta OC? En el kardex, o marcado a mano (fuera del sistema). */
   invConsumoCapturado: (state: AppState, orderId: string) =>
-    state.invMoves.some(m => m.orderId === orderId && m.motivo === 'Salida a proyecto'),
+    sel.invConsumoEnKardex(state, orderId) || !!state.orders.find(o => o.id === orderId)?.consumoManual,
+  /** Piezas de un paquete en texto ("2 × Charola Mini + 2 × Viga Mini"), × `veces` paquetes. */
+  invKitDesc: (state: AppState, kit: InventoryKit, veces = 1) =>
+    kit.components.map(c => {
+      const it = state.invItems.find(i => i.id === c.itemId)
+      return `${c.qty * veces} × ${it ? sel.invLabel(state, it) : 'clave eliminada'}`
+    }).join(' + '),
+  /** Paquetes (kits) en el orden definido. */
+  invKits: (state: AppState) => [...state.invKits].sort((a, b) => a.position - b.position),
+  /** Cuántos paquetes completos se arman con la existencia actual de sus piezas. */
+  invKitArmables: (state: AppState, kit: InventoryKit) => {
+    let n = Infinity
+    for (const c of kit.components) {
+      if (c.qty <= 0) continue
+      n = Math.min(n, Math.floor((state.invItems.find(i => i.id === c.itemId)?.qty ?? 0) / c.qty))
+    }
+    return n === Infinity ? 0 : n
+  },
 
   /** Comisiones de un proyecto. */
   commissionsForProject: (state: AppState, pid: string) => state.commissions.filter(c => c.projectId === pid),

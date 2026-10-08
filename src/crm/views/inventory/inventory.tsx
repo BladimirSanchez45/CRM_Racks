@@ -10,12 +10,12 @@
 //    almacén solo corrige lo que cambió.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtDate, fmtDateShort, isDireccion, uid, INV_ROJO, INV_NARANJA } from '../../core/data'
+import { useStore, sel, fmtDate, fmtDateShort, isDireccion, uid, INV_ROJO, INV_NARANJA, WAREHOUSE_STATUS_LABEL } from '../../core/data'
 import { Modal, Field, Input, Select, Badge, Confirm, Empty, Seg, SecTitle, KPI, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printSticker } from './sticker'
 import type {
-  InventoryAttr, InventoryFamily, InventoryItem, InventoryMotivo, Order,
+  InventoryAttr, InventoryFamily, InventoryItem, InventoryKit, InventoryMotivo, Order,
 } from '../../core/types'
 
 /** ¿Quién opera el inventario? Almacén (dueño del proceso) y administración.
@@ -523,10 +523,20 @@ function FamilyModal({ family, onClose }: { family?: InventoryFamily; onClose: (
 /* ============================================================
    Buscador de claves (para "Entrada" desde la barra superior)
    ============================================================ */
-function PickItemModal({ onPick, onClose }: { onPick: (item: InventoryItem) => void; onClose: () => void }) {
+function PickItemModal({ onPick, onPickKit, onClose, title = '¿Qué material entró?', sub = 'Busca la clave y registra el movimiento' }: {
+  onPick: (item: InventoryItem) => void
+  /** Si viene, el buscador también ofrece los PAQUETES (kits). */
+  onPickKit?: (kit: InventoryKit) => void
+  onClose: () => void
+  title?: string
+  sub?: string
+}) {
   const { state } = useStore()
   const [q, setQ] = React.useState('')
   const palabras = norm(q).split(' ').filter(Boolean)
+  const kits = onPickKit
+    ? sel.invKits(state).filter(k => palabras.every(w => norm(k.name).includes(w)))
+    : []
   const lista = state.invItems
     .map(i => ({ i, label: sel.invLabel(state, i), fam: state.invFamilies.find(f => f.id === i.familyId) }))
     // Por palabras y no por texto contiguo: "viga 4.5" debe encontrar
@@ -540,11 +550,22 @@ function PickItemModal({ onPick, onClose }: { onPick: (item: InventoryItem) => v
     .slice(0, 40)
 
   return (
-    <Modal width={520} icon="search" title="¿Qué material entró?" sub="Busca la clave y registra el movimiento" onClose={onClose}
+    <Modal width={520} icon="search" title={title} sub={sub} onClose={onClose}
       footer={<><div className="flex-1"></div><button className="btn btn-ghost" onClick={onClose}>Cerrar</button></>}>
       <Input value={q} onChange={e => setQ(e.target.value)} placeholder="viga 4.5, marco 3000, ancla…" autoFocus />
       <div className="mt-3 flex flex-col gap-1 max-h-[320px] overflow-y-auto">
-        {lista.length === 0
+        {kits.map(k => (
+          // Los paquetes van arriba: al elegir uno entran todas sus piezas de un golpe.
+          <button key={k.id} className="flex items-center gap-3 px-3 py-2.5 rounded-[8px] border border-transparent hover:border-line hover:bg-bg-3 text-left cursor-pointer bg-transparent"
+            onClick={() => onPickKit!(k)}>
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] flex items-center gap-2">{k.name} <Badge color="var(--acc)">Paquete</Badge></div>
+              <div className="meta truncate">{sel.invKitDesc(state, k)}</div>
+            </div>
+            <span className="mono text-[12.5px] text-tx-2" title="Paquetes que se pueden armar con la existencia">{sel.invKitArmables(state, k)} arm.</span>
+          </button>
+        ))}
+        {lista.length === 0 && kits.length === 0
           ? <Empty icon="search">Nada con ese nombre. En la matriz, el <b>+</b> gris da de alta la medida nueva.</Empty>
           : lista.map(({ i, label, fam }) => {
             return (
@@ -564,46 +585,143 @@ function PickItemModal({ onPick, onClose }: { onPick: (item: InventoryItem) => v
 }
 
 /* ============================================================
+   Paquete (kit): nombre + piezas que lo forman
+   ============================================================ */
+function KitModal({ kit, onClose }: { kit?: InventoryKit; onClose: () => void }) {
+  const { state, dispatch } = useStore()
+  const [name, setName] = React.useState(kit?.name ?? '')
+  const [comps, setComps] = React.useState<{ itemId: string; qty: number }[]>(kit?.components ?? [])
+  const [picking, setPicking] = React.useState(false)
+  const [confirmDel, setConfirmDel] = React.useState(false)
+  const { requestClose, guard } = useUnsavedGuard({ name, comps }, onClose)
+  // Mismo nombre normalizado que otro paquete → en el consumo empatarían y ganaría uno al azar.
+  const duplicado = sel.invKits(state).some(k => k.id !== kit?.id && norm(k.name) === norm(name))
+  const valid = !!name.trim() && !duplicado && comps.length > 0
+    && comps.every(c => c.qty > 0 && state.invItems.some(i => i.id === c.itemId))
+
+  const setQty = (itemId: string, qty: number) =>
+    setComps(cs => cs.map(c => c.itemId === itemId ? { ...c, qty: Math.max(0, Math.round(qty)) } : c))
+  const agregar = (item: InventoryItem) => {
+    setPicking(false)
+    setComps(cs => cs.some(c => c.itemId === item.id) ? cs : [...cs, { itemId: item.id, qty: 1 }])
+  }
+  const save = () => {
+    if (!valid) return
+    dispatch({ type: 'SAVE_INV_KIT', kit: { ...(kit ?? {}), name: name.trim(), components: comps } })
+    onClose()
+  }
+
+  return (
+    <Modal width={560} icon="layers" title={kit ? 'Editar paquete' : 'Nuevo paquete'}
+      sub="Un paquete no tiene existencia propia: al descontarlo se descuentan sus piezas" onClose={requestClose}
+      footer={<>
+        {kit && <button className="btn btn-ghost" style={{ color: 'var(--danger)' }} onClick={() => setConfirmDel(true)}><Icon name="trash" size={14} /> Eliminar</button>}
+        <div className="flex-1"></div>
+        <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
+        <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
+      </>}>
+      <Field label="Nombre del paquete"><Input value={name} onChange={e => setName(e.target.value)} placeholder="Ej. Nivel Mini" autoFocus /></Field>
+      <div className="meta mt-1.5 mb-4">
+        {duplicado
+          ? <span style={{ color: 'var(--danger)' }}>Ya hay un paquete con ese nombre.</span>
+          : 'El nombre es lo que se compara con las partidas de la OC: “Nivel Mini” reconoce “NIVEL · MINIRACK · ESTANDAR”.'}
+      </div>
+      <div className="label-k mb-1.5">Piezas por paquete</div>
+      {comps.length === 0
+        ? <Empty icon="box">Agrega las piezas que forman UN paquete (ej. 2 charolas + 2 vigas).</Empty>
+        : (
+          <div className="border border-line rounded-[8px] overflow-hidden">
+            <table className="tbl">
+              <thead><tr><th>Pieza</th><th className="num">Existencia</th><th className="num">Cantidad</th><th></th></tr></thead>
+              <tbody>
+                {comps.map(c => {
+                  const it = state.invItems.find(i => i.id === c.itemId)
+                  return (
+                    <tr key={c.itemId} style={{ cursor: 'default' }}>
+                      <td className="text-[12.5px]">{it ? sel.invLabel(state, it) : <span style={{ color: 'var(--danger)' }}>clave eliminada — quítala para poder guardar</span>}</td>
+                      <td className="num text-tx-2 text-[12px]">{it?.qty ?? '—'}</td>
+                      <td className="num">
+                        <input className="input mono text-center" style={{ width: 62, padding: '4px 2px' }} value={c.qty}
+                          inputMode="numeric" onChange={e => setQty(c.itemId, Number(e.target.value) || 0)} />
+                      </td>
+                      <td><button className="icon-btn w-7 h-7" title="Quitar" onClick={() => setComps(cs => cs.filter(x => x.itemId !== c.itemId))}><Icon name="trash" size={13} /></button></td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      <button className="btn btn-ghost mt-3" onClick={() => setPicking(true)}><Icon name="plus" size={14} /> Agregar pieza</button>
+      {picking && <PickItemModal title="¿Qué pieza lleva el paquete?" sub="Busca la clave de inventario" onPick={agregar} onClose={() => setPicking(false)} />}
+      {confirmDel && kit && (
+        <Confirm title="Eliminar paquete" message={`¿Eliminar el paquete "${kit.name}"? No afecta la existencia de sus piezas.`}
+          onConfirm={() => { dispatch({ type: 'DELETE_INV_KIT', id: kit.id }); onClose() }} onClose={() => setConfirmDel(false)} />
+      )}
+      {guard}
+    </Modal>
+  )
+}
+
+/* ============================================================
    Consumo de una OC: qué material se ocupó de verdad
    ============================================================ */
-/** Sugiere claves de inventario a partir de los materiales de la OC.
- *  Es una AYUDA: compara el texto de cada partida contra el nombre de la
- *  clave y propone la de mayor coincidencia. Almacén revisa y corrige.
- *  Devuelve también `porPartida`: con qué clave quedó cada renglón de la OC
- *  (o null), que es lo que permite avisar qué material NO se va a descontar. */
+/** Qué tanto coincide un nombre (sus palabras) con el texto de una partida.
+ *  `score` = cuántas palabras aparecen (decide si hay coincidencia).
+ *  `orden` = cuántas aparecen EN EL MISMO ORDEN (solo desempata). Sin esto,
+ *  una parrilla de 46x42 y una de 42x46 puntúan idéntico —las dos palabras
+ *  están en el texto— y se elegía por azar. */
+function coincidencia(tokens: string[], heno: string) {
+  let sueltas = 0, enOrden = 0, pos = 0
+  for (const t of tokens) {
+    if (heno.includes(t)) sueltas++
+    const i = heno.indexOf(t, pos)
+    if (i >= 0) { enOrden++; pos = i + t.length }
+  }
+  return { score: sueltas / tokens.length, orden: enOrden / tokens.length }
+}
+const tokensDe = (s: string) => norm(s).split(' ').filter(t => t.length > 1)
+/** Piezas de un paquete cuya clave sigue existiendo (los paquetes no tienen FK: una clave
+ *  borrada dejaría líneas fantasma que inflan el total y luego no se descuentan). */
+const piezasVivas = (state: ReturnType<typeof useStore>['state'], kit: InventoryKit) =>
+  kit.components.filter(c => state.invItems.some(i => i.id === c.itemId))
+const mejor = <T,>(a: T & { score: number; orden: number } | null, b: T & { score: number; orden: number }) =>
+  (b.score >= 0.6 && (!a || b.score > a.score || (b.score === a.score && b.orden > a.orden))) ? b : a
+
+/** Sugiere qué descontar a partir de los materiales de la OC. Es una AYUDA:
+ *  almacén revisa y corrige. Por cada partida prueba primero los PAQUETES
+ *  (p. ej. "Nivel Mini" = 2 charolas + 2 vigas): si coincide, la partida se
+ *  descompone en sus piezas. Si no, busca la clave suelta de mayor coincidencia.
+ *  Devuelve también `porPartida`: con qué quedó cada renglón de la OC —id de
+ *  clave, 'kit:<id>' o null—, que es lo que permite avisar qué NO se descuenta. */
 function sugerirLineas(state: ReturnType<typeof useStore>['state'], order: Order) {
-  const claves = state.invItems.map(i => ({ i, tokens: norm(sel.invLabel(state, i) + ' ' + (i.sub || '')).split(' ').filter(t => t.length > 1) }))
-  const lineas: { itemId: string; qty: number; desde: string }[] = []
+  const claves = state.invItems.map(i => ({ id: i.id, tokens: tokensDe(sel.invLabel(state, i) + ' ' + (i.sub || '')) })).filter(c => c.tokens.length)
+  const kits = state.invKits.map(k => ({ kit: k, tokens: tokensDe(k.name) })).filter(c => c.tokens.length)
+  const lineas: { itemId: string; qty: number }[] = []
   const porPartida: (string | null)[] = []
+  // Una misma clave puede venir en VARIAS partidas de la OC (renglones partidos
+  // o dos paquetes que comparten pieza). Se SUMAN: descartar la segunda
+  // descontaría de menos y en silencio, que es el peor error de inventario.
+  const sumar = (itemId: string, qty: number) => {
+    const ya = lineas.find(o => o.itemId === itemId)
+    if (ya) ya.qty += qty
+    else lineas.push({ itemId, qty })
+  }
   for (const p of order.items ?? []) {
     const heno = norm([p.parte, p.material, p.description, p.dimensiones, p.color].filter(Boolean).join(' '))
-    let best: { id: string; score: number; orden: number } | null = null
-    for (const c of claves) {
-      if (!c.tokens.length) continue
-      // `score` = cuántas palabras de la clave aparecen (decide si hay coincidencia).
-      // `orden` = cuántas aparecen EN EL MISMO ORDEN (solo desempata). Sin esto,
-      // una parrilla de 46x42 y una de 42x46 puntúan idéntico —las dos palabras
-      // están en el texto— y se elegía por azar.
-      let sueltas = 0, enOrden = 0, pos = 0
-      for (const t of c.tokens) {
-        if (heno.includes(t)) sueltas++
-        const i = heno.indexOf(t, pos)
-        if (i >= 0) { enOrden++; pos = i + t.length }
-      }
-      const score = sueltas / c.tokens.length
-      const orden = enOrden / c.tokens.length
-      if (score >= 0.6 && (!best || score > best.score || (score === best.score && orden > best.orden))) {
-        best = { id: c.i.id, score, orden }
-      }
-    }
-    porPartida.push(best ? best.id : null)
-    if (best) {
-      // Una misma clave puede venir en VARIAS partidas de la OC (renglones
-      // partidos). Se SUMAN: descartar la segunda descontaría de menos y
-      // en silencio, que es el peor tipo de error de inventario.
-      const ya = lineas.find(o => o.itemId === best!.id)
-      if (ya) ya.qty += p.qty || 0
-      else lineas.push({ itemId: best.id, qty: p.qty || 0, desde: p.description || p.material || '' })
+    let kit: { kit: InventoryKit; score: number; orden: number } | null = null
+    for (const c of kits) kit = mejor(kit, { kit: c.kit, ...coincidencia(c.tokens, heno) })
+    let clave: { id: string; score: number; orden: number } | null = null
+    for (const c of claves) clave = mejor(clave, { id: c.id, ...coincidencia(c.tokens, heno) })
+    // El paquete gana en empate: "Nivel Mini" describe mejor "NIVEL MINIRACK" que "Marco Mini".
+    if (kit && (!clave || kit.score >= clave.score)) {
+      porPartida.push(`kit:${kit.kit.id}`)
+      for (const c of piezasVivas(state, kit.kit)) sumar(c.itemId, (p.qty || 0) * c.qty)
+    } else if (clave) {
+      porPartida.push(clave.id)
+      sumar(clave.id, p.qty || 0)
+    } else {
+      porPartida.push(null)
     }
   }
   return { lineas, porPartida }
@@ -627,22 +745,34 @@ export function ConsumoModal({ order, onClose, onSaved }: {
   const [vinculadas, setVinculadas] = React.useState<Record<number, string>>({})
   // null = cerrado · 'libre' = agregar material suelto · { idx } = vincular esa partida
   const [picking, setPicking] = React.useState<'libre' | { idx: number } | null>(null)
-  const yaCapturado = sel.invConsumoCapturado(state, order.id)
+  const enKardex = sel.invConsumoEnKardex(state, order.id)
+  const soloManual = !enKardex && !!order.consumoManual
 
-  /** Clave con la que quedó cubierta una partida de la OC (null = ninguna). */
-  const cubierta = (idx: number) => vinculadas[idx] ?? sug.porPartida[idx] ?? null
+  /** Con qué quedó cubierta una partida de la OC: id de clave, 'kit:<id>' o null. Si la persona
+   *  quitó esa línea del consumo, la partida vuelve a contar como NO cubierta. */
+  const cubierta = (idx: number) => {
+    const id = vinculadas[idx] ?? sug.porPartida[idx] ?? null
+    if (!id) return null
+    const activa = (itemId: string) => lineas.some(l => l.itemId === itemId && l.qty > 0)
+    if (id.startsWith('kit:')) {
+      const k = state.invKits.find(x => x.id === id.slice(4))
+      return k && k.components.some(c => activa(c.itemId)) ? id : null
+    }
+    return activa(id) ? id : null
+  }
   const sinReconocer = partidas.map((_, i) => i).filter(i => !cubierta(i))
   const piezasSinReconocer = sinReconocer.reduce((a, i) => a + (partidas[i]?.qty || 0), 0)
 
   const setQty = (itemId: string, q: number) =>
     setLineas(ls => ls.map(l => l.itemId === itemId ? { ...l, qty: Math.max(0, q) } : l))
   const quitar = (itemId: string) => setLineas(ls => ls.filter(l => l.itemId !== itemId))
-  /** Suma (o da de alta) el renglón de consumo de esa clave. */
-  const sumarLinea = (itemId: string, qty: number) =>
+  /** Suma (o da de alta) el renglón de consumo de esa clave. `plan` = también
+   *  cuenta como planeado (viene de una partida de la OC); si no, es material suelto. */
+  const sumarLinea = (itemId: string, qty: number, plan = true) =>
     setLineas(ls => {
       const ya = ls.find(l => l.itemId === itemId)
-      if (ya) return ls.map(l => l.itemId === itemId ? { ...l, qty: l.qty + qty, plan: l.plan + qty } : l)
-      return [...ls, { itemId, qty, plan: qty }]
+      if (ya) return ls.map(l => l.itemId === itemId ? { ...l, qty: l.qty + qty, plan: l.plan + (plan ? qty : 0) } : l)
+      return [...ls, { itemId, qty, plan: plan ? qty : 0 }]
     })
   const agregar = (item: InventoryItem) => {
     const modo = picking
@@ -653,14 +783,26 @@ export function ConsumoModal({ order, onClose, onSaved }: {
       sumarLinea(item.id, partidas[modo.idx]?.qty || 0)
       return
     }
-    setLineas(ls => ls.some(l => l.itemId === item.id) ? ls : [...ls, { itemId: item.id, qty: 1, plan: 0 }])
+    sumarLinea(item.id, 1, false)   // suelto: suma 1 (igual que un paquete suelto suma sus piezas)
+  }
+  /** Un paquete entra como todas sus piezas: × la cantidad de la partida al
+   *  vincular, o × 1 si se agrega suelto. */
+  const agregarKit = (kit: InventoryKit) => {
+    const modo = picking
+    setPicking(null)
+    const vinculo = modo && modo !== 'libre' ? modo : null
+    const veces = vinculo ? (partidas[vinculo.idx]?.qty || 0) : 1
+    if (vinculo) setVinculadas(v => ({ ...v, [vinculo.idx]: `kit:${kit.id}` }))
+    for (const c of piezasVivas(state, kit)) sumarLinea(c.itemId, veces * c.qty, !!vinculo)
   }
   const igualarPlan = () => setLineas(ls => ls.map(l => ({ ...l, qty: l.plan })))
 
   const totales = lineas.reduce((a, l) => a + l.qty, 0)
+  // Si ninguna clave tiene existencia, el reducer no escribe nada: no hay que dar la OC por resuelta.
+  const descontable = lineas.some(l => l.qty > 0 && (state.invItems.find(i => i.id === l.itemId)?.qty ?? 0) > 0)
   const guardar = () => {
     const utiles = lineas.filter(l => l.qty > 0)
-    if (!utiles.length) return
+    if (!utiles.length || !descontable) return
     dispatch({
       type: 'INV_CONSUMO',
       orderId: order.id,
@@ -668,6 +810,12 @@ export function ConsumoModal({ order, onClose, onSaved }: {
       ref: proj ? proj.code : order.number,
       lines: utiles.map(l => ({ itemId: l.itemId, qty: l.qty })),
     })
+    onSaved?.()
+    onClose()
+  }
+  /** Cierra la OC sin descontar: el material ya se registró a mano (o no pasa por el inventario). */
+  const cerrarManual = () => {
+    dispatch({ type: 'SET_ORDER_CONSUMO_MANUAL', id: order.id, manual: true })
     onSaved?.()
     onClose()
   }
@@ -679,19 +827,29 @@ export function ConsumoModal({ order, onClose, onSaved }: {
       footer={<>
         <button className="btn btn-ghost" onClick={() => setPicking('libre')}><Icon name="plus" size={14} /> Agregar material</button>
         <button className="btn btn-ghost" disabled={!lineas.some(l => l.plan > 0)} onClick={igualarPlan}>Usé lo planeado</button>
+        {!enKardex && !order.consumoManual && (
+          <button className="btn btn-ghost" title="Cierra esta OC sin descontar nada: el material ya se registró a mano o no pasa por el inventario"
+            onClick={cerrarManual}><Icon name="check" size={14} /> Capturado a mano</button>
+        )}
         <div className="flex-1"></div>
         <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-        <button className={'btn btn-primary' + (totales <= 0 ? ' opacity-50' : '')} disabled={totales <= 0} onClick={guardar}>
+        <button className={'btn btn-primary' + (totales <= 0 || !descontable ? ' opacity-50' : '')} disabled={totales <= 0 || !descontable} onClick={guardar}
+          title={totales > 0 && !descontable ? 'Ninguna de estas claves tiene existencia: no hay nada que descontar' : undefined}>
           <Icon name="check" size={15} /> Descontar {totales} pza
         </button>
       </>}>
 
-      {yaCapturado && (
+      {(enKardex || soloManual) && (
         <div className="flex items-start gap-3 mb-4 p-3 rounded-[8px] border" style={{ borderColor: 'var(--warn)', background: 'color-mix(in srgb, var(--warn) 10%, transparent)' }}>
           <Icon name="alert" size={18} className="mt-0.5 flex-none" style={{ color: 'var(--warn)' }} />
           <div className="text-[12.5px] text-tx-2">
-            Esta OC <b>ya tiene consumo capturado</b>. Si guardas otra vez, el material se descuenta de nuevo.
-            Úsalo solo para registrar material adicional que se ocupó después.
+            {enKardex ? <>
+              Esta OC <b>ya tiene consumo capturado</b>. Si guardas otra vez, el material se descuenta de nuevo.
+              Úsalo solo para registrar material adicional que se ocupó después.
+            </> : <>
+              Esta OC se marcó como <b>resuelta a mano</b>: en el sistema no se ha descontado nada.
+              Si guardas aquí, el material se descuenta por primera vez.
+            </>}
           </div>
         </div>
       )}
@@ -768,7 +926,10 @@ export function ConsumoModal({ order, onClose, onSaved }: {
               // Cada partida dice si quedó cubierta o no. Lo que no se reconoce
               // NO se descuenta, así que tiene que verse aquí, no adivinarse.
               const claveId = cubierta(idx)
-              const clave = claveId ? state.invItems.find(i => i.id === claveId) : undefined
+              const kit = claveId?.startsWith('kit:') ? state.invKits.find(k => k.id === claveId.slice(4)) : undefined
+              const clave = claveId && !kit ? state.invItems.find(i => i.id === claveId) : undefined
+              // Paquete: se muestra ya multiplicado por la cantidad de la partida (12 niveles → 24 + 24).
+              const piezasKit = kit ? sel.invKitDesc(state, kit, it.qty || 0) : ''
               return (
                 <div key={it.id} className="flex items-center gap-3 px-3 py-2 border-b border-line-soft last:border-b-0 text-[12px]">
                   <span className="mono font-semibold w-10">{it.qty}</span>
@@ -776,7 +937,11 @@ export function ConsumoModal({ order, onClose, onSaved }: {
                     {[it.material, it.description, it.dimensiones].filter(Boolean).join(' · ') || '—'}
                   </span>
                   {it.color && <span className="meta shrink-0">{it.color}</span>}
-                  {clave
+                  {kit
+                    ? <span className="meta truncate max-w-[260px]" style={{ color: 'var(--ok)' }} title={`${kit.name} → ${piezasKit}`}>
+                        <Icon name="check" size={12} className="align-[-1px]" /> {kit.name} → {piezasKit}
+                      </span>
+                    : clave
                     ? <span className="meta truncate max-w-[180px]" style={{ color: 'var(--ok)' }} title={sel.invLabel(state, clave)}>
                         <Icon name="check" size={12} className="align-[-1px]" /> {sel.invLabel(state, clave)}
                       </span>
@@ -792,7 +957,7 @@ export function ConsumoModal({ order, onClose, onSaved }: {
         </div>
       )}
 
-      {picking && <PickItemModal onPick={agregar} onClose={() => setPicking(null)} />}
+      {picking && <PickItemModal title="Material o paquete" sub="Busca la clave de inventario o un paquete" onPick={agregar} onPickKit={agregarKit} onClose={() => setPicking(null)} />}
     </Modal>
   )
 }
@@ -1026,8 +1191,12 @@ export function InventoryPage() {
   const [newItem, setNewItem] = React.useState<{ familyId: string; rowId?: string; colId?: string } | null>(null)
   // null = cerrado · {} = familia nueva · { family } = editando esa familia
   const [famForm, setFamForm] = React.useState<{ family?: InventoryFamily } | null>(null)
+  // null = cerrado · {} = paquete nuevo · { kit } = editando ese paquete
+  const [kitForm, setKitForm] = React.useState<{ kit?: InventoryKit } | null>(null)
   const [picking, setPicking] = React.useState(false)
   const [consumoOc, setConsumoOc] = React.useState<Order | null>(null)
+  // Consumo por OC: por defecto solo lo que falta por resolver, para que la lista no crezca.
+  const [fConsumo, setFConsumo] = React.useState('pendientes')
 
   const res = sel.invResumen(state)
 
@@ -1108,6 +1277,7 @@ export function InventoryPage() {
     .concat(sel.warehouseDone(state).slice(0, 20))
     .map(w => state.orders.find(o => o.id === w.orderId))
     .filter((o): o is Order => !!o)
+  const pendientesConsumo = ocsConsumo.filter(o => !sel.invConsumoCapturado(state, o.id))
 
   return (
     <div>
@@ -1138,8 +1308,12 @@ export function InventoryPage() {
           { value: 'stock', label: 'Existencias' },
           { value: 'movs', label: `Movimientos (${state.invMoves.length})` },
           { value: 'consumo', label: 'Consumo por OC' },
+          { value: 'kits', label: `Paquetes (${state.invKits.length})` },
         ]} />
         <div className="flex-1"></div>
+        {vista === 'kits' && manage && (
+          <button className="btn btn-primary" onClick={() => setKitForm({})}><Icon name="plus" size={14} /> Nuevo paquete</button>
+        )}
         {vista === 'stock' && manage && (
           <button className={'btn' + (conteo ? ' btn-primary' : ' btn-ghost')} onClick={() => setConteo(v => !v)}>
             <Icon name="check" size={14} /> Modo conteo
@@ -1271,6 +1445,39 @@ export function InventoryPage() {
         </div>
       )}
 
+      {/* ---- PAQUETES (kits) ---- */}
+      {vista === 'kits' && (
+        <div className="card overflow-hidden">
+          <div className="card-h">
+            <Icon name="layers" size={17} className="text-acc" />
+            <span className="ttl">Paquetes</span>
+            <span className="flex-1"></span>
+            <span className="meta">Sin existencia propia: al descontar un paquete se descuentan sus piezas.</span>
+          </div>
+          {state.invKits.length === 0
+            ? <Empty icon="layers">Todavía no hay paquetes. Ejemplo: “Nivel Mini” = 2 charolas + 2 vigas.{manage ? ' Créalo con “Nuevo paquete”.' : ''}</Empty>
+            : (
+              <table className="tbl">
+                <thead><tr><th>Paquete</th><th>Piezas por paquete</th><th className="num">Armables hoy</th><th></th></tr></thead>
+                <tbody>
+                  {sel.invKits(state).map(k => (
+                    <tr key={k.id} style={manage ? undefined : { cursor: 'default' }} onClick={() => manage && setKitForm({ kit: k })}>
+                      <td className="font-semibold text-[13px]">{k.name}</td>
+                      <td className="text-[12.5px] text-tx-2">
+                        {sel.invKitDesc(state, k)}
+                      </td>
+                      <td className="num font-semibold" title="Con la existencia actual de sus piezas">{sel.invKitArmables(state, k)}</td>
+                      <td className="text-right" onClick={e => e.stopPropagation()}>
+                        {manage && <button className="btn btn-sm btn-ghost" onClick={() => setKitForm({ kit: k })}><Icon name="edit" size={13} /> Editar</button>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+        </div>
+      )}
+
       {/* ---- CONSUMO POR OC ---- */}
       {vista === 'consumo' && (
         <div className="card overflow-hidden">
@@ -1278,16 +1485,25 @@ export function InventoryPage() {
             <Icon name="orders" size={17} className="text-acc" />
             <span className="ttl">Consumo por orden de compra</span>
             <span className="flex-1"></span>
-            <span className="meta">Descuenta del inventario lo que se ocupó de verdad</span>
+            <Seg value={fConsumo} onChange={setFConsumo} options={[
+              { value: 'pendientes', label: `Pendientes (${pendientesConsumo.length})` },
+              { value: 'todas', label: 'Todas' },
+            ]} />
           </div>
-          {ocsConsumo.length === 0 ? <Empty icon="orders">No hay órdenes de compra en la cola de almacén</Empty> : (
+          {(() => {
+            const lista = fConsumo === 'pendientes' ? pendientesConsumo : ocsConsumo
+            return lista.length === 0
+              ? <Empty icon={fConsumo === 'pendientes' ? 'check' : 'orders'}>{fConsumo === 'pendientes' ? 'No hay órdenes de compra con consumo pendiente' : 'No hay órdenes de compra en la cola de almacén'}</Empty>
+              : (
             <div className="overflow-x-auto">
               <table className="tbl">
                 <thead><tr><th>OC</th><th>Proyecto</th><th>Estado en almacén</th><th className="num">Materiales</th><th>Consumo</th><th></th></tr></thead>
                 <tbody>
-                  {ocsConsumo.map(o => {
+                  {lista.map(o => {
                     const wh = sel.warehouseForOrder(state, o.id)
                     const proj = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
+                    // "capturado" = hay salidas en el kardex; "a mano" = se resolvió fuera del sistema.
+                    const enKardex = sel.invConsumoEnKardex(state, o.id)
                     const capturado = sel.invConsumoCapturado(state, o.id)
                     return (
                       // Toda la fila abre la captura de consumo; sin permiso, no hace nada.
@@ -1296,9 +1512,9 @@ export function InventoryPage() {
                         onClick={() => { if (manage) setConsumoOc(o) }}>
                         <td><span className="mono text-acc font-semibold">{o.number}</span></td>
                         <td>{proj ? <>{proj.code}<div className="meta">{sel.clientName(state, proj.client)}</div></> : <span className="text-tx-3">—</span>}</td>
-                        <td className="text-tx-2 text-[12px]">{wh ? wh.status : '—'}</td>
+                        <td className="text-tx-2 text-[12px]">{wh ? WAREHOUSE_STATUS_LABEL[wh.status] : '—'}</td>
                         <td className="num text-[12px]">{o.items?.length ?? 0}</td>
-                        <td>{capturado ? <Badge color="var(--ok)">capturado</Badge> : <Badge color="var(--warn)">pendiente</Badge>}</td>
+                        <td>{enKardex ? <Badge color="var(--ok)">capturado</Badge> : o.consumoManual ? <Badge color="var(--acc)">a mano</Badge> : <Badge color="var(--warn)">pendiente</Badge>}</td>
                         {/* Los botones mandan lo suyo: no deben disparar además el clic de la fila. */}
                         <td className="text-right" onClick={e => e.stopPropagation()}>
                           <div className="flex gap-1.5 justify-end">
@@ -1310,6 +1526,16 @@ export function InventoryPage() {
                             {manage && <button className="btn btn-sm btn-ghost" onClick={() => setConsumoOc(o)}>
                               {capturado ? 'Ver / ajustar' : 'Capturar consumo'}
                             </button>}
+                            {/* Resuelto fuera del sistema: la OC deja de estar pendiente sin tocar el kardex. */}
+                            {manage && !enKardex && (
+                              o.consumoManual
+                                ? <button className="btn btn-sm btn-ghost" title="Vuelve a quedar pendiente"
+                                    onClick={() => dispatch({ type: 'SET_ORDER_CONSUMO_MANUAL', id: o.id, manual: false })}>Reabrir</button>
+                                : <button className="btn btn-sm btn-ghost" title="El material ya se descontó a mano o no pasa por el inventario: no se descuenta nada"
+                                    onClick={() => dispatch({ type: 'SET_ORDER_CONSUMO_MANUAL', id: o.id, manual: true })}>
+                                    <Icon name="check" size={13} /> Ya lo registré a mano
+                                  </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1318,7 +1544,8 @@ export function InventoryPage() {
                 </tbody>
               </table>
             </div>
-          )}
+              )
+          })()}
         </div>
       )}
 
@@ -1329,6 +1556,7 @@ export function InventoryPage() {
       {editItem && <ItemModal familyId={editItem.familyId} item={editItem} onClose={() => setEditItem(null)} />}
       {newItem && <ItemModal familyId={newItem.familyId} rowId={newItem.rowId} colId={newItem.colId} onClose={() => setNewItem(null)} />}
       {famForm && <FamilyModal family={famForm.family} onClose={() => setFamForm(null)} />}
+      {kitForm && <KitModal kit={kitForm.kit} onClose={() => setKitForm(null)} />}
       {picking && <PickItemModal onPick={(i) => { setPicking(false); setMoveItem(i) }} onClose={() => setPicking(false)} />}
       {consumoOc && <ConsumoModal order={consumoOc} onClose={() => setConsumoOc(null)} />}
     </div>

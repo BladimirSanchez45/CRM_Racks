@@ -6,7 +6,7 @@
 //  Total de la lista = subtotal + comisión bancaria (5.3% antes del 10-sep-2026, 4.5% desde entonces).
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, TODAY_ISO, isAdminRole, isDireccion, comisionBancaria, comisionBancariaLabel } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, TODAY_ISO, isAdminRole, isDireccion, listTotals, comisionBancariaLabel } from '../../core/data'
 import { signedDocUrl } from '../../core/api'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard } from '../../core/ui'
 import { Icon } from '../../core/icons'
@@ -25,13 +25,6 @@ const listBadge = (l: MovementList) =>
     ? <Badge color="var(--ok)" icon="check">Pagada</Badge>
     : <Badge color={LIST_STATUS_COLOR[l.status]}>{l.status}</Badge>
 const movBadge = (s: MovementStatus) => <Badge color={MOV_STATUS_COLOR[s]}>{s}</Badge>
-
-const listTotals = (list: MovementList, movs: Movement[]) => {
-  // Los movimientos eliminados por Dirección (borrado suave) no suman.
-  const subtotal = movs.filter(m => m.changedByDireccion !== 'removed').reduce((a, m) => a + (m.amount || 0), 0)
-  const comision = subtotal * comisionBancaria(list)
-  return { subtotal, comision, total: subtotal + comision }
-}
 
 /* Chip de intervención de Dirección sobre la lista enviada. */
 const DIR_CHIP: Record<NonNullable<Movement['changedByDireccion']>, { label: string; color: string }> = {
@@ -301,7 +294,7 @@ function ListDetail({ list, onBack }: { list: MovementList; onBack: () => void }
                   <td className={'num font-display font-bold text-[14px] whitespace-nowrap ' + (removed ? 'line-through text-tx-3' : '')}>{fmtMoney2(m.amount)}</td>
                   <td><div className="flex gap-1 justify-end">
                     {removed && canEditMov && (
-                      <button className="icon-btn w-7 h-7" title="Restaurar" onClick={() => dispatch({ type: 'SAVE_MOVEMENT', movement: { ...m, status: 'Pendiente' } })}><Icon name="check" size={13} /></button>
+                      <button className="icon-btn w-7 h-7" title="Restaurar" onClick={() => dispatch({ type: 'SAVE_MOVEMENT', movement: { ...m, status: 'Pendiente', changedByDireccion: undefined } })}><Icon name="check" size={13} /></button>
                     )}
                     {!removed && canEditMov && <>
                       <button className="icon-btn w-7 h-7" title="Editar" onClick={() => setMovForm(m)}><Icon name="edit" size={13} /></button>

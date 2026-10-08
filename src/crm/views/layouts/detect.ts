@@ -207,6 +207,8 @@ function detectFrames(lines: Line[], beams: Beam[], Lmed: number): { frames: Fra
   // cajones de poste) y lo mucho más largo (postes de alzado, que sí sirven para la altura).
   const Fmed = median(accepted.map(lenOf))
   const frames = Fmed ? accepted.filter(f => lenOf(f) >= 0.4 * Fmed && lenOf(f) <= 3 * Fmed) : []
+  // Sin marcos de planta (hoja de puro alzado) no hay "marco típico": cualquier barra azul
+  // cuenta como poste candidato y la altura sale de la más larga.
   const posts = Fmed ? bars.filter(b => lenOf(b) > 3 * Fmed) : bars
   return { frames, posts }
 }
@@ -303,10 +305,7 @@ function detectElevation(cands: Beam[], posts: Line[], mmPerUnit: number | null,
   }
   const real = stacks.filter(s => s.length >= 2 && regular(s))
   if (!real.length) return null
-  // Vota cada pila por su tamaño, ponderado por cuántas vigas trae; empate → la más alta.
-  const votes = new Map<number, number>()
-  for (const s of real) votes.set(s.length, (votes.get(s.length) ?? 0) + s.length)
-  const levels = [...votes.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0]
+  const levels = elevationLevels(real, () => true)
   const chosen = real.filter(s => s.length === levels)
   if (chosen.flat().length < 3) return null
   chosen.flat().forEach((b, i) => { b.id = `e${i}` })

@@ -475,6 +475,7 @@ type OcFormState = {
   id?: string; number: string; date: string; supplierId: string; projectId?: string
   description: string; conditions: string; amount: number | string; responsible: string
   file: string; filePath?: string; deliveryDate?: string; items: OcItem[]; cancelled?: boolean
+  consumoManual?: boolean   // no se edita aquí; se conserva para no perderla al guardar
 }
 export function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose: () => void }) {
   const { state, dispatch } = useStore()
@@ -497,6 +498,7 @@ export function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose:
     deliveryDate: order?.deliveryDate || '',
     items: order?.items ? JSON.parse(JSON.stringify(order.items)) : [],
     cancelled: order?.cancelled || false,
+    consumoManual: order?.consumoManual || false,
   }))
   const set = (k: keyof OcFormState, v: unknown) => setO(s => ({ ...s, [k]: v }))
   const onPickProject = (pid: string) => {

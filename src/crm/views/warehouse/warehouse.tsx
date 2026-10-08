@@ -9,7 +9,7 @@
 //  Ventas ve el mismo dato en modo lectura: <WarehouseLoadCard>.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtDate, fmtMoney2, addDays } from '../../core/data'
+import { useStore, sel, fmtDate, fmtMoney2, addDays, WAREHOUSE_STATUS_LABEL } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, Badge, DocChip, Confirm, Empty, Seg, SecTitle } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { InventoryLowCard, ConsumoModal } from '../inventory/inventory'
@@ -21,12 +21,12 @@ const SIZE_META: Record<WarehouseSize, { label: string; short: string }> = {
   L: { label: 'Grande', short: 'L' },
 }
 const STATUS_META: Record<WarehouseStatus, { label: string; color: string }> = {
-  pendiente: { label: 'Por iniciar', color: 'var(--tx-2)' },
-  proceso:   { label: 'En proceso',  color: 'var(--warn)' },
-  pausado:   { label: 'Pausado',     color: 'var(--st-5)' },
+  pendiente: { label: WAREHOUSE_STATUS_LABEL.pendiente, color: 'var(--tx-2)' },
+  proceso:   { label: WAREHOUSE_STATUS_LABEL.proceso,   color: 'var(--warn)' },
+  pausado:   { label: WAREHOUSE_STATUS_LABEL.pausado,   color: 'var(--st-5)' },
   // "Listo" = preparado en almacén, esperando salir. "Terminado" = ya salió (deja la cola).
-  preparado: { label: 'Listo',       color: 'var(--ok)' },
-  listo:     { label: 'Terminado',   color: 'var(--acc)' },
+  preparado: { label: WAREHOUSE_STATUS_LABEL.preparado, color: 'var(--ok)' },
+  listo:     { label: WAREHOUSE_STATUS_LABEL.listo,     color: 'var(--acc)' },
 }
 /** Orden en que se ofrecen los estatus en el selector. */
 const STATUSES: WarehouseStatus[] = ['pendiente', 'proceso', 'pausado', 'preparado', 'listo']
@@ -528,8 +528,10 @@ export function WarehouseLoadCard() {
   const [open, setOpen] = React.useState(false)
   const load = sel.warehouseLoad(state)
   const queue = sel.warehouseQueue(state)
-  // Proporción proceso / por iniciar (NO es un % de capacidad: no hay tope definido).
-  const pct = load.total > 0 ? (load.proceso / load.total) * 100 : 0
+  // Proporción proceso / resto de la carga (NO es un % de capacidad: no hay tope definido).
+  // Lo ya Listo no es carga, así que no entra en la base.
+  const carga = load.total - load.preparado
+  const pct = carga > 0 ? (load.proceso / carga) * 100 : 0
 
   return (
     <div className="card">

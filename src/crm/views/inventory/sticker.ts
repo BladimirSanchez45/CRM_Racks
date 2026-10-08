@@ -94,7 +94,9 @@ function trimLogo(img: HTMLImageElement): { src: string | HTMLImageElement; rati
 /** Fecha en que la OC quedó lista en almacén; si todavía no se marca, hoy. */
 export function fechaListo(state: AppState, order: Order): string {
   const wh = sel.warehouseForOrder(state, order.id)
-  if (wh?.doneAt) return wh.doneAt.slice(0, 10)
+  // "Listo" (preparado) sella readyAt; las OC viejas solo traen doneAt.
+  const at = wh?.readyAt ?? wh?.doneAt
+  if (at) return at.slice(0, 10)
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }

@@ -8,7 +8,7 @@ import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
   Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
-  AgendaEvent, WarehouseItem, InventoryFamily, InventoryItem, InventoryMove, BankTransaction, CfdiDoc,
+  AgendaEvent, WarehouseItem, InventoryFamily, InventoryItem, InventoryMove, InventoryKit, BankTransaction, CfdiDoc,
   Employee, VacationEntitlement, VacationRequest,
 } from './types'
 import { WAREHOUSE_DAYS_DEFAULT } from './types'
@@ -290,6 +290,7 @@ function mapOrder(r: any): Order {
     ...(r.project_id ? { projectId: r.project_id } : {}),
     ...(Array.isArray(r.items) && r.items.length ? { items: r.items } : {}),
     ...(r.cancelled ? { cancelled: true } : {}),
+    ...(r.consumo_manual ? { consumoManual: true } : {}),
   }
 }
 function orderRow(o: Order): Record<string, unknown> {
@@ -298,6 +299,7 @@ function orderRow(o: Order): Record<string, unknown> {
     description: o.description, conditions: o.conditions, amount: o.amount,
     responsible: o.responsible, file: o.file, file_path: o.filePath ?? null,
     delivery_date: orNull(o.deliveryDate), project_id: o.projectId ?? null, items: o.items ?? [], cancelled: !!o.cancelled,
+    consumo_manual: !!o.consumoManual,
   }
 }
 export async function fetchOrders(): Promise<Order[]> {
@@ -655,6 +657,7 @@ function mapWarehouseItem(r: any): WarehouseItem {
     ...(r.estimated_done ? { estimatedDone: r.estimated_done } : {}),
     ...(r.notes ? { notes: r.notes } : {}),
     ...(r.started_at ? { startedAt: r.started_at } : {}),
+    ...(r.ready_at ? { readyAt: r.ready_at } : {}),
     ...(r.done_at ? { doneAt: r.done_at } : {}),
   }
 }
@@ -662,7 +665,7 @@ function warehouseItemRow(w: WarehouseItem): Record<string, unknown> {
   return {
     id: w.id, order_id: w.orderId, position: w.position, size: w.size ?? null, days: w.days ?? null,
     status: w.status, estimated_done: orNull(w.estimatedDone), notes: w.notes ?? null,
-    entered_at: w.enteredAt, started_at: w.startedAt ?? null, done_at: w.doneAt ?? null,
+    entered_at: w.enteredAt, started_at: w.startedAt ?? null, ready_at: w.readyAt ?? null, done_at: w.doneAt ?? null,
   }
 }
 export async function fetchWarehouse(): Promise<WarehouseItem[]> {
@@ -771,6 +774,32 @@ export async function saveInvItems(items: InventoryItem[]): Promise<void> {
 }
 export const deleteInvItem = (id: string) => removeRow('inventory_items', id)
 export const saveInvMove = (m: InventoryMove) => upsert('inventory_moves', invMoveRow(m))
+
+/* ---- Paquetes (kits) de inventario ---- */
+function mapInvKit(r: any): InventoryKit {
+  return {
+    id: r.id, name: r.name ?? '',
+    components: Array.isArray(r.components) ? r.components : [],
+    position: Number(r.position ?? 0),
+  }
+}
+function invKitRow(k: InventoryKit): Record<string, unknown> {
+  return { id: k.id, name: k.name, components: k.components ?? [], position: k.position }
+}
+export const fetchInvKits = (): Promise<InventoryKit[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('inventory_kits').select('*').order('position', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map(mapInvKit)
+}, 'inventory_kits')
+/** OC que ya tienen salida en el kardex. Se consulta aparte porque el kardex solo se carga
+ *  acotado a los últimos movimientos y, con el tiempo, el consumo viejo quedaría fuera. */
+export const fetchInvConsumedOrders = (): Promise<string[]> => sinTabla(async () => {
+  const { data, error } = await supabase.from('inventory_moves').select('order_id').eq('motivo', 'Salida a proyecto').not('order_id', 'is', null)
+  if (error) throw error
+  return [...new Set((data ?? []).map((r: any) => String(r.order_id)))]
+}, 'inventory_moves')
+export const saveInvKit = (k: InventoryKit) => upsert('inventory_kits', invKitRow(k))
+export const deleteInvKit = (id: string) => removeRow('inventory_kits', id)
 
 /* ---- Vacaciones: empleados, paquetes de días y solicitudes ----
    Las lecturas van con `sinTabla`: mientras no se corra step31_vacaciones.sql
@@ -1045,6 +1074,7 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   inventory_families: mapInvFamily,
   inventory_items: mapInvItem,
   inventory_moves: mapInvMove,
+  inventory_kits: mapInvKit,
   employees: mapEmployee,
   vacation_entitlements: mapVacEntitlement,
   vacation_requests: mapVacRequest,
@@ -1121,14 +1151,14 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, employees, vacationEntitlements, vacationRequests, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
       fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchBankTxs(), fetchCfdiDocs(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(),
-      fetchInvFamilies(), fetchInvItems(), fetchInvMoves(),
+      fetchInvFamilies(), fetchInvItems(), fetchInvMoves(), fetchInvKits(), fetchInvConsumedOrders(),
       fetchEmployees(), fetchVacEntitlements(), fetchVacRequests(),
       fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, employees, vacationEntitlements, vacationRequests, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications }
 }

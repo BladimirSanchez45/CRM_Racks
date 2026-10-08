@@ -15,6 +15,10 @@ import { detectLayout, elevationLevels, groupBeams, snapToDim, type BeamGroup, t
 
 type PageInfo = { n: number; det: Detection; w: number; h: number; m: number[] }
 
+/** Índice de la hoja de PLANTA con más vigas (−1 si ninguna hoja es planta). */
+const bestPlanIdx = (ps: PageInfo[]) =>
+  ps.reduce<number>((b, p, i) => (p.det.kind === 'planta' && (b < 0 || p.det.beams.length > ps[b].det.beams.length) ? i : b), -1)
+
 // pdf.js (~1 MB) se carga solo al entrar a esta vista.
 let pdfjsReady: Promise<typeof import('pdfjs-dist')> | null = null
 const loadPdfjs = () => (pdfjsReady ??= Promise.all([
@@ -92,6 +96,7 @@ export function LayoutsPage() {
     if (e.button !== 0 || e.pointerType !== 'mouse') return
     const el = scrollRef.current
     if (!el) return
+    suppressClick.current = false   // un arrastre cancelado (sin clic después) no debe tragarse el siguiente clic
     drag.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, moved: false }
   }
   const onPanMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -125,6 +130,7 @@ export function LayoutsPage() {
   React.useEffect(() => () => { void loadingTask?.destroy() }, [loadingTask])
 
   const load = async (file: File) => {
+    if (busy) return   // una carga a la vez: si no, gana la que termine al último, no la que se eligió
     if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { setError('El archivo debe ser un PDF.'); return }
     setBusy(true); setError('')
     let lt: PDFDocumentLoadingTask | null = null
@@ -142,13 +148,14 @@ export function LayoutsPage() {
         text += '\n' + texts.map(t => t.str).join('\n')
       }
       // Se abre en la hoja de planta con más vigas (si no hay, en la primera).
-      const plan = infos.reduce((b, p, i) => (p.det.beams.length > (infos[b]?.det.beams.length ?? 0) ? i : b), 0)
+      const plan = Math.max(0, bestPlanIdx(infos))
       const elev = infos.find(p => p.det.elevation)?.det.elevation ?? null
       setDoc(d); setLoadingTask(lt); setPages(infos); setPageIdx(plan); setFileName(file.name); setZoom(1)
       setToggled(new Set()); setGroupMm({}); setAdjFrames(''); setAdjBeams('')
       // Datos del cuadro del plano; los niveles y la altura también pueden venir del alzado.
       // "Niveles: 5" o "Piso + 03 niveles".
-      const nivelesCuadro = (/niveles?\s*:?\s*(\d{1,2})\b/i.exec(text) ?? /\b(\d{1,2})\s*niveles?\b/i.exec(text))?.[1]?.replace(/^0+(?=\d)/, '')
+      // (En plural y con separador: "NIVEL 1" de un alzado no es el dato.)
+      const nivelesCuadro = (/niveles\s*[:=]\s*(\d{1,2})\b/i.exec(text) ?? /\b(\d{1,2})\s*niveles\b/i.exec(text))?.[1]?.replace(/^0+(?=\d)/, '')
       setLevels(nivelesCuadro ?? (elev ? String(elev.levels) : ''))
       setFrameH(elev?.frameHeightMm ? String(elev.frameHeightMm) : '')
       setMeta({ cliente: /cliente\s*:\s*([^\n]+)/i.exec(text)?.[1].trim() || undefined, plano: /plano\s*:\s*(\S+)/i.exec(text)?.[1], nivelesCuadro })
@@ -170,7 +177,12 @@ export function LayoutsPage() {
       const page = await doc.getPage(info.n)
       const canvas = canvasRef.current
       if (cancelled || !canvas) return
-      const vp = page.getViewport({ scale: Math.min(2 * zoom, 8) })
+      // Tope de píxeles: arriba de ~268 Mpx (o 16 384 px de lado) el navegador deja el canvas en
+      // blanco sin avisar. Un plano A0 con zoom alto lo rebasa.
+      const base = page.getViewport({ scale: 1 })
+      const MAX_PX = 1.6e8, MAX_SIDE = 16384
+      const scale = Math.min(2 * zoom, 8, Math.sqrt(MAX_PX / (base.width * base.height)), MAX_SIDE / Math.max(base.width, base.height))
+      const vp = page.getViewport({ scale })
       canvas.width = Math.floor(vp.width)
       canvas.height = Math.floor(vp.height)
       task = page.render({ canvas, viewport: vp })
@@ -180,7 +192,7 @@ export function LayoutsPage() {
   }, [doc, pages, pageIdx, zoom])
 
   // El conteo sale SIEMPRE de la hoja de planta (la de más vigas), se esté viendo la que sea.
-  const planIdx = pages.reduce<number>((b, p, i) => (p.det.kind === 'planta' && (b < 0 || p.det.beams.length > pages[b].det.beams.length) ? i : b), -1)
+  const planIdx = bestPlanIdx(pages)
   const plan = planIdx >= 0 ? pages[planIdx] : undefined
   const det = plan?.det
   const view = pages[pageIdx]
@@ -220,9 +232,14 @@ export function LayoutsPage() {
     // Si el campo de niveles traía la propuesta del alzado, se actualiza con la nueva.
     if (levels === String(elevLevelsIn(toggled))) setLevels(String(elevLevelsIn(nx)))
   }
-  const beams = plan && det ? [...det.beams.filter(b => isOn(plan.n, b.id, true)), ...det.doubtful.filter(b => isOn(plan.n, b.id, false))] : []
+  // 'd…' = dudosa (apagada por defecto); el resto de vigas cuentan salvo que se quiten.
+  const beamOn = (id: string) => !!plan && isOn(plan.n, id, !id.startsWith('d'))
+  const beams = det ? [...det.beams, ...det.doubtful].filter(b => beamOn(b.id)) : []
   const frames = plan && det ? det.frames.filter(f => isOn(plan.n, f.id, true)) : []
-  const groups = groupBeams(beams, det?.mmPerUnit ?? null, det?.dimsMm ?? [])
+  // Los grupos se forman con TODAS las vigas de la planta (prendidas o no): así su identidad —y
+  // el largo en mm que se capturó para el grupo— no cambia al quitar o incluir una viga.
+  const groups = (det ? groupBeams([...det.beams, ...det.doubtful], det.mmPerUnit, det.dimsMm) : [])
+    .map(g => ({ ...g, ids: g.ids.filter(beamOn) })).filter(g => g.ids.length > 0)
   const nAdjF = parseInt(adjFrames) || 0
   const nAdjB = parseInt(adjBeams) || 0
   const frameCount = frames.reduce((s, f) => s + f.count, 0) + nAdjF
@@ -256,38 +273,45 @@ export function LayoutsPage() {
     if (!view) return null
     const d = view.det, n = view.n
     const editable = view === plan   // solo la hoja de planta afecta el conteo
+    const noCuenta = plan ? ` — no cuenta: el conteo sale de la hoja ${plan.n}` : ' — no cuenta'
+    // Los niveles se leen de UNA sola hoja (elevPage); en cualquier otra solo se muestran.
+    const levelsHere = view === elevPage
     const loose = new Set(d.looseBeams)
     return (
       <svg className="absolute inset-0 w-full h-full" viewBox={`0 0 ${view.w} ${view.h}`} preserveAspectRatio="none">
         {d.elevation?.stacks.flat().map(b => {
           const inc = isOn(n, b.id, true)
           return <Piece key={b.id} l={b} m={view.m} color={inc ? C.level : C.off} dashed={!inc}
-            title={`Nivel — clic para ${inc ? 'quitar' : 'incluir'} este nivel (todas sus vigas)`} onClick={() => toggleLevel(b.id)} />
+            title={levelsHere ? `Nivel — clic para ${inc ? 'quitar' : 'incluir'} este nivel (todas sus vigas)` : `Nivel (los niveles se leen de la hoja ${elevPage?.n ?? '?'})`}
+            onClick={levelsHere ? () => toggleLevel(b.id) : undefined} />
         })}
         {d.frames.map(f => {
           const inc = isOn(n, f.id, true)
           return <Piece key={f.id} l={f} m={view.m} color={inc ? C.frame : C.off} dashed={!inc}
-            title={`Marco${f.count > 1 ? ` doble (cuenta ${f.count})` : ''} — clic para ${inc ? 'quitarlo' : 'incluirlo'}`}
+            title={`Marco${f.count > 1 ? ` doble (cuenta ${f.count})` : ''}${editable ? ` — clic para ${inc ? 'quitarlo' : 'incluirlo'}` : noCuenta}`}
             onClick={editable ? () => toggle(n, f.id) : undefined} />
         })}
         {d.beams.map(b => {
           const inc = isOn(n, b.id, true)
           return <Piece key={b.id} l={b} m={view.m} color={!inc ? C.off : loose.has(b.id) ? C.loose : C.beam} dashed={!inc}
-            title={`Viga${approxMm(b.len)}${loose.has(b.id) ? ' · un extremo sin marco' : ''} — clic para ${inc ? 'quitarla' : 'incluirla'}`}
+            title={`Viga${approxMm(b.len)}${loose.has(b.id) ? ' · un extremo sin marco' : ''}${editable ? ` — clic para ${inc ? 'quitarla' : 'incluirla'}` : noCuenta}`}
             onClick={editable ? () => toggle(n, b.id) : undefined} />
         })}
         {d.doubtful.map(b => {
           const inc = isOn(n, b.id, false)
           return <Piece key={b.id} l={b} m={view.m} color={inc ? C.beam : C.doubtful} dashed={!inc}
-            title={`Trazo rojo sin marco${approxMm(b.len)} — ${inc ? 'incluido; clic para quitarlo' : 'no cuenta; clic para incluirlo'}`}
+            title={`Trazo rojo sin marco${approxMm(b.len)}${editable ? ` — ${inc ? 'incluido; clic para quitarlo' : 'no cuenta; clic para incluirlo'}` : noCuenta}`}
             onClick={editable ? () => toggle(n, b.id) : undefined} />
         })}
       </svg>
     )
   }
 
-  const levelsSource = meta.nivelesCuadro ? 'según el cuadro del plano' : elevation ? 'leídos del alzado' : 'captúralos a la derecha'
-  const modules = Math.round(beams.length / 2)   // cada módulo aporta viga de frente y de fondo
+  const levelsSource = !levels ? 'captúralos a la derecha'
+    : levels === meta.nivelesCuadro ? 'según el cuadro del plano'
+    : elevation && levels === String(elevation.levels) ? 'leídos del alzado'
+    : 'capturados a mano'
+  const modules = Math.round(beamsPlan / 2)   // cada módulo aporta viga de frente y de fondo
   const warnings = [
     !plan && { color: 'var(--danger)', text: 'No se encontró una hoja de planta con marcos y vigas. Revisa que el PDF traiga la vista de planta y venga de AutoCAD (no escaneado).' },
     det && det.looseBeams.length > 0 && { color: 'var(--warn)', text: `${det.looseBeams.length} viga${det.looseBeams.length === 1 ? '' : 's'} con un extremo sin marco detectado (en ámbar). Revísalas en el plano.` },

@@ -71,8 +71,8 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders',  section: 'Compras' },
   // Almacén: su cola de trabajo. La ven almacén, admin y dirección (lectura).
   { id: 'almacen',     label: 'Almacén',      icon: 'pkg', roles: ['almacen', 'admin', 'superadmin', 'direccion'], section: 'Logística' },
-  // Inventario: existencias del almacén. Lo opera almacén; admin y dirección lo consultan.
-  { id: 'inventario',  label: 'Inventario',   icon: 'grid', roles: ['almacen', 'admin', 'superadmin', 'direccion'], section: 'Logística' },
+  // Inventario: existencias del almacén. Lo operan almacén y admin; dirección y logística lo consultan (solo lectura).
+  { id: 'inventario',  label: 'Inventario',   icon: 'grid', roles: ['almacen', 'admin', 'superadmin', 'direccion', 'logistica'], section: 'Logística' },
   { id: 'asignacion',  label: 'Asignación',   icon: 'handshake',   section: 'Logística' },
   { id: 'remisiones',  label: 'Remisiones',   icon: 'truck',       section: 'Logística' },
   { id: 'payments',    label: 'Pagos',        icon: 'money',       section: 'Finanzas' },
@@ -106,7 +106,7 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   ventas: ['dashboard', 'agenda', 'vacaciones', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'layouts', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
-  logistica: ['dashboard', 'agenda', 'vacaciones', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'ventas_stats', 'settings'],
+  logistica: ['dashboard', 'agenda', 'vacaciones', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'inventario', 'ventas_stats', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
   ingenieria: ['dashboard', 'agenda', 'vacaciones', 'projects', 'ventas_stats', 'layouts', 'settings'],
   // Marketing: Estadísticas por origen, Campañas y Prospectos (solo lectura, ve a
