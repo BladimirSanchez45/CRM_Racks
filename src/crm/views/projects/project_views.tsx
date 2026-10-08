@@ -321,6 +321,61 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
   const movementsCost = sel.projectMovementsCost(state, p.id)
   const utilSub = sel.projectUtilidadSub(state, p)
   const utilTotal = ventaTotal - comprasTotal - internalCost - movementsCost
+
+  // Desglose de costos: clic en una línea de "Utilidad" lista qué partidas se están restando.
+  type CostKind = 'compras' | 'internos' | 'movs'
+  const [desglose, setDesglose] = React.useState<{ kind: CostKind; iva: boolean } | null>(null)
+  const costRow = (label: string, amount: number, kind: CostKind, iva: boolean) => {
+    const open = desglose?.kind === kind && desglose.iva === iva
+    return (
+      <button type="button" title="Clic para ver qué se está descontando"
+        className="w-full flex justify-between items-center text-[12.5px] text-tx-2 py-[3px] px-0 bg-transparent border-none cursor-pointer hover:text-tx-0 text-left"
+        onClick={() => setDesglose(open ? null : { kind, iva })}>
+        <span className="inline-flex items-center gap-1"><Icon name={open ? 'chevronDown' : 'chevron'} size={11} className="opacity-60" /> {label}</span>
+        <span className="mono">−{fmtMoney(amount)}</span>
+      </button>
+    )
+  }
+  const desgloseRows = (kind: CostKind, iva: boolean): { k: string; a: React.ReactNode; b?: React.ReactNode; monto: number }[] => {
+    if (kind === 'compras') {
+      return state.orders.filter(o => o.projectId === p.id && !o.cancelled).map(o => ({
+        k: o.id, a: <><span className="mono text-acc">{o.number}</span> · {sel.supplier(state, o.supplierId)?.name ?? 'Sin proveedor'}</>,
+        b: o.description, monto: iva ? o.amount : o.amount / 1.16,
+      }))
+    }
+    if (kind === 'internos') {
+      return state.internalPayments.filter(ip => ip.projectId === p.id && ip.status === 'Pagado' && !ip.movementId).map(ip => ({
+        k: ip.id, a: <>{ip.concept} <span className="meta">· {ip.category}{ip.sinFactura ? ' · sin factura' : ''}</span></>,
+        b: ip.supplierId ? sel.supplier(state, ip.supplierId)?.name : undefined,
+        // Mismo criterio que projectInternalPaymentsSub: sin factura no trae IVA.
+        monto: iva || ip.sinFactura ? ip.amount : (ip.subtotal != null ? ip.subtotal : ip.amount / 1.16),
+      }))
+    }
+    const pagadas = new Set(state.movementLists.filter(l => !!l.comprobantePath).map(l => l.id))
+    return state.movements.filter(m => m.projectId === p.id && m.status === 'Autorizado' && m.changedByDireccion !== 'removed' && pagadas.has(m.listId)).map(m => ({
+      k: m.id, a: m.description, b: state.movementLists.find(l => l.id === m.listId)?.name, monto: m.amount,
+    }))
+  }
+  const NOTA_DESGLOSE: Record<CostKind, (iva: boolean) => string> = {
+    compras: iva => `Órdenes de compra no canceladas, ${iva ? 'con IVA' : 'sin IVA (total ÷ 1.16)'}.`,
+    internos: () => 'Pagos internos ya pagados. Los sin factura que pasaron a una lista de movimientos se ven en "Movimientos".',
+    movs: () => 'Movimientos autorizados de listas ya pagadas (con comprobante).',
+  }
+  const desgloseBox = (kind: CostKind, iva: boolean) => {
+    if (desglose?.kind !== kind || desglose.iva !== iva) return null
+    const rows = desgloseRows(kind, iva)
+    return (
+      <div className="my-1 border border-line rounded-[8px] bg-bg-2 overflow-hidden">
+        {rows.length === 0 ? <div className="meta px-3 py-2">Sin partidas.</div> : rows.map(r => (
+          <div key={r.k} className="flex justify-between gap-3 px-3 py-1.5 border-b border-line-soft last:border-b-0 text-[12px]">
+            <div className="min-w-0"><div className="truncate text-tx-1">{r.a}</div>{r.b && <div className="meta truncate">{r.b}</div>}</div>
+            <span className="mono shrink-0">−{fmtMoney(r.monto)}</span>
+          </div>
+        ))}
+        <div className="meta px-3 py-1.5 border-t border-line">{NOTA_DESGLOSE[kind](iva)}</div>
+      </div>
+    )
+  }
   const margen = ventaSub > 0 ? (utilSub / ventaSub) * 100 : null
   const cobros = sel.clientPaymentsForProject(state, p.id)
   const cobrado = sel.projectCobrado(state, p.id)
@@ -424,15 +479,15 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
           <div className="label-k mb-2">Utilidad</div>
           <div className="bg-bg-1 border border-line p-3.5 mb-3.5">
             <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Subtotal de la venta</span><span className="mono">{fmtMoney(ventaSub)}</span></div>
-            <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (sin IVA)</span><span className="mono">−{fmtMoney(comprasSub)}</span></div>
-            {internalSub > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Pagos internos (sin IVA)</span><span className="mono">−{fmtMoney(internalSub)}</span></div>}
-            {movementsCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Movimientos (pagados)</span><span className="mono">−{fmtMoney(movementsCost)}</span></div>}
+            {costRow('Compras / gastos (sin IVA)', comprasSub, 'compras', false)}{desgloseBox('compras', false)}
+            {internalSub > 0 && <>{costRow('Pagos internos (sin IVA)', internalSub, 'internos', false)}{desgloseBox('internos', false)}</>}
+            {movementsCost > 0 && <>{costRow('Movimientos (pagados)', movementsCost, 'movs', false)}{desgloseBox('movs', false)}</>}
             <div className="flex justify-between text-[12.5px] py-[3px]"><span className="text-tx-1 font-semibold">Utilidad sin IVA</span><span className="mono font-semibold" style={{ color: utilSub >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilSub)}</span></div>
             <div className="h-px bg-line my-2"></div>
             <div className="flex justify-between text-[12.5px] text-tx-1 py-[3px]"><span>Total con IVA</span><span className="mono">{fmtMoney(ventaTotal)}</span></div>
-            <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Compras / gastos (con IVA)</span><span className="mono">−{fmtMoney(comprasTotal)}</span></div>
-            {internalCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Pagos internos (con IVA)</span><span className="mono">−{fmtMoney(internalCost)}</span></div>}
-            {movementsCost > 0 && <div className="flex justify-between text-[12.5px] text-tx-2 py-[3px]"><span>Movimientos (pagados)</span><span className="mono">−{fmtMoney(movementsCost)}</span></div>}
+            {costRow('Compras / gastos (con IVA)', comprasTotal, 'compras', true)}{desgloseBox('compras', true)}
+            {internalCost > 0 && <>{costRow('Pagos internos (con IVA)', internalCost, 'internos', true)}{desgloseBox('internos', true)}</>}
+            {movementsCost > 0 && <>{costRow('Movimientos (pagados)', movementsCost, 'movs', true)}{desgloseBox('movs', true)}</>}
             <div className="flex justify-between items-baseline mt-1"><span className="label-k">Utilidad con IVA</span><span className="font-display font-extrabold text-[19px]" style={{ color: utilTotal >= 0 ? 'var(--ok)' : 'var(--danger)' }}>{fmtMoney(utilTotal)}</span></div>
             {margen != null && <div className="flex justify-between text-[11px] text-tx-3 mt-1.5"><span>Margen sobre venta</span><span className="mono">{margen.toFixed(1)}%</span></div>}
           </div>
