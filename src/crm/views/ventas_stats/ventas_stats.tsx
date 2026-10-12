@@ -5,7 +5,7 @@
 //  exportación a Excel. Navegable por mes para ver el histórico.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, moneyDigits, fmtMoneyInput } from '../../core/data'
+import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, canSeeAllProspects, moneyDigits, fmtMoneyInput } from '../../core/data'
 import { KPI, SecTitle, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { exportVentasExcel } from '../../core/export_ventas'
@@ -22,8 +22,9 @@ const ymAdd = (ym: string, delta: number) => {
 }
 const ymLabel = (ym: string) => `${MESES_L[Number(ym.slice(5)) - 1]} ${ym.slice(0, 4)}`
 
-/** Dona SVG con leyenda: cada segmento proporcional a su valor. */
-function Donut({ data, center, sub }: { data: { label: string; value: number; color: string }[]; center: string; sub?: string }) {
+/** Dona SVG con leyenda: cada segmento proporcional a su valor.
+ *  `ocultar` en un dato = mostrar solo su porcentaje, sin importe (compañeros de un vendedor). */
+function Donut({ data, center, sub }: { data: { label: string; value: number; color: string; ocultar?: boolean }[]; center: string; sub?: string }) {
   const total = data.reduce((a, d) => a + d.value, 0)
   let acc = 0
   return (
@@ -36,7 +37,7 @@ function Donut({ data, center, sub }: { data: { label: string; value: number; co
             <circle key={i} cx="50" cy="50" r="38" fill="none" stroke={d.color} strokeWidth="15"
               pathLength={100} strokeDasharray={`${pct} ${100 - pct}`} strokeDashoffset={-acc}
               transform="rotate(-90 50 50)">
-              <title>{`${d.label}: ${fmtMoney(d.value)} (${pct.toFixed(1)}%)`}</title>
+              <title>{d.ocultar ? `${d.label}: ${pct.toFixed(1)}%` : `${d.label}: ${fmtMoney(d.value)} (${pct.toFixed(1)}%)`}</title>
             </circle>
           )
           acc += pct
@@ -52,7 +53,7 @@ function Donut({ data, center, sub }: { data: { label: string; value: number; co
             <div key={i} className="flex items-center gap-2 text-[12px]">
               <span className="inline-block w-2.5 h-2.5 rounded-full flex-none" style={{ background: d.color }}></span>
               <span className="text-tx-1 truncate flex-1" title={d.label}>{d.label}</span>
-              <span className="mono font-semibold">{fmtK(d.value)}</span>
+              {!d.ocultar && <span className="mono font-semibold">{fmtK(d.value)}</span>}
               <span className="text-tx-3 text-[11px] w-[42px] text-right">{pct.toFixed(1)}%</span>
             </div>
           )
@@ -66,6 +67,11 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   const { state, dispatch } = useStore()
   const me = state.currentUser
   const canEdit = canEditSalesGoals(me)
+  // Un vendedor de a pie ve de sus COMPAÑEROS solo el porcentaje de avance: ni lo vendido,
+  // ni su meta ni sus ventas. Lo suyo y los totales del equipo (meta, vendido) sí los ve.
+  // Gerentes (ven a todo el equipo) y quienes fijan metas ven todo.
+  const soloPorcentaje = me?.role === 'ventas' && !canEdit && !canSeeAllProspects(me)
+  const ocultar = (sellerId: string) => soloPorcentaje && sellerId !== me?.id
   const currentYm = TODAY_ISO.slice(0, 7)
   const [ym, setYm] = React.useState(currentYm)
 
@@ -74,7 +80,8 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
 
   // Filtro por vendedor ('' = todo el equipo). Acota KPIs, tendencia, sistema,
   // tablas y Excel a ese vendedor; las barras del equipo quedan como contexto.
-  const [sellerId, setSellerId] = React.useState('')
+  // Quien solo ve porcentajes arranca filtrado a sí mismo y solo puede elegirse a sí mismo.
+  const [sellerId, setSellerId] = React.useState(() => (soloPorcentaje && me ? me.id : ''))
   const vendedorSel = sellerId ? vendedores.find(v => v.id === sellerId) : undefined
   const esMio = (x: { seller: string }) => !sellerId || x.seller === sellerId
 
@@ -108,6 +115,9 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   const faltaSel = Math.max(0, metaSel - vendidoSel)
   const nVentas = ventasSel.length
   const ticket = nVentas > 0 ? vendidoSel / nVentas : 0
+  // La lista de ventas (con importes por proyecto) solo muestra las propias a quien ve porcentajes.
+  const ventasLista = soloPorcentaje ? ventasSel.filter(p => p.seller === me?.id) : ventasSel
+  const vendidoLista = ventasLista.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
   const pctSel = metaSel > 0 ? (vendidoSel / metaSel) * 100 : 0
 
   // Por cerrar (solo tiene sentido en el mes en curso): prospectos cotizados o en
@@ -208,7 +218,8 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           {/* Filtro por vendedor */}
           <select className="select text-[12px] py-1 px-2 w-[170px]" value={sellerId} onChange={e => setSellerId(e.target.value)} title="Filtrar por vendedor">
             <option value="">Todo el equipo</option>
-            {vendedores.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+            {/* Quien solo ve porcentajes únicamente puede filtrarse a sí mismo. */}
+            {vendedores.filter(v => !ocultar(v.id)).map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
           </select>
           {/* Navegación por mes */}
           <button className="btn btn-ghost btn-sm" disabled={ym <= minYm} onClick={() => setYm(ymAdd(ym, -1))} title="Mes anterior">
@@ -233,7 +244,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
               {canEdit && <button className="btn btn-ghost btn-sm" title={`Editar la meta de ${ymLabel(ym)}`} onClick={() => { setDraft(String(Math.round(meta))); setEditing(true) }}><Icon name="edit" size={13} /></button>}
             </span>
           )}
-          <button className="btn btn-sm" onClick={() => void exportar()}><Icon name="download" size={14} /> Excel</button>
+          {!soloPorcentaje && <button className="btn btn-sm" onClick={() => void exportar()}><Icon name="download" size={14} /> Excel</button>}
         </div>
       } />
 
@@ -279,11 +290,13 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
                 const pct = r.meta > 0 ? (r.total / r.meta) * 100 : 0
                 const cumplio = r.meta > 0 && r.total >= r.meta
                 const activo = sellerId === r.v.id
-                const dim = !!sellerId && !activo
+                // Quien solo ve porcentajes vive filtrado a sí mismo: no se atenúa a los demás.
+                const dim = !!sellerId && !activo && !soloPorcentaje
                 const editandoEste = editSeller === r.v.id
+                const oculto = ocultar(r.v.id)   // compañero: solo el porcentaje
                 return (
-                  <div key={r.v.id} className="flex items-center gap-3 cursor-pointer" style={{ opacity: dim ? .35 : 1, transition: 'opacity .2s' }}
-                    onClick={() => { if (!editandoEste) setSellerId(activo ? '' : r.v.id) }} title={activo ? 'Quitar filtro' : `Ver solo a ${r.v.name}`}>
+                  <div key={r.v.id} className={'flex items-center gap-3' + (oculto ? '' : ' cursor-pointer')} style={{ opacity: dim ? .35 : 1, transition: 'opacity .2s' }}
+                    onClick={() => { if (!editandoEste && !oculto) setSellerId(activo ? '' : r.v.id) }} title={oculto ? undefined : activo ? 'Quitar filtro' : `Ver solo a ${r.v.name}`}>
                     <div className="w-[130px] flex-none text-[12.5px] truncate" style={{ color: activo ? 'var(--acc)' : 'var(--tx-1)', fontWeight: activo ? 700 : 400 }} title={r.v.name}>{r.v.name}</div>
                     <div className="flex-1 h-[22px] bg-bg-1 border border-line relative overflow-hidden">
                       <div className="h-full opacity-90" style={{ width: `${Math.min(100, pct)}%`, background: cumplio ? 'var(--ok)' : colorOf(r.v.id), minWidth: r.total ? 3 : 0, transition: 'width .5s ease' }}></div>
@@ -291,10 +304,12 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
                     </div>
                     <div className="w-[250px] flex-none text-right leading-tight">
                       <div className="text-[12px]">
-                        <span className="mono font-semibold" style={{ color: r.total ? 'var(--tx-0)' : 'var(--tx-3)' }}>{fmtMoney(r.total)}</span>
+                        {oculto
+                          ? <span className="mono font-semibold" style={{ color: cumplio ? 'var(--ok)' : 'var(--tx-1)' }}>{pct.toFixed(0)}% de su meta</span>
+                          : <span className="mono font-semibold" style={{ color: r.total ? 'var(--tx-0)' : 'var(--tx-3)' }}>{fmtMoney(r.total)}</span>}
                         <span className="text-tx-3 text-[10.5px]"> · {r.n} venta{r.n === 1 ? '' : 's'}</span>
                       </div>
-                      {editandoEste ? (
+                      {oculto ? null : editandoEste ? (
                         /* Captura de la meta personal de este vendedor para el mes elegido */
                         <div className="flex items-center justify-end gap-1 mt-0.5" onClick={e => e.stopPropagation()}>
                           <input autoFocus className="input mono text-[11px] w-[105px] py-0.5 px-1.5" value={fmtMoneyInput(draftP)}
@@ -328,7 +343,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           </div>
           <div className="card-b">
             <Donut center={fmtK(vendido)} sub="vendido"
-              data={porVendedor.map(r => ({ label: r.v.name, value: r.total, color: colorOf(r.v.id) }))} />
+              data={porVendedor.map(r => ({ label: r.v.name, value: r.total, color: colorOf(r.v.id), ocultar: ocultar(r.v.id) }))} />
           </div>
         </div>
       </div>
@@ -392,11 +407,16 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
                       {r.v.name}
                     </td>
                     <td className="num">{r.n}</td>
-                    <td className="num text-[12.5px] font-semibold">{fmtMoney(r.total)}</td>
-                    <td className="num text-[12.5px]">{r.n > 0 ? fmtMoney(r.total / r.n) : '—'}</td>
-                    <td className="num text-[12.5px] text-tx-2" title={r.propia ? 'Meta propia' : 'Reparto (meta ÷ equipo)'}>
-                      {fmtMoney(r.meta)}{r.propia && <span className="text-[10px] text-acc ml-1" title="Meta propia capturada">●</span>}
-                    </td>
+                    {ocultar(r.v.id) ? (
+                      // Compañero: sin importes (con la meta y el % se deduciría lo vendido).
+                      <><td className="num text-tx-3">—</td><td className="num text-tx-3">—</td><td className="num text-tx-3">—</td></>
+                    ) : (<>
+                      <td className="num text-[12.5px] font-semibold">{fmtMoney(r.total)}</td>
+                      <td className="num text-[12.5px]">{r.n > 0 ? fmtMoney(r.total / r.n) : '—'}</td>
+                      <td className="num text-[12.5px] text-tx-2" title={r.propia ? 'Meta propia' : 'Reparto (meta ÷ equipo)'}>
+                        {fmtMoney(r.meta)}{r.propia && <span className="text-[10px] text-acc ml-1" title="Meta propia capturada">●</span>}
+                      </td>
+                    </>)}
                     <td className="num font-semibold" style={{ color: pctMeta >= 100 ? 'var(--ok)' : pctMeta >= 50 ? 'var(--tx-0)' : 'var(--warn)' }}>{pctMeta.toFixed(1)}%</td>
                     <td className="num text-[12.5px] text-tx-2">{vendido > 0 ? ((r.total / vendido) * 100).toFixed(1) : '0.0'}%</td>
                   </tr>
@@ -412,14 +432,14 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
         <div className="card-h">
           <Icon name="projects" size={17} className="text-acc" />
           <span className="ttl">Ventas de {ymLabel(ym)}{vendedorSel ? ` · ${vendedorSel.name}` : ''}</span>
-          <span className="sub ml-auto">{nVentas} venta{nVentas === 1 ? '' : 's'} · {fmtMoney(vendidoSel)}</span>
+          <span className="sub ml-auto">{ventasLista.length} venta{ventasLista.length === 1 ? '' : 's'} · {fmtMoney(vendidoLista)}{soloPorcentaje && !vendedorSel ? ' · solo las tuyas' : ''}</span>
         </div>
         <div className="card-b p-0 max-h-[420px] overflow-y-auto">
-          {nVentas === 0 ? <Empty icon="projects">{vendedorSel ? `${vendedorSel.name} no tiene ventas registradas este mes` : 'Sin ventas registradas este mes'}</Empty> : (
+          {ventasLista.length === 0 ? <Empty icon="projects">{vendedorSel ? `${vendedorSel.name} no tiene ventas registradas este mes` : 'Sin ventas registradas este mes'}</Empty> : (
             <table className="tbl">
               <thead><tr><th>Fecha</th><th>Proyecto</th><th>Cliente</th><th>Vendedor</th><th>Sistema</th><th className="num">Venta (subtotal)</th></tr></thead>
               <tbody>
-                {ventasSel.map(p => (
+                {ventasLista.map(p => (
                   <tr key={p.id} onClick={() => onOpenProject(p)}>
                     <td className="num text-tx-2">{fmtDateShort(p.created.slice(0, 10))}</td>
                     <td><span className="mono text-acc font-semibold">{p.code}</span></td>

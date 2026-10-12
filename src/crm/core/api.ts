@@ -299,7 +299,9 @@ function orderRow(o: Order): Record<string, unknown> {
     description: o.description, conditions: o.conditions, amount: o.amount,
     responsible: o.responsible, file: o.file, file_path: o.filePath ?? null,
     delivery_date: orNull(o.deliveryDate), project_id: o.projectId ?? null, items: o.items ?? [], cancelled: !!o.cancelled,
-    consumo_manual: !!o.consumoManual,
+    // Solo se manda cuando el campo viene definido: así una OC normal se guarda aunque la
+    // columna (step36) todavía no exista en la base; marcar/desmarcar sí la requiere.
+    ...(o.consumoManual !== undefined ? { consumo_manual: !!o.consumoManual } : {}),
   }
 }
 export async function fetchOrders(): Promise<Order[]> {
@@ -665,7 +667,9 @@ function warehouseItemRow(w: WarehouseItem): Record<string, unknown> {
   return {
     id: w.id, order_id: w.orderId, position: w.position, size: w.size ?? null, days: w.days ?? null,
     status: w.status, estimated_done: orNull(w.estimatedDone), notes: w.notes ?? null,
-    entered_at: w.enteredAt, started_at: w.startedAt ?? null, ready_at: w.readyAt ?? null, done_at: w.doneAt ?? null,
+    entered_at: w.enteredAt, started_at: w.startedAt ?? null, done_at: w.doneAt ?? null,
+    // Igual que consumo_manual: solo si el renglón trae el campo (columna del step37).
+    ...('readyAt' in w ? { ready_at: w.readyAt ?? null } : {}),
   }
 }
 export async function fetchWarehouse(): Promise<WarehouseItem[]> {

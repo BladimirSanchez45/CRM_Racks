@@ -498,7 +498,7 @@ export function OrderForm({ order, onClose }: { order?: Partial<Order>; onClose:
     deliveryDate: order?.deliveryDate || '',
     items: order?.items ? JSON.parse(JSON.stringify(order.items)) : [],
     cancelled: order?.cancelled || false,
-    consumoManual: order?.consumoManual || false,
+    consumoManual: order?.consumoManual,   // sin valor = no se manda a la base
   }))
   const set = (k: keyof OcFormState, v: unknown) => setO(s => ({ ...s, [k]: v }))
   const onPickProject = (pid: string) => {
