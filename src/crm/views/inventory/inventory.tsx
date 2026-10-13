@@ -672,6 +672,10 @@ function KitModal({ kit, onClose }: { kit?: InventoryKit; onClose: () => void })
  *  una parrilla de 46x42 y una de 42x46 puntúan idéntico —las dos palabras
  *  están en el texto— y se elegía por azar. */
 function coincidencia(tokens: string[], heno: string) {
+  // La PRIMERA palabra del nombre es la que dice qué es (marco, viga, charola, nivel): si no
+  // aparece, no hay coincidencia aunque el resto sí. Sin esto, "Marco Mini · minirack estándar"
+  // atrapaba la partida "NIVEL · MINIRACK · ESTANDAR" por las palabras de la descripción.
+  if (!tokens.length || !heno.includes(tokens[0])) return { score: 0, orden: 0 }
   let sueltas = 0, enOrden = 0, pos = 0
   for (const t of tokens) {
     if (heno.includes(t)) sueltas++
