@@ -1330,7 +1330,8 @@ export function InventoryPage() {
       <div className="flex gap-2.5 mb-4 items-center flex-wrap">
         <div className="relative flex-[1_1_220px] max-w-[320px]">
           <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
-          <input className="input pl-[34px]" placeholder="Buscar: viga 4.0, marco, 2438…" value={q} onChange={e => setQ(e.target.value)} />
+          <input className="input pl-[34px]" value={q} onChange={e => setQ(e.target.value)}
+            placeholder={vista === 'consumo' ? 'Buscar: OC, proyecto, cliente…' : vista === 'movs' ? 'Buscar: material, motivo, referencia, quién…' : vista === 'kits' ? 'Buscar paquete…' : 'Buscar: viga 4.0, marco, 2438…'} />
         </div>
         <Seg value={vista} onChange={setVista} options={[
           { value: 'stock', label: 'Existencias' },
@@ -1452,7 +1453,10 @@ export function InventoryPage() {
               <table className="tbl">
                 <thead><tr><th>Cuándo</th><th>Material</th><th>Motivo</th><th className="num">Cant.</th><th className="num">Quedó en</th><th>Quién</th><th>Referencia</th></tr></thead>
                 <tbody>
-                  {sel.invMovesRecientes(state).map(m => {
+                  {sel.invMovesRecientes(state).filter(m => {
+                    const item = state.invItems.find(i => i.id === m.itemId)
+                    return matchTexto(`${item ? sel.invLabel(state, item) : ''} ${m.motivo} ${m.ref ?? ''} ${sel.userName(state, m.userId)}`)
+                  }).map(m => {
                     const item = state.invItems.find(i => i.id === m.itemId)
                     return (
                       <tr key={m.id} style={{ cursor: 'default' }}>
@@ -1488,7 +1492,7 @@ export function InventoryPage() {
               <table className="tbl">
                 <thead><tr><th>Paquete</th><th>Piezas por paquete</th><th className="num">Armables hoy</th><th></th></tr></thead>
                 <tbody>
-                  {sel.invKits(state).map(k => (
+                  {sel.invKits(state).filter(k => matchTexto(`${k.name} ${sel.invKitDesc(state, k)}`)).map(k => (
                     <tr key={k.id} style={manage ? undefined : { cursor: 'default' }} onClick={() => manage && setKitForm({ kit: k })}>
                       <td className="font-semibold text-[13px]">{k.name}</td>
                       <td className="text-[12.5px] text-tx-2">
@@ -1519,7 +1523,11 @@ export function InventoryPage() {
             ]} />
           </div>
           {(() => {
-            const lista = fConsumo === 'pendientes' ? pendientesConsumo : ocsConsumo
+            // El buscador de arriba también filtra aquí: por OC, código de proyecto o cliente.
+            const lista = (fConsumo === 'pendientes' ? pendientesConsumo : ocsConsumo).filter(o => {
+              const proj = o.projectId ? state.projects.find(p => p.id === o.projectId) : undefined
+              return matchTexto(`${o.number} ${proj?.code ?? ''} ${proj ? sel.clientName(state, proj.client) : ''}`)
+            })
             return lista.length === 0
               ? <Empty icon={fConsumo === 'pendientes' ? 'check' : 'orders'}>{fConsumo === 'pendientes' ? 'No hay órdenes de compra con consumo pendiente' : 'No hay órdenes de compra en la cola de almacén'}</Empty>
               : (
