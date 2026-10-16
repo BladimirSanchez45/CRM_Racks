@@ -8,7 +8,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { useStore, sel, fmtDateShort, fmtDate, TODAY_ISO, nextFolio, uid, isDireccion } from '../../core/data'
 import { uploadDoc } from '../../core/api'
-import { Modal, Field, Input, TextArea, Select, FileField, Badge, Empty, KPI, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, FileField, Badge, Empty, KPI, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { importMaterialsFromExcel } from '../../core/excel'
 import type { AppState, Remision, RemisionInput, RemisionItem, RemisionStatus } from '../../core/types'
@@ -370,6 +370,7 @@ function RemisionForm({ remision, onClose, readOnly }: { remision?: Remision; on
 }
 
 export function RemisionesPage() {
+  const tabla = useFitTableHeight()
   const { state } = useStore()
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin crear/editar/eliminar
   const [form, setForm] = React.useState<Remision | {} | null>(null)
@@ -405,7 +406,7 @@ export function RemisionesPage() {
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr><th>Folio</th><th>Proyecto</th><th>Fecha</th><th>Destino</th><th>Transportista</th><th className="num">Partidas</th><th>Estatus</th></tr></thead>
             <tbody>

@@ -5,7 +5,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, isDireccion } from '../../core/data'
-import { Modal, Field, Select, MoneyInput, Empty, KPI, StageBadge, Badge, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Select, MoneyInput, Empty, KPI, StageBadge, Badge, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Project, Supplier } from '../../core/types'
 
@@ -130,6 +130,7 @@ function AssignForm({ project, onClose }: { project: Project; onClose: () => voi
 }
 
 export function AsignacionPage() {
+  const tabla = useFitTableHeight()
   const { state } = useStore()
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: ver sin asignar/editar
   const [assign, setAssign] = React.useState<Project | null>(null)
@@ -191,7 +192,7 @@ export function AsignacionPage() {
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr><th>Proyecto</th><th>Cliente</th><th>Etapa</th><th>Flete</th><th>Instalación</th><th className="num">Presupuesto</th><th className="num">Costo</th><th className="num">Dif.</th><th></th></tr></thead>
             <tbody>

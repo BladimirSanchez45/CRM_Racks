@@ -5,7 +5,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney } from '../../core/data'
-import { KPI, SecTitle, Empty } from '../../core/ui'
+import { KPI, SecTitle, Empty, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 
 // Paleta estable por origen (mismo color en todas las gráficas de la vista).
@@ -14,6 +14,7 @@ const PALETTE = ['#2f6feb', '#14b8a6', '#f59e0b', '#c084fc', '#f472b6', '#38bdf8
 type Grupo = { origen: string; count: number; venta: number; utilidad: number; margen: number | null }
 
 export function EstadisticasPage() {
+  const tabla = useFitTableHeight()   // tabla "Proyectos por utilidad" ajustada a la pantalla
   const { state } = useStore()
 
   // Agrupa TODOS los proyectos por su origen (anuncio). Cada proyecto aporta su
@@ -132,7 +133,8 @@ export function EstadisticasPage() {
           <Icon name="layers" size={17} className="text-st-9" />
           <span className="ttl">Resumen por anuncio</span>
         </div>
-        <div className="card-b p-0">
+        {/* Altura acotada con scroll propio (encabezado pegado): la página no se alarga con cada anuncio. */}
+        <div className="card-b p-0 max-h-[380px] overflow-auto">
           <table className="tbl">
             <thead><tr><th>Anuncio (origen)</th><th className="num">Proyectos</th><th className="num">Venta</th><th className="num">Utilidad</th><th className="num">Margen</th></tr></thead>
             <tbody>
@@ -160,7 +162,7 @@ export function EstadisticasPage() {
           <span className="ttl">Proyectos por utilidad</span>
           <span className="sub ml-auto">{proyectos.length} proyectos</span>
         </div>
-        <div className="card-b p-0">
+        <div ref={tabla.ref} className="card-b p-0 overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr><th>Proyecto</th><th>Anuncio (origen)</th><th className="num">Venta</th><th className="num">Utilidad</th></tr></thead>
             <tbody>

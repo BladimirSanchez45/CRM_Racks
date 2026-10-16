@@ -6,7 +6,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, addDays, TODAY_ISO, isDireccion } from '../../core/data'
-import { Modal, Badge, Empty, KPI, Select, Seg, DocChip } from '../../core/ui'
+import { Modal, Badge, Empty, KPI, Select, Seg, DocChip, useFitTableHeight } from '../../core/ui'
 import { CobroForm } from '../projects/project_views'
 import { BancosView } from './bancos'
 import { Icon } from '../../core/icons'
@@ -198,6 +198,7 @@ function CobrosPorDia() {
 }
 
 export function CobranzaPage() {
+  const tabla = useFitTableHeight()
   const { state } = useStore()
   const [detail, setDetail] = React.useState<Project | null>(null)
   const [q, setQ] = React.useState('')
@@ -302,7 +303,7 @@ export function CobranzaPage() {
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr><th>Proyecto</th><th>Cliente</th><th className="num">Monto total</th><th className="num">Cobrado</th><th className="num">Saldo</th><th>Estado</th><th>Forma de pago</th><th>Comentarios</th></tr></thead>
             <tbody>

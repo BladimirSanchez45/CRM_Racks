@@ -6,7 +6,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
 import { exportProspectosExcel, type ProspectoRow } from '../../core/export_prospectos'
@@ -101,26 +101,6 @@ const mesLabel = (key: string): string => {
   if (!y || !m) return key
   const t = new Date(y, m - 1, 1).toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })
   return t.charAt(0).toUpperCase() + t.slice(1)
-}
-
-/** Acota la altura de un contenedor (la tabla) al espacio visible hasta el fondo de la
- *  pantalla, para que su barra de scroll horizontal quede SIEMPRE a la vista (fija) sin
- *  tener que bajar la página; la tabla hace scroll vertical propio y el encabezado
- *  queda pegado arriba (sticky). Se reajusta al cambiar el tamaño de la ventana. */
-function useFitTableHeight() {
-  const ref = React.useRef<HTMLDivElement>(null)
-  const [maxH, setMaxH] = React.useState<number>()
-  React.useLayoutEffect(() => {
-    const el = ref.current; if (!el) return
-    const recalc = () => setMaxH(Math.max(260, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 24)))
-    recalc()
-    window.addEventListener('resize', recalc)
-    const scroller = el.closest('.content') as HTMLElement | null
-    const ro = scroller ? new ResizeObserver(recalc) : null
-    if (scroller && ro) ro.observe(scroller)
-    return () => { window.removeEventListener('resize', recalc); ro?.disconnect() }
-  }, [])
-  return { ref, maxH }
 }
 
 /** Nombre del vendedor tolerante a id de vendedor O id de usuario (ventas). */

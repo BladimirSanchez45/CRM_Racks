@@ -7,7 +7,7 @@
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, fmtDate, TODAY_ISO, payCutoff, isAdminRole, isDireccion } from '../../core/data'
 import { signedDocUrl } from '../../core/api'
-import { Modal, Field, Input, TextArea, Select, Seg, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, TextArea, Select, Seg, MoneyInput, Badge, Empty, KPI, Confirm, FileField, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { InternalPayment, InternalPaymentInput, InternalPaymentCategory, InternalPaymentStatus } from '../../core/types'
 
@@ -368,6 +368,7 @@ function InternalPaymentDetail({ payment, onEdit, onClose }: { payment: Internal
 }
 
 export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string | null; onConsumed?: () => void } = {}) {
+  const tabla = useFitTableHeight()
   const { state } = useStore()
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: solo lectura
   const [detail, setDetail] = React.useState<InternalPayment | null>(null)
@@ -442,7 +443,7 @@ export function InternalPaymentsPage({ openId, onConsumed }: { openId?: string |
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr><th>Concepto</th><th>Categoría</th><th>Factura</th><th>Proyecto</th><th>Solicitó</th><th className="num">Monto</th><th>Fecha pago</th><th>Estatus</th></tr></thead>
             <tbody>

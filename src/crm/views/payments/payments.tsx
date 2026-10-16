@@ -3,7 +3,7 @@
 // ============================================================
 import * as React from 'react'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDateShort, TODAY_ISO, isDireccion } from '../../core/data'
-import { Modal, Field, Input, Select, MoneyInput, PaymentBadge, Empty, KPI, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, Select, MoneyInput, PaymentBadge, Empty, KPI, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Payment, PaymentInput, PaymentStatus } from '../../core/types'
 
@@ -84,6 +84,7 @@ function PaymentForm({ payment, onClose, readOnly }: { payment?: Payment; onClos
 }
 
 export function PaymentsPage() {
+  const tabla = useFitTableHeight()
   const { state } = useStore()
   const readOnly = isDireccion(state.currentUser?.role)   // dirección: solo lectura
   const [form, setForm] = React.useState<Payment | {} | null>(null)
@@ -138,7 +139,7 @@ export function PaymentsPage() {
       </div>
 
       <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
+        <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr><th>OC</th><th>Proyecto</th><th className="num">No.</th><th>Fecha</th><th className="num">Importe</th><th className="num">Acumulado</th><th className="num">Saldo</th><th>Método / Ref.</th><th>Estado</th><th>Proveedor</th><th>Comentarios</th></tr></thead>
             <tbody>

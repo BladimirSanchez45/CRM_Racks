@@ -8,7 +8,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, fmtDateShort, daysBetween, MESES, uid, TODAY_ISO } from '../../core/data'
 import { uploadDoc } from '../../core/api'
-import { Modal, Field, Input, Select, FileField, MoneyInput, MoneyCellInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip, useUnsavedGuard } from '../../core/ui'
+import { Modal, Field, Input, Select, FileField, MoneyInput, MoneyCellInput, OCStatus, PaymentBadge, StageBadge, Empty, KPI, Seg, DocChip, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { CobroForm } from '../projects/project_views'
 import { importMaterialsFromExcel } from '../../core/excel'
@@ -796,6 +796,7 @@ function MonthlyChart({ state }: { state: AppState }) {
    Página de Órdenes de Compra
    ============================================================ */
 export function OrdersPage() {
+  const tabla = useFitTableHeight()
   const { state } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
@@ -939,7 +940,7 @@ export function OrdersPage() {
       ) : (
         <>
           {/* KPIs estilo Dashboard del Excel */}
-          <div className="grid grid-cols-5 gap-3.5 mb-4">
+          <div className="grid grid-cols-5 gap-3.5 mb-4 max-[1400px]:grid-cols-3">
             <KPI label={supplierName ? `Total OC · ${supplierName}` : 'Total OC'} value={totalOC} format={fmtMoney} icon="orders" accent foot={supplierName ? `${kpiBase.length} OC` : undefined} />
             <KPI label="Total pagado" value={totalPaid} format={fmtMoney} icon="money" />
             <KPI label={supplierName ? `Adeudo · ${supplierName}` : 'Saldo pendiente'} value={saldo} format={fmtMoney} icon="alert" footTrend="dn" foot={saldo > 0 ? 'Por pagar' : 'Al corriente'} />
@@ -996,7 +997,7 @@ export function OrdersPage() {
           </div>
 
           <div className="card overflow-hidden">
-            <div className="overflow-x-auto">
+            <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
               <table className="tbl">
                 <thead><tr>
                   {selEC && (
@@ -1019,9 +1020,9 @@ export function OrdersPage() {
                     return (
                       <tr key={o.id} onClick={() => selEC ? toggleEC(o.id) : setDetail(o)} title={selEC ? 'Clic para palomear esta OC' : undefined}>
                         {selEC && <td className="w-[30px]"><input type="checkbox" className="cursor-pointer" checked={selEC.has(o.id)} onChange={() => toggleEC(o.id)} onClick={e => e.stopPropagation()} /></td>}
-                        <td><span className="mono text-acc font-semibold">{o.number}</span></td>
-                        <td className="num text-tx-2 text-[12px]">{fmtDateShort(o.date)}</td>
-                        <td className="text-[12.5px]">{supplier ? supplier.name : '—'}</td>
+                        <td className="whitespace-nowrap"><span className="mono text-acc font-semibold">{o.number}</span></td>
+                        <td className="num text-tx-2 text-[12px] whitespace-nowrap">{fmtDateShort(o.date)}</td>
+                        <td className="text-[12.5px] max-w-[200px] truncate" title={supplier?.name}>{supplier ? supplier.name : '—'}</td>
                         <td className="text-tx-1 text-[12px] max-w-[200px] truncate">{ocDesc(state, o)}</td>
                         <td className="text-tx-2 text-[11.5px] max-w-[170px] truncate">{o.conditions}</td>
                         <td className="num">{fmtMoney(o.amount)}</td>

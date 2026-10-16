@@ -398,10 +398,14 @@ export function KPI({ label, value, unit, format, icon, foot, footTrend, accent,
   const display = typeof value === 'number'
     ? (format ? format(animated) : Math.round(animated).toLocaleString('es-MX'))
     : value
+  // Los importes largos ("$26,203,271.80") no caben a 31px en una tarjeta de 5 por fila:
+  // el tamaño baja según el largo del texto en vez de cortarse.
+  const len = String(display).length
+  const size = len > 15 ? 'text-[20px]' : len > 12 ? 'text-[24px]' : ''
   return (
     <div className={'kpi animate-in' + (accent ? ' kpi-accent' : '')} style={{ animationDelay: delay + 'ms' }}>
       <div className="k-label">{label}</div>
-      <div className="k-val">{display}{unit && <span className="unit">{unit}</span>}</div>
+      <div className={'k-val whitespace-nowrap ' + size} title={typeof display === 'string' && len > 12 ? display : undefined}>{display}{unit && <span className="unit">{unit}</span>}</div>
       {foot && <div className="k-foot"><span className={footTrend === 'up' ? 'trend-up' : footTrend === 'dn' ? 'trend-dn' : ''}>{foot}</span></div>}
       {icon && <div className="k-ic"><Icon name={icon} size={22} /></div>}
     </div>
@@ -429,6 +433,30 @@ export function Seg({ value, onChange, options }: {
 /* ---- Empty state ---- */
 export function Empty({ icon = 'box', children }: { icon?: IconName; children: React.ReactNode }) {
   return <div className="empty"><Icon name={icon} size={40} /><div>{children}</div></div>
+}
+
+/* ---- Tabla ajustada a la pantalla ---- */
+/** Acota la altura de un contenedor (la tabla) al espacio visible hasta el fondo de la
+ *  pantalla, para que su barra de scroll horizontal quede SIEMPRE a la vista (fija) sin
+ *  tener que bajar la página; la tabla hace scroll vertical propio y el encabezado
+ *  queda pegado arriba (sticky). Se reajusta al cambiar el tamaño de la ventana.
+ *  Uso: `const tabla = useFitTableHeight()` y
+ *  `<div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>`.
+ *  El contenedor debe renderizarse siempre (la condición de "vacío" va adentro). */
+export function useFitTableHeight() {
+  const ref = React.useRef<HTMLDivElement>(null)
+  const [maxH, setMaxH] = React.useState<number>()
+  React.useLayoutEffect(() => {
+    const el = ref.current; if (!el) return
+    const recalc = () => setMaxH(Math.max(260, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 24)))
+    recalc()
+    window.addEventListener('resize', recalc)
+    const scroller = el.closest('.content') as HTMLElement | null
+    const ro = scroller ? new ResizeObserver(recalc) : null
+    if (scroller && ro) ro.observe(scroller)
+    return () => { window.removeEventListener('resize', recalc); ro?.disconnect() }
+  }, [])
+  return { ref, maxH }
 }
 
 /* ---- Confirm dialog ---- */

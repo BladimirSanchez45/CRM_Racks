@@ -645,11 +645,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const existing = s.commissions.filter(c => c.projectId === proj.id)
       const paid = new Set(existing.filter(c => c.status === 'paid').map(c => c.seller))
       const manual = new Map(existing.filter(c => c.manual && !clearManual?.has(c.id)).map(c => [c.seller, c.amount]))
+      // Cada persona CONSERVA el id de su comisión: se actualiza en vez de borrarla e insertar
+      // otra. `persist` corre las escrituras en paralelo y, con el índice único por proyecto +
+      // persona (step33), el alta podía llegar antes que la baja: error en pantalla y, en el
+      // peor caso, la comisión se perdía. Solo se borran las de personas que ya no aplican.
+      const porPersona = new Map(existing.map(c => [c.seller, c]))
+      const nuevas = buildCommissions(calcState, proj, paid, manual).map(cm => {
+        const prev = porPersona.get(cm.seller)
+        return prev ? { ...cm, id: prev.id } : cm
+      })
+      const vigentes = new Set(nuevas.map(cm => cm.id))
       for (const old of existing) {
+        if (vigentes.has(old.id)) continue
         rawDispatch({ type: 'REMOVE_COMMISSION', id: old.id })
         thunks.push(() => deleteCommission(old.id))
       }
-      for (const cm of buildCommissions(calcState, proj, paid, manual)) {
+      for (const cm of nuevas) {
         rawDispatch({ type: 'UPSERT_COMMISSION', commission: cm })
         thunks.push(() => saveCommission(cm))
       }

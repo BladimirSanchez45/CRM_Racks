@@ -4,7 +4,7 @@
 import * as React from 'react'
 import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion, isIngenieria, isAdminRole } from '../../core/data'
 import type { AppState } from '../../core/types'
-import { StageBadge, Seg, Empty, Badge, Avatar, Select } from '../../core/ui'
+import { StageBadge, Seg, Empty, Badge, Avatar, Select, useFitTableHeight } from '../../core/ui'
 import { ProjectDetail, ProjectForm } from './project_views'
 import { Icon } from '../../core/icons'
 import type { Project, StageId } from '../../core/types'
@@ -122,6 +122,7 @@ const provName = (state: AppState, p: Project) =>
   p.suppliers.map(id => sel.supplier(state, id)?.name).filter(Boolean).join(', ') || 'Sin asignar'
 
 export function ProjectsTable({ projects, onOpen, historial = false }: { projects: Project[]; onOpen: (p: Project) => void; historial?: boolean }) {
+  const tabla = useFitTableHeight()
   const { state } = useStore()
   // En el Historial ordena por defecto por fecha de cierre (lo más reciente arriba).
   const [sort, setSort] = React.useState<{ key: string; dir: number }>(() => historial ? { key: 'closedOn', dir: -1 } : { key: 'updated', dir: -1 })
@@ -171,7 +172,7 @@ export function ProjectsTable({ projects, onOpen, historial = false }: { project
 
   return (
     <div className="card overflow-hidden">
-      <div className="overflow-x-auto">
+      <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
         <table className="tbl">
           <thead>
             <tr>
