@@ -770,12 +770,12 @@ function MonthlyChart({ state }: { state: AppState }) {
   if (rows.length === 0) return <Empty icon="money">Sin pagos</Empty>
   return (
     <div>
-      <div className="flex items-end gap-2 h-[160px] px-1">
+      <div className="flex items-end gap-2 h-[120px] px-1">
         {rows.map(([k, v]) => {
           const [y, m] = k.split('-')
           return (
             <div key={k} className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0">
-              <div className="flex items-end gap-0.5 w-full justify-center" style={{ height: 130 }}>
+              <div className="flex items-end gap-0.5 w-full justify-center" style={{ height: 92 }}>
                 <div title={`Programado ${fmtMoney(v.prog)}`} className="w-[8px] rounded-t-[2px]" style={{ height: `${(v.prog / max) * 100}%`, background: 'var(--st-2)', minHeight: v.prog ? 2 : 0 }}></div>
                 <div title={`Realizado ${fmtMoney(v.paid)}`} className="w-[8px] rounded-t-[2px]" style={{ height: `${(v.paid / max) * 100}%`, background: 'var(--danger)', minHeight: v.paid ? 2 : 0 }}></div>
               </div>
@@ -796,7 +796,8 @@ function MonthlyChart({ state }: { state: AppState }) {
    Página de Órdenes de Compra
    ============================================================ */
 export function OrdersPage() {
-  const tabla = useFitTableHeight()
+  // Arriba van KPIs y dos gráficas: la tabla pide al menos 420 px para no quedar en 4 filas.
+  const tabla = useFitTableHeight(420)
   const { state } = useStore()
   const me = state.currentUser
   const isVentas = me?.role === 'ventas'
@@ -951,7 +952,7 @@ export function OrdersPage() {
           <div className="grid grid-cols-[1fr_1.5fr] gap-4 mb-4">
             <div className="card">
               <div className="card-h"><Icon name="commissions" size={17} className="text-acc" /><span className="ttl">OC por estatus</span></div>
-              <div className="card-b flex flex-col gap-2.5">
+              <div className="card-b flex flex-col gap-1.5">
                 {statusCounts.map(({ s, n }) => (
                   <div key={s} className="flex items-center gap-3 cursor-pointer" onClick={() => setFStatus(fStatus === s ? '' : s)}>
                     <span className="text-[12px] w-[78px] flex-none" style={{ color: STATUS_COLOR[s] }}>{s}</span>
