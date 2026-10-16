@@ -671,14 +671,38 @@ function KitModal({ kit, onClose }: { kit?: InventoryKit; onClose: () => void })
  *  `orden` = cuántas aparecen EN EL MISMO ORDEN (solo desempata). Sin esto,
  *  una parrilla de 46x42 y una de 42x46 puntúan idéntico —las dos palabras
  *  están en el texto— y se elegía por azar. */
+/** ¿`a` y `b` difieren a lo más en un error de dedo? (una letra de más, de menos o cambiada,
+ *  o dos letras volteadas: "nievl" ~ "nivel"). */
+function errorDeDedo(a: string, b: string): boolean {
+  if (a === b) return true
+  if (Math.abs(a.length - b.length) > 1) return false
+  if (a.length === b.length) {
+    const dif = [...a].map((c, i) => (c !== b[i] ? i : -1)).filter(i => i >= 0)
+    if (dif.length === 1) return true
+    return dif.length === 2 && dif[1] === dif[0] + 1 && a[dif[0]] === b[dif[1]] && a[dif[1]] === b[dif[0]]
+  }
+  const [corta, larga] = a.length < b.length ? [a, b] : [b, a]
+  let i = 0, j = 0, saltado = false
+  while (i < corta.length && j < larga.length) {
+    if (corta[i] === larga[j]) { i++; j++ }
+    else if (saltado) return false
+    else { saltado = true; j++ }
+  }
+  return true
+}
+/** ¿La palabra aparece en el texto? Exacta (como subcadena) o, si tiene 4+ letras, con un error de dedo. */
+const hayPalabra = (t: string, heno: string, palabras: string[]) =>
+  heno.includes(t) || (t.length >= 4 && palabras.some(w => errorDeDedo(t, w)))
+
 function coincidencia(tokens: string[], heno: string) {
+  const palabras = heno.split(' ')
   // La PRIMERA palabra del nombre es la que dice qué es (marco, viga, charola, nivel): si no
   // aparece, no hay coincidencia aunque el resto sí. Sin esto, "Marco Mini · minirack estándar"
   // atrapaba la partida "NIVEL · MINIRACK · ESTANDAR" por las palabras de la descripción.
-  if (!tokens.length || !heno.includes(tokens[0])) return { score: 0, orden: 0 }
+  if (!tokens.length || !hayPalabra(tokens[0], heno, palabras)) return { score: 0, orden: 0 }
   let sueltas = 0, enOrden = 0, pos = 0
   for (const t of tokens) {
-    if (heno.includes(t)) sueltas++
+    if (hayPalabra(t, heno, palabras)) sueltas++
     const i = heno.indexOf(t, pos)
     if (i >= 0) { enOrden++; pos = i + t.length }
   }
