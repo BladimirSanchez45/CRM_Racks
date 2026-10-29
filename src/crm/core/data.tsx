@@ -330,6 +330,7 @@ const initial: AppState = {
   settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {}, salesGoalsPersonal: {} },
   activity: [], notifications: [],
   users: [], currentUser: null,   // todo se carga desde Supabase tras el login
+  dataWarnings: [],
 }
 
 /* Helpers de fecha/usuario para las acciones. */

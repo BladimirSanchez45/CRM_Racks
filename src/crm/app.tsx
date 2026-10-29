@@ -301,6 +301,13 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
           </button>
           <NotificationsBell onOpenProject={onOpenProject} onOpenInternalPayment={(id) => { setRoute('internal_payments'); setOpenIPId(id) }} onOpenMovements={(id) => { setRoute('movements'); setOpenMovId(id) }} onOpenClients={() => setRoute('clients')} onOpenVacaciones={() => setRoute('vacaciones')} />
         </header>
+        {/* Franja roja si alguna tabla llegó incompleta desde Supabase: con datos a medias
+            NO se debe pagar ni recalcular nada. Se ve para todos los roles. */}
+        {state.dataWarnings?.length > 0 && (
+          <div role="alert" className="px-5 py-2.5 text-[13px] font-semibold" style={{ background: 'var(--danger)', color: '#fff' }}>
+            ⚠ Datos incompletos: {state.dataWarnings.join(' · ')}. Recarga la página; si el aviso sigue, no pagues comisiones y avisa al administrador.
+          </div>
+        )}
         <main className="content blueprint">
           <div className="content-inner" key={route}>{page()}</div>
         </main>

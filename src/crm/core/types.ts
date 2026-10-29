@@ -838,6 +838,9 @@ export interface AppState {
   notifications: Notification[]
   users: User[]
   currentUser: User | null
+  /** Avisos de carga INCOMPLETA (la base reporta más filas de las que llegaron).
+   *  Vacío = todo cargó completo. La app los muestra en una franja roja. */
+  dataWarnings: string[]
 }
 
 // ---- Payloads de creación/edición (el reducer rellena id/fechas) ----

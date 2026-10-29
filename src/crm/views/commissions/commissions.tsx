@@ -60,6 +60,30 @@ export function CommissionsPage() {
   // Repone comisiones perdidas y empareja importes; no toca pagadas ni ajustadas a mano.
   const canRecalcMonth = isAdminRole(state.currentUser?.role) && month !== 'all'
   const monthProjects = month === 'all' ? [] : state.projects.filter(p => p.stage === 'finalizado' && (p.closedOn || '').slice(0, 7) === month)
+  // VERIFICACIÓN del mes, visible para quien paga: por cada proyecto cerrado del mes,
+  // ¿están todas las comisiones que deben existir (vendedor + cada override) y las
+  // no ajustadas / no pagadas coinciden con la fórmula actual? Lo que falle se lista
+  // aquí mismo; no hace falta revisar la base ni la consola.
+  type Issue = { code: string; faltan: string[]; desfasadas: string[] }
+  const issues: Issue[] = monthProjects.flatMap(p => {
+    const rows = state.commissions.filter(c => c.projectId === p.id)
+    const base = sel.projectComisionBase(state, p)
+    const nameOf = (id: string) => sel.seller(state, id)?.name || state.users.find(u => u.id === id)?.name || id
+    const expected: { id: string; rate: number }[] = [
+      // Mismo criterio que buildCommissions: vendedor fuera del catálogo → 4 %.
+      { id: p.seller, rate: sel.seller(state, p.seller)?.rate ?? 0.04 },
+      ...state.sellers.filter(v => (v.overrideRate ?? 0) > 0 && v.id !== p.seller).map(v => ({ id: v.id, rate: v.overrideRate! })),
+    ]
+    const faltan: string[] = [], desfasadas: string[] = []
+    for (const e of expected) {
+      const r = rows.find(c => c.seller === e.id)
+      if (!r) { faltan.push(nameOf(e.id)); continue }
+      if (!r.manual && r.status !== 'paid' && r.amount !== Math.round(base * e.rate)) desfasadas.push(nameOf(e.id))
+    }
+    return faltan.length || desfasadas.length ? [{ code: p.code, faltan, desfasadas }] : []
+  })
+  const okCount = monthProjects.length - issues.length
+
   const recalcMonth = () => {
     if (!monthProjects.length) { alert(`No hay proyectos cerrados en ${monthLabel(month)}.`); return }
     const ok = confirm(`¿Recalcular las comisiones de ${monthLabel(month)}?\n\n` +
@@ -89,6 +113,36 @@ export function CommissionsPage() {
         <div className="kpi"><div className="k-label">Pendiente de pago</div><div className="k-val text-[26px] text-warn">{fmtMoney(totalPending)}</div><div className="k-foot">{monthRows.filter(r=>r.status==='pending').length} comisiones</div></div>
         <div className="kpi"><div className="k-label">Pagado</div><div className="k-val text-[26px] text-ok">{fmtMoney(totalPaid)}</div><div className="k-foot">{monthRows.filter(r=>r.status==='paid').length} comisiones</div></div>
       </div>
+
+      {/* Verificación del mes: se recalcula cada vez que cambian los datos. */}
+      {month !== 'all' && monthProjects.length > 0 && (
+        issues.length === 0 ? (
+          <div className="mb-5 px-4 py-2.5 rounded-lg text-[12.5px] inline-flex items-center gap-2" style={{ background: 'color-mix(in srgb, var(--ok) 12%, transparent)', color: 'var(--ok)', border: '1px solid color-mix(in srgb, var(--ok) 35%, transparent)' }}>
+            <Icon name="check" size={14} /> Verificado: los {monthProjects.length} proyectos cerrados en {monthLabel(month)} tienen todas sus comisiones y los importes cuadran con la fórmula.
+          </div>
+        ) : (
+          <div className="card mb-5" style={{ borderColor: 'var(--warn)' }}>
+            <div className="card-h">
+              <Icon name="commissions" size={17} style={{ color: 'var(--warn)' }} />
+              <span className="ttl">Revisar antes de pagar · {issues.length} de {monthProjects.length} proyectos con diferencias{okCount > 0 ? ` (${okCount} correctos)` : ''}</span>
+              <span className="flex-1"></span>
+              {canRecalcMonth && <button className="btn btn-sm btn-primary" onClick={recalcMonth}><Icon name="commissions" size={13} /> Recalcular mes</button>}
+            </div>
+            <div className="px-4 py-3 text-[12.5px]">
+              <div className="meta mb-2">"Falta" = la persona debería tener comisión en ese proyecto y no existe. "Desfasada" = el importe no coincide con la fórmula actual y no está ajustada ni pagada. "Recalcular mes" corrige ambas.</div>
+              <ul className="m-0 pl-4" style={{ listStyle: 'disc' }}>
+                {issues.map(i => (
+                  <li key={i.code} className="mb-1">
+                    <span className="mono text-acc font-semibold">{i.code}</span>
+                    {i.faltan.length > 0 && <span> · falta: {i.faltan.join(', ')}</span>}
+                    {i.desfasadas.length > 0 && <span> · desfasada: {i.desfasadas.join(', ')}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        )
+      )}
 
       <div className="card overflow-hidden">
         <div className="card-h">

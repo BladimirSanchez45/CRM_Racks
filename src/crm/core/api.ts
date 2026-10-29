@@ -196,19 +196,38 @@ const orNull = (v?: string) => (v && v.trim() ? v : null)
  *  rechazadas y "comisiones perdidas" (después). Orden determinista (+ desempate por
  *  `tie`) para que las páginas no se traslapen. */
 const PAGE_SIZE = 1000
-async function selectAll(table: string, order?: { column: string; ascending?: boolean }, tie: string = 'id'): Promise<any[]> {
+async function selectAll(
+  table: string,
+  order?: { column: string; ascending?: boolean },
+  tie: string = 'id',
+  opts?: { columns?: string; filter?: (q: any) => any },
+): Promise<any[]> {
   const rows: any[] = []
+  let expected: number | null = null
   for (let from = 0; ; from += PAGE_SIZE) {
-    let q = supabase.from(table).select('*')
+    // La primera página pide también el conteo exacto: sirve de autocomprobación.
+    let q: any = supabase.from(table).select(opts?.columns ?? '*', from === 0 ? { count: 'exact' } : undefined)
+    if (opts?.filter) q = opts.filter(q)
     if (order) q = q.order(order.column, { ascending: order.ascending ?? true })
     if (!order || order.column !== tie) q = q.order(tie, { ascending: true })
-    const { data, error } = await q.range(from, from + PAGE_SIZE - 1)
+    const { data, error, count } = await q.range(from, from + PAGE_SIZE - 1)
     if (error) throw error
+    if (from === 0 && typeof count === 'number') expected = count
     const page = data ?? []
     rows.push(...page)
-    if (page.length < PAGE_SIZE) return rows
+    if (page.length < PAGE_SIZE) break
   }
+  // Si la base dice que hay más filas de las que llegaron, algo se quedó fuera: que se note
+  // en la consola Y en pantalla (loadAll entrega `dataWarnings` al estado y la app lo muestra).
+  if (expected != null && rows.length < expected) {
+    const msg = `${table}: la base tiene ${expected} filas y el CRM solo cargó ${rows.length}`
+    console.error('[supabase] ' + msg)
+    dataWarnings.push(msg)
+  }
+  return rows
 }
+/** Avisos de carga incompleta detectados por selectAll en la última carga. */
+const dataWarnings: string[] = []
 async function upsert(table: string, row: Record<string, unknown>): Promise<void> {
   const { error } = await supabase.from(table).upsert(row)
   if (error) throw error
@@ -804,9 +823,12 @@ export const fetchInvKits = (): Promise<InventoryKit[]> => sinTabla(async () => 
 /** OC que ya tienen salida en el kardex. Se consulta aparte porque el kardex solo se carga
  *  acotado a los últimos movimientos y, con el tiempo, el consumo viejo quedaría fuera. */
 export const fetchInvConsumedOrders = (): Promise<string[]> => sinTabla(async () => {
-  const { data, error } = await supabase.from('inventory_moves').select('order_id').eq('motivo', 'Salida a proyecto').not('order_id', 'is', null)
-  if (error) throw error
-  return [...new Set((data ?? []).map((r: any) => String(r.order_id)))]
+  // Paginado: el consumo crece sin límite y una sola consulta se corta en 1000 filas.
+  const data = await selectAll('inventory_moves', undefined, 'id', {
+    columns: 'id, order_id',
+    filter: q => q.eq('motivo', 'Salida a proyecto').not('order_id', 'is', null),
+  })
+  return [...new Set(data.map((r: any) => String(r.order_id)))]
 }, 'inventory_moves')
 export const saveInvKit = (k: InventoryKit) => upsert('inventory_kits', invKitRow(k))
 export const deleteInvKit = (id: string) => removeRow('inventory_kits', id)
@@ -1156,6 +1178,7 @@ export async function deleteDoc(path: string): Promise<void> {
 
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
+  dataWarnings.length = 0
   const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
@@ -1165,5 +1188,5 @@ export async function loadAll(): Promise<Partial<AppState>> {
       fetchEmployees(), fetchVacEntitlements(), fetchVacRequests(),
       fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications, dataWarnings: [...dataWarnings] }
 }
