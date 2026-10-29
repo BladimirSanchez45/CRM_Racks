@@ -72,15 +72,13 @@ function mapSupplier(r: any): Supplier {
 
 /** Trae todos los clientes ordenados por nombre. */
 export async function fetchClients(): Promise<Client[]> {
-  const { data, error } = await supabase.from('clients').select('*').order('name')
-  if (error) throw error
+  const data = await selectAll('clients', { column: 'name' })
   return (data ?? []).map(mapClient)
 }
 
 /** Trae todos los proveedores ordenados por nombre. */
 export async function fetchSuppliers(): Promise<Supplier[]> {
-  const { data, error } = await supabase.from('suppliers').select('*').order('name')
-  if (error) throw error
+  const data = await selectAll('suppliers', { column: 'name' })
   return (data ?? []).map(mapSupplier)
 }
 
@@ -136,8 +134,7 @@ export async function fetchMyProfile(): Promise<User | null> {
 
 /** Lista de usuarios (para el panel de administración). */
 export async function fetchUsers(): Promise<User[]> {
-  const { data, error } = await supabase.from('users').select('*').order('name')
-  if (error) throw error
+  const data = await selectAll('users', { column: 'name' })
   return (data ?? []).map(mapUser)
 }
 
@@ -191,6 +188,27 @@ export async function impersonateUser(id: string): Promise<void> {
 
 const orNull = (v?: string) => (v && v.trim() ? v : null)
 
+/** Lee TODAS las filas de una tabla, por páginas de 1000.
+ *  Supabase (PostgREST, max-rows) corta cada consulta en 1000 filas y NO avisa: sin
+ *  paginar, las tablas que crecen llegaban incompletas al front (comisiones ya pasa de
+ *  1300). El recálculo de comisiones trabajaba a ciegas con las filas que faltaban:
+ *  creaba otras con id nuevo → duplicados (antes del índice único) o escrituras
+ *  rechazadas y "comisiones perdidas" (después). Orden determinista (+ desempate por
+ *  `tie`) para que las páginas no se traslapen. */
+const PAGE_SIZE = 1000
+async function selectAll(table: string, order?: { column: string; ascending?: boolean }, tie: string = 'id'): Promise<any[]> {
+  const rows: any[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let q = supabase.from(table).select('*')
+    if (order) q = q.order(order.column, { ascending: order.ascending ?? true })
+    if (!order || order.column !== tie) q = q.order(tie, { ascending: true })
+    const { data, error } = await q.range(from, from + PAGE_SIZE - 1)
+    if (error) throw error
+    const page = data ?? []
+    rows.push(...page)
+    if (page.length < PAGE_SIZE) return rows
+  }
+}
 async function upsert(table: string, row: Record<string, unknown>): Promise<void> {
   const { error } = await supabase.from(table).upsert(row)
   if (error) throw error
@@ -205,8 +223,7 @@ function mapSeller(r: any): Seller {
   return { id: r.id, name: r.name ?? '', initials: r.initials ?? '', rate: Number(r.rate ?? 0), overrideRate: Number(r.override_rate ?? 0) }
 }
 export async function fetchSellers(): Promise<Seller[]> {
-  const { data, error } = await supabase.from('sellers').select('*').order('name')
-  if (error) throw error
+  const data = await selectAll('sellers', { column: 'name' })
   return (data ?? []).map(mapSeller)
 }
 export const saveSeller = (s: Seller) =>
@@ -272,8 +289,7 @@ function projectRow(p: Project): Record<string, unknown> {
   }
 }
 export async function fetchProjects(): Promise<Project[]> {
-  const { data, error } = await supabase.from('projects').select('*').order('created', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('projects', { column: 'created', ascending: false })
   return (data ?? []).map(mapProject)
 }
 export const saveProject = (p: Project) => upsert('projects', projectRow(p))
@@ -305,8 +321,7 @@ function orderRow(o: Order): Record<string, unknown> {
   }
 }
 export async function fetchOrders(): Promise<Order[]> {
-  const { data, error } = await supabase.from('orders').select('*').order('date', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('orders', { column: 'date', ascending: false })
   return (data ?? []).map(mapOrder)
 }
 export const saveOrder = (o: Order) => upsert('orders', orderRow(o))
@@ -326,8 +341,7 @@ function paymentRow(p: Payment): Record<string, unknown> {
   }
 }
 export async function fetchPayments(): Promise<Payment[]> {
-  const { data, error } = await supabase.from('payments').select('*')
-  if (error) throw error
+  const data = await selectAll('payments')
   return (data ?? []).map(mapPayment)
 }
 export const savePayment = (p: Payment) => upsert('payments', paymentRow(p))
@@ -350,8 +364,7 @@ function clientPaymentRow(c: ClientPayment): Record<string, unknown> {
   }
 }
 export async function fetchClientPayments(): Promise<ClientPayment[]> {
-  const { data, error } = await supabase.from('client_payments').select('*')
-  if (error) throw error
+  const data = await selectAll('client_payments')
   return (data ?? []).map(mapClientPayment)
 }
 export const saveClientPayment = (c: ClientPayment) => upsert('client_payments', clientPaymentRow(c))
@@ -365,8 +378,7 @@ function mapCommission(r: any): Commission {
   }
 }
 export async function fetchCommissions(): Promise<Commission[]> {
-  const { data, error } = await supabase.from('commissions').select('*')
-  if (error) throw error
+  const data = await selectAll('commissions')
   return (data ?? []).map(mapCommission)
 }
 export const saveCommission = (c: Commission) =>
@@ -395,8 +407,7 @@ function remisionRow(r: Remision): Record<string, unknown> {
   }
 }
 export async function fetchRemisiones(): Promise<Remision[]> {
-  const { data, error } = await supabase.from('remisiones').select('*').order('date', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('remisiones', { column: 'date', ascending: false })
   return (data ?? []).map(mapRemision)
 }
 export const saveRemision = (r: Remision) => upsert('remisiones', remisionRow(r))
@@ -440,8 +451,7 @@ function internalPaymentRow(p: InternalPayment): Record<string, unknown> {
   }
 }
 export async function fetchInternalPayments(): Promise<InternalPayment[]> {
-  const { data, error } = await supabase.from('internal_payments').select('*').order('created_at', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('internal_payments', { column: 'created_at', ascending: false })
   return (data ?? []).map(mapInternalPayment)
 }
 export const saveInternalPayment = (p: InternalPayment) => upsert('internal_payments', internalPaymentRow(p))
@@ -471,8 +481,7 @@ function movementListRow(l: MovementList): Record<string, unknown> {
   }
 }
 export async function fetchMovementLists(): Promise<MovementList[]> {
-  const { data, error } = await supabase.from('movement_lists').select('*').order('date', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('movement_lists', { column: 'date', ascending: false })
   return (data ?? []).map(mapMovementList)
 }
 export const saveMovementList = (l: MovementList) => upsert('movement_lists', movementListRow(l))
@@ -502,8 +511,7 @@ function movementRow(m: Movement): Record<string, unknown> {
   }
 }
 export async function fetchMovements(): Promise<Movement[]> {
-  const { data, error } = await supabase.from('movements').select('*').order('date', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('movements', { column: 'date', ascending: false })
   return (data ?? []).map(mapMovement)
 }
 export const saveMovement = (m: Movement) => upsert('movements', movementRow(m))
@@ -525,8 +533,7 @@ function campaignRow(c: Campaign): Record<string, unknown> {
   }
 }
 export async function fetchCampaigns(): Promise<Campaign[]> {
-  const { data, error } = await supabase.from('campaigns').select('*').order('created_at', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('campaigns', { column: 'created_at', ascending: false })
   return (data ?? []).map(mapCampaign)
 }
 export const saveCampaign = (c: Campaign) => upsert('campaigns', campaignRow(c))
@@ -555,17 +562,19 @@ function bankTxRow(t: BankTransaction): Record<string, unknown> {
   }
 }
 export async function fetchBankTxs(): Promise<BankTransaction[]> {
-  const { data, error } = await supabase.from('bank_transactions').select('*').order('date', { ascending: false })
-  if (error) {
+  let data: any[]
+  try {
+    data = await selectAll('bank_transactions', { column: 'date', ascending: false })
+  } catch (error: any) {
     // Si todavía no se corrió step28_bancos.sql (tabla inexistente), no tumbar la carga
     // de TODA la app: Bancos simplemente arranca vacío y se avisa en consola.
-    if (error.code === 'PGRST205' || /bank_transactions/.test(error.message ?? '')) {
-      console.warn('[supabase] Falta la tabla bank_transactions (corre database/step28_bancos.sql):', error.message)
+    if (error?.code === 'PGRST205' || /bank_transactions/.test(error?.message ?? '')) {
+      console.warn('[supabase] Falta la tabla bank_transactions (corre database/step28_bancos.sql):', error?.message)
       return []
     }
     throw error
   }
-  return (data ?? []).map(mapBankTx)
+  return data.map(mapBankTx)
 }
 export const saveBankTx = (t: BankTransaction) => upsert('bank_transactions', bankTxRow(t))
 /** Inserta en lote; los renglones cuyo hash ya exista se ignoran (dedupe a nivel base). */
@@ -601,15 +610,17 @@ function cfdiRow(d: CfdiDoc): Record<string, unknown> {
   }
 }
 export async function fetchCfdiDocs(): Promise<CfdiDoc[]> {
-  const { data, error } = await supabase.from('cfdi_docs').select('*').order('created_at', { ascending: true })
-  if (error) {
-    if (error.code === 'PGRST205' || /cfdi_docs/.test(error.message ?? '')) {
-      console.warn('[supabase] Falta la tabla cfdi_docs (corre database/step29_cfdi.sql):', error.message)
+  let data: any[]
+  try {
+    data = await selectAll('cfdi_docs', { column: 'created_at' })
+  } catch (error: any) {
+    if (error?.code === 'PGRST205' || /cfdi_docs/.test(error?.message ?? '')) {
+      console.warn('[supabase] Falta la tabla cfdi_docs (corre database/step29_cfdi.sql):', error?.message)
       return []
     }
     throw error
   }
-  return (data ?? []).map(mapCfdi)
+  return data.map(mapCfdi)
 }
 export const saveCfdiDoc = (d: CfdiDoc) => upsert('cfdi_docs', cfdiRow(d))
 export const deleteCfdiDoc = (id: string) => removeRow('cfdi_docs', id)
@@ -642,8 +653,7 @@ function agendaEventRow(e: AgendaEvent): Record<string, unknown> {
   }
 }
 export async function fetchAgendaEvents(): Promise<AgendaEvent[]> {
-  const { data, error } = await supabase.from('agenda_events').select('*').order('date', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('agenda_events', { column: 'date', ascending: false })
   return (data ?? []).map(mapAgendaEvent)
 }
 export const saveAgendaEvent = (e: AgendaEvent) => upsert('agenda_events', agendaEventRow(e))
@@ -673,8 +683,7 @@ function warehouseItemRow(w: WarehouseItem): Record<string, unknown> {
   }
 }
 export async function fetchWarehouse(): Promise<WarehouseItem[]> {
-  const { data, error } = await supabase.from('warehouse_queue').select('*').order('position', { ascending: true })
-  if (error) throw error
+  const data = await selectAll('warehouse_queue', { column: 'position' })
   return (data ?? []).map(mapWarehouseItem)
 }
 export const saveWarehouseItem = (w: WarehouseItem) => upsert('warehouse_queue', warehouseItemRow(w))
@@ -750,14 +759,12 @@ function invMoveRow(m: InventoryMove): Record<string, unknown> {
   }
 }
 export const fetchInvFamilies = (): Promise<InventoryFamily[]> => sinTabla(async () => {
-  const { data, error } = await supabase.from('inventory_families').select('*').order('position', { ascending: true })
-  if (error) throw error
+  const data = await selectAll('inventory_families', { column: 'position' })
   return (data ?? []).map(mapInvFamily)
 }, 'inventory_families')
 
 export const fetchInvItems = (): Promise<InventoryItem[]> => sinTabla(async () => {
-  const { data, error } = await supabase.from('inventory_items').select('*')
-  if (error) throw error
+  const data = await selectAll('inventory_items')
   return (data ?? []).map(mapInvItem)
 }, 'inventory_items')
 
@@ -791,8 +798,7 @@ function invKitRow(k: InventoryKit): Record<string, unknown> {
   return { id: k.id, name: k.name, components: k.components ?? [], position: k.position }
 }
 export const fetchInvKits = (): Promise<InventoryKit[]> => sinTabla(async () => {
-  const { data, error } = await supabase.from('inventory_kits').select('*').order('position', { ascending: true })
-  if (error) throw error
+  const data = await selectAll('inventory_kits', { column: 'position' })
   return (data ?? []).map(mapInvKit)
 }, 'inventory_kits')
 /** OC que ya tienen salida en el kardex. Se consulta aparte porque el kardex solo se carga
@@ -860,18 +866,15 @@ function vacRequestRow(v: VacationRequest): Record<string, unknown> {
   }
 }
 export const fetchEmployees = (): Promise<Employee[]> => sinTabla(async () => {
-  const { data, error } = await supabase.from('employees').select('*').order('name')
-  if (error) throw error
+  const data = await selectAll('employees', { column: 'name' })
   return (data ?? []).map(mapEmployee)
 }, 'employees')
 export const fetchVacEntitlements = (): Promise<VacationEntitlement[]> => sinTabla(async () => {
-  const { data, error } = await supabase.from('vacation_entitlements').select('*').order('created_at', { ascending: true })
-  if (error) throw error
+  const data = await selectAll('vacation_entitlements', { column: 'created_at' })
   return (data ?? []).map(mapVacEntitlement)
 }, 'vacation_entitlements')
 export const fetchVacRequests = (): Promise<VacationRequest[]> => sinTabla(async () => {
-  const { data, error } = await supabase.from('vacation_requests').select('*').order('created_at', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('vacation_requests', { column: 'created_at', ascending: false })
   return (data ?? []).map(mapVacRequest)
 }, 'vacation_requests')
 export const saveEmployee = (e: Employee) => upsert('employees', employeeRow(e))
@@ -937,8 +940,7 @@ function prospectRow(p: Prospect): Record<string, unknown> {
   }
 }
 export async function fetchProspects(): Promise<Prospect[]> {
-  const { data, error } = await supabase.from('prospects').select('*').order('created_at', { ascending: false })
-  if (error) throw error
+  const data = await selectAll('prospects', { column: 'created_at', ascending: false })
   return (data ?? []).map(mapProspect)
 }
 export const saveProspect = (p: Prospect) => upsert('prospects', prospectRow(p))
@@ -946,8 +948,7 @@ export const deleteProspect = (id: string) => removeRow('prospects', id)
 
 /* ---- Configuración global (clave/valor) — p. ej. saldo bancario ---- */
 export async function fetchSettings(): Promise<AppSettings> {
-  const { data, error } = await supabase.from('app_settings').select('*')
-  if (error) throw error
+  const data = await selectAll('app_settings', undefined, 'key')
   const map = Object.fromEntries((data ?? []).map((r: any) => [r.key, r.value]))
   const wh = map['wh_days'] as Partial<Record<'S' | 'M' | 'L', unknown>> | undefined
   return {
