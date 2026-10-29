@@ -341,15 +341,17 @@ const whoName = (s: AppState) => s.currentUser?.name ?? 'Sistema'
 /** Construye las comisiones de un proyecto finalizado según el estado ACTUAL:
  *  - principal: el % del vendedor del proyecto sobre la base (utilidad sin IVA).
  *  - override: el % de cada persona con override > 0 que NO sea el vendedor.
- *  `paid` (ids de beneficiarios ya pagados) preserva ese estado al recalcular.
+ *  `paid` (beneficiario → importe YA PAGADO) preserva el estado "pagada" y congela ese
+ *  importe: dinero entregado no se reescribe aunque cambie la utilidad.
  *  `manual` (beneficiario → importe fijado por Dirección/Admin) gana sobre la fórmula. */
-function buildCommissions(s: AppState, proj: Project, paid?: Set<string>, manual?: Map<string, number>): Commission[] {
+function buildCommissions(s: AppState, proj: Project, paid?: Map<string, number>, manual?: Map<string, number>): Commission[] {
   // Base = utilidad sin IVA (subtotal de venta − subtotal de compras/gastos).
   const base = sel.projectComisionBase(s, proj)
   const month = curMonth()
   const seller = s.sellers.find(x => x.id === proj.seller)
-  // Importe = el ajustado a mano si existe; si no, la fórmula.
-  const amountFor = (id: string, calc: number) => (manual?.has(id) ? manual.get(id)! : calc)
+  // Importe = el ajustado a mano si existe; si no, el ya pagado; si no, la fórmula.
+  const amountFor = (id: string, calc: number) =>
+    manual?.has(id) ? manual.get(id)! : paid?.has(id) ? paid.get(id)! : calc
   const list: Commission[] = [{
     id: uid('cm'), projectId: proj.id, seller: proj.seller,
     amount: amountFor(proj.seller, Math.round(base * (seller ? seller.rate : 0.04))),
@@ -636,14 +638,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   // dispatch PÚBLICO: aplica el cambio localmente (optimista) y lo persiste.
   const dispatch = React.useCallback((action: Action) => {
     const s = stateRef.current
-    // Recalcula las comisiones de un proyecto: borra las viejas y crea nuevas según el
-    // estado actual (vendedor, utilidad, overrides), preservando "pagada" por beneficiario
-    // y los importes AJUSTADOS A MANO por Dirección/Admin.
+    // Recalcula las comisiones de un proyecto según el estado actual (vendedor, utilidad,
+    // overrides), preservando por beneficiario las PAGADAS (estado e importe: dinero ya
+    // entregado no se reescribe) y los importes AJUSTADOS A MANO por Dirección/Admin.
     // `calcState` permite calcular con datos recién modificados (p. ej. la OC nueva).
     // `clearManual` (ids) descarta esos ajustes manuales y devuelve la fórmula.
-    const regenCommissions = (proj: Project, thunks: (() => Promise<void>)[], calcState: AppState = s, clearManual?: Set<string>) => {
+    // Devuelve cuántas filas cambiaron realmente (las iguales no se reescriben).
+    const regenCommissions = (proj: Project, thunks: (() => Promise<void>)[], calcState: AppState = s, clearManual?: Set<string>): number => {
       const existing = s.commissions.filter(c => c.projectId === proj.id)
-      const paid = new Set(existing.filter(c => c.status === 'paid').map(c => c.seller))
+      const paid = new Map(existing.filter(c => c.status === 'paid').map(c => [c.seller, c.amount]))
       const manual = new Map(existing.filter(c => c.manual && !clearManual?.has(c.id)).map(c => [c.seller, c.amount]))
       // Cada persona CONSERVA el id de su comisión: se actualiza en vez de borrarla e insertar
       // otra. `persist` corre las escrituras en paralelo y, con el índice único por proyecto +
@@ -655,15 +658,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         return prev ? { ...cm, id: prev.id } : cm
       })
       const vigentes = new Set(nuevas.map(cm => cm.id))
+      let cambios = 0
       for (const old of existing) {
         if (vigentes.has(old.id)) continue
         rawDispatch({ type: 'REMOVE_COMMISSION', id: old.id })
         thunks.push(() => deleteCommission(old.id))
+        cambios++
       }
       for (const cm of nuevas) {
+        // Sin cambio real (mismo importe, estado y ajuste): no se reescribe. Así el
+        // recálculo masivo del mes solo toca las filas que de verdad difieren.
+        const prev = porPersona.get(cm.seller)
+        if (prev && prev.amount === cm.amount && prev.status === cm.status && !!prev.manual === !!cm.manual) continue
         rawDispatch({ type: 'UPSERT_COMMISSION', commission: cm })
         thunks.push(() => saveCommission(cm))
+        cambios++
       }
+      return cambios
     }
     switch (action.type) {
       case 'HYDRATE': rawDispatch(action); return
@@ -927,6 +938,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (!proj || proj.stage !== 'finalizado') return
         const thunks: (() => Promise<void>)[] = []
         regenCommissions(proj, thunks)
+        persist(thunks); return
+      }
+      // Admin: recalcula las comisiones de TODOS los proyectos finalizados cuyo cierre
+      // (closedOn) cae en el mes 'YYYY-MM'. Repone filas perdidas y empareja importes;
+      // respeta pagadas y ajustes manuales. Solo escribe las filas que cambian.
+      case 'RECALC_COMMISSIONS_MONTH': {
+        if (!isAdminRole(s.currentUser?.role)) return
+        const projs = s.projects.filter(p => p.stage === 'finalizado' && (p.closedOn || '').slice(0, 7) === action.month)
+        if (!projs.length) return
+        const thunks: (() => Promise<void>)[] = []
+        let cambios = 0
+        for (const proj of projs) cambios += regenCommissions(proj, thunks)
+        const [y, m] = action.month.split('-')
+        const mesLabel = `${MESES_L[Number(m) - 1] ?? m} ${y}`
+        const activity: Activity = {
+          id: uid('a'), t: nowISO(), icon: 'commissions', who: whoName(s),
+          txt: `recalculó las comisiones de ${mesLabel}`, tgt: `${projs.length} proyectos · ${cambios} cambios`, kind: 'money',
+        }
+        rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+        thunks.push(() => saveActivity(activity))
         persist(thunks); return
       }
       // Dirección/Admin fijan el total a pagar de las comisiones PENDIENTES de una persona.

@@ -2,7 +2,7 @@
 //  COMMISSIONS — finalized projects this month, seller, paid/pending
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, splitTotal, MESES_L, TODAY_ISO, isDireccion, canEditCommissionAmount } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtMoney2, fmtDate, splitTotal, MESES_L, TODAY_ISO, isDireccion, isAdminRole, canEditCommissionAmount } from '../../core/data'
 import { Badge, Avatar, Empty, Seg, Select, Modal, Field, Input } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import type { Commission, Project } from '../../core/types'
@@ -56,14 +56,32 @@ export function CommissionsPage() {
   // Marca como pagadas todas las pendientes de una persona.
   const markGroupPaid = (g: Group) => g.items.filter(r => r.status === 'pending').forEach(r => dispatch({ type: 'TOGGLE_COMMISSION', id: r.id }))
 
+  // Recalcular TODO el mes (admin): proyectos finalizados cuyo cierre cae en el mes elegido.
+  // Repone comisiones perdidas y empareja importes; no toca pagadas ni ajustadas a mano.
+  const canRecalcMonth = isAdminRole(state.currentUser?.role) && month !== 'all'
+  const monthProjects = month === 'all' ? [] : state.projects.filter(p => p.stage === 'finalizado' && (p.closedOn || '').slice(0, 7) === month)
+  const recalcMonth = () => {
+    if (!monthProjects.length) { alert(`No hay proyectos cerrados en ${monthLabel(month)}.`); return }
+    const ok = confirm(`¿Recalcular las comisiones de ${monthLabel(month)}?\n\n` +
+      `Se revisarán ${monthProjects.length} proyectos finalizados: se reponen comisiones faltantes y se ` +
+      `actualizan los importes con la utilidad actual. Las comisiones PAGADAS y las AJUSTADAS a mano no se modifican.`)
+    if (ok) dispatch({ type: 'RECALC_COMMISSIONS_MONTH', month })
+  }
+
   return (
     <div>
       <div className="spread mb-[18px]">
         <div className="sec-title m-0"><h2>Comisiones</h2><span className="sub">{month === 'all' ? 'Todos los meses' : monthLabel(month)}</span></div>
-        <Select value={month} onChange={e => setMonth(e.target.value)} className="w-auto min-w-[170px]">
-          {monthOptions.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
-          <option value="all">Todos los meses</option>
-        </Select>
+        <span className="inline-flex items-center gap-2">
+          {canRecalcMonth && (
+            <button className="btn btn-ghost" title="Vuelve a calcular las comisiones de todos los proyectos cerrados en este mes (respeta pagadas y ajustadas)"
+              onClick={recalcMonth}><Icon name="commissions" size={15} /> Recalcular mes</button>
+          )}
+          <Select value={month} onChange={e => setMonth(e.target.value)} className="w-auto min-w-[170px]">
+            {monthOptions.map(m => <option key={m} value={m}>{monthLabel(m)}</option>)}
+            <option value="all">Todos los meses</option>
+          </Select>
+        </span>
       </div>
 
       <div className="grid grid-cols-3 gap-3.5 mb-5">

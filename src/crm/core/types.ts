@@ -957,6 +957,9 @@ export type Action =
   | { type: 'DELETE_CLIENT'; id: string }
   | { type: 'TOGGLE_COMMISSION'; id: string }
   | { type: 'RECALC_COMMISSIONS'; id: string }   // recalcula las comisiones de un proyecto finalizado
+  // Admin: recalcula las comisiones de TODOS los proyectos cerrados en el mes 'YYYY-MM'
+  // (repone filas perdidas y empareja importes; respeta pagadas y ajustes manuales).
+  | { type: 'RECALC_COMMISSIONS_MONTH'; month: string }
   // Dirección/Admin fijan el TOTAL a pagar de un grupo de comisiones PENDIENTES
   // (se prorratea entre ellas y quedan marcadas como ajustadas a mano).
   | { type: 'SET_COMMISSIONS_TOTAL'; ids: string[]; total: number }
