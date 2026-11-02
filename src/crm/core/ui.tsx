@@ -531,3 +531,82 @@ export function StageStepper({ stage }: { stage: StageId }) {
     </div>
   )
 }
+
+/* ---- Tablas ordenables, filtrables y ampliables ----
+   useTabla guarda orden + filtros por columna + "ver filtros" + "ampliada";
+   TablaCard es la tarjeta con esos botones y, ampliada, la MISMA tabla en un modal. */
+type Sort = { key: string; dir: 1 | -1 }
+/** Estado de una tabla: columna de orden, filtro de texto por columna, si se ve la
+ *  fila de filtros y si está ampliada (la misma tabla en un modal casi a pantalla completa). */
+export function useTabla<K extends string>(sort0: Sort, keys: readonly K[]) {
+  const vacio = () => Object.fromEntries(keys.map(k => [k, ''])) as Record<K, string>
+  const [sort, setSort] = React.useState<Sort>(sort0)
+  const [f, setF] = React.useState<Record<K, string>>(vacio)
+  const [verFiltros, setVerFiltros] = React.useState(false)
+  const [grande, setGrande] = React.useState(false)
+  const nFiltros = keys.filter(k => f[k].trim()).length
+  /** ¿El texto de la celda pasa el filtro de esa columna? (vacío = pasa todo) */
+  const has = (val: string, k: K) => { const q = f[k].trim().toLowerCase(); return !q || val.toLowerCase().includes(q) }
+  const cmp = (a: string | number, b: string | number) => (a > b ? 1 : a < b ? -1 : 0) * sort.dir
+  /** Encabezado ordenable: clic alterna ascendente / descendente. */
+  const th = (key: string, label: string, cls = '') => (
+    <th className={'sortable ' + cls} title="Clic para ordenar" onClick={() => setSort(s => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))}>
+      {label}{sort.key === key && <span className="text-acc"> {sort.dir > 0 ? '▲' : '▼'}</span>}
+    </th>
+  )
+  /** Celda de filtro (no sticky, para no encimar el encabezado); sin clave = columna sin filtro. */
+  const fth = (k?: K) => (
+    <th style={{ position: 'static' }} className="py-1.5">
+      {k && <input value={f[k]} onChange={e => setF(s => ({ ...s, [k]: e.target.value }))} placeholder="buscar…"
+        className="w-full bg-bg-2 border border-line-2 rounded-[6px] px-2 py-1 text-[11.5px] font-normal outline-none focus:border-acc" />}
+    </th>
+  )
+  const limpiar = () => setF(vacio())
+  return { sort, has, cmp, th, fth, verFiltros, setVerFiltros, grande, setGrande, nFiltros, limpiar }
+}
+export type TablaCtl = Pick<ReturnType<typeof useTabla<string>>, 'verFiltros' | 'setVerFiltros' | 'grande' | 'setGrande' | 'nFiltros' | 'limpiar'>
+
+/** Tarjeta con una tabla: botones para mostrar filtros y para ampliarla. Ampliada,
+ *  la MISMA tabla (mismo orden y filtros) se abre en un modal del alto de la ventana. */
+export function TablaCard({ icon, iconClass = 'text-acc', title, sub, t, maxH = 420, bodyRef, className = '', children }: {
+  icon: IconName; iconClass?: string; title: React.ReactNode; sub?: React.ReactNode
+  t: TablaCtl
+  /** Alto máximo del cuerpo en px (`undefined` = sin tope, p. ej. con useFitTableHeight). */
+  maxH?: number
+  /** Ref al cuerpo con scroll, para medirlo (useFitTableHeight). */
+  bodyRef?: React.RefObject<HTMLDivElement | null>
+  className?: string; children: React.ReactNode
+}) {
+  const botones = (
+    <span className="flex items-center gap-1.5 flex-none ml-3">
+      {t.nFiltros > 0 && <button className="btn btn-ghost btn-sm" title="Quitar todos los filtros" onClick={t.limpiar}>Limpiar ({t.nFiltros})</button>}
+      <button className={'btn btn-ghost btn-sm px-2' + (t.verFiltros || t.nFiltros > 0 ? ' text-acc border-acc' : '')} title={t.verFiltros ? 'Ocultar filtros' : 'Filtrar por columna'} onClick={() => t.setVerFiltros(v => !v)}>
+        <Icon name="filter" size={15} />
+      </button>
+      <button className={'btn btn-ghost btn-sm px-2' + (t.grande ? ' text-acc border-acc' : '')} title={t.grande ? 'Reducir' : 'Ampliar: ver la tabla en grande'} onClick={() => t.setGrande(g => !g)}>
+        <Icon name={t.grande ? 'minimize' : 'maximize'} size={15} />
+      </button>
+    </span>
+  )
+  return (
+    <>
+      <div className={'card ' + className}>
+        <div className="card-h">
+          <Icon name={icon} size={17} className={iconClass} />
+          <span className="ttl">{title}</span>
+          {sub && <span className="sub ml-auto text-right">{sub}</span>}
+          <span className={sub ? '' : 'ml-auto'}>{botones}</span>
+        </div>
+        <div ref={bodyRef} className="card-b p-0 overflow-auto" style={{ maxHeight: maxH }}>{children}</div>
+      </div>
+      {t.grande && (
+        <Modal width={1500} icon={icon} title={title} sub={sub} onClose={() => t.setGrande(false)}>
+          <div className="-m-6">
+            <div className="flex items-center justify-end px-4 py-2 border-b border-line bg-bg-1">{botones}</div>
+            <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 250px)' }}>{children}</div>
+          </div>
+        </Modal>
+      )}
+    </>
+  )
+}

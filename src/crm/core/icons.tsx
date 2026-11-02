@@ -46,6 +46,8 @@ const P = {
   download: '<path d="M12 3v12M7 11l5 5 5-5M4 21h16"/>',
   collapse: '<path d="M15 6l-6 6 6 6"/>',
   expand: '<path d="M9 6l6 6-6 6"/>',
+  maximize: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
+  minimize: '<path d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5"/>',
   trendUp: '<path d="M3 17l6-6 4 4 8-8"/><path d="M21 7v5h-5"/>',
   flag: '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
   handshake: '<path d="M3 12l4-4 5 3 5-3 4 4-4 4-3-2-2 2-2-2-3 2z"/>',

@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -673,9 +673,6 @@ const nextProjectCode = (projects: Project[]) => {
   return `PRY-2026-${String(max + 1).padStart(3, '0')}`
 }
 
-// Orígenes de la venta/lead (canal de captación).
-const ORIGENES = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack', 'Otro (Especificar)']
-
 const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
   client: '', seller: '', city: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
@@ -762,9 +759,10 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
     : { ...blank(), code: nextProjectCode(state.projects), seller: isVentas ? me!.id : '', id: uid('p'), ...prefill })
   const isNew = !project
   const set = (k: keyof ProjectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
-  // Origen: si el valor guardado no es uno de los presets, se considera "Otro" (texto libre).
-  const presetOrigenes = ORIGENES.slice(0, -1)
-  const [origenOtro, setOrigenOtro] = React.useState(() => !!p.origen && !presetOrigenes.includes(p.origen))
+  // Origen: catálogo cerrado (el mismo que en prospectos); lo que no esté en él es "Otro" (texto libre).
+  const [origenOtro, setOrigenOtro] = React.useState(() => !!p.origen && !ORIGENES.includes(p.origen))
+  // Sistema vendido: catálogo cerrado; lo que no esté en él se trata como "Otro" (texto libre).
+  const [sistemaOtro, setSistemaOtro] = React.useState(() => !!p.sistemaVendido && !SISTEMAS.includes(p.sistemaVendido))
   const [showClient, setShowClient] = React.useState(false)
   const [addClient, setAddClient] = React.useState(false)
   // ETA proveedor automático: fecha base (creación o hoy) + semanas de entrega × 7 días.
@@ -832,16 +830,28 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
           <Input value={p.alias || ''} onChange={e => set('alias', e.target.value)} placeholder="Cómo conoces al cliente" />
         </Field>
         <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey, N.L." /></Field>
-        <Field label="Sistema vendido"><Input value={p.sistemaVendido || ''} onChange={e => set('sistemaVendido', e.target.value)} placeholder="Ej. Rack selectivo" /></Field>
+        <Field label="Sistema vendido">
+          <Select value={sistemaOtro ? SISTEMA_OTRO : (p.sistemaVendido || '')} onChange={e => {
+            const v = e.target.value
+            if (v === SISTEMA_OTRO) { setSistemaOtro(true); set('sistemaVendido', '') }
+            else { setSistemaOtro(false); set('sistemaVendido', v) }
+          }}>
+            <option value="">Selecciona…</option>
+            {SISTEMAS.map(s => <option key={s} value={s}>{s}</option>)}
+            <option value={SISTEMA_OTRO}>{SISTEMA_OTRO}</option>
+          </Select>
+        </Field>
+        {sistemaOtro && <Field label="Especificar sistema"><Input value={p.sistemaVendido || ''} onChange={e => set('sistemaVendido', e.target.value)} placeholder="Describe el sistema" autoFocus /></Field>}
 
         <Field label="Origen">
-          <Select value={origenOtro ? 'Otro (Especificar)' : (p.origen || '')} onChange={e => {
+          <Select value={origenOtro ? ORIGEN_OTRO : (p.origen || '')} onChange={e => {
             const v = e.target.value
-            if (v === 'Otro (Especificar)') { setOrigenOtro(true); set('origen', '') }
+            if (v === ORIGEN_OTRO) { setOrigenOtro(true); set('origen', '') }
             else { setOrigenOtro(false); set('origen', v) }
           }}>
             <option value="">Selecciona…</option>
             {ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}
+            <option value={ORIGEN_OTRO}>{ORIGEN_OTRO}</option>
           </Select>
         </Field>
         {origenOtro && <Field label="Especificar origen"><Input value={p.origen || ''} onChange={e => set('origen', e.target.value)} placeholder="Describe el origen" autoFocus /></Field>}

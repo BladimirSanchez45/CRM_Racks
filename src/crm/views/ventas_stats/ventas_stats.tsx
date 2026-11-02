@@ -5,10 +5,11 @@
 //  exportación a Excel. Navegable por mes para ver el histórico.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, canSeeAllProspects, moneyDigits, fmtMoneyInput } from '../../core/data'
-import { KPI, SecTitle, Empty } from '../../core/ui'
+import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, canSeeAllProspects, moneyDigits, fmtMoneyInput, normalizeSistema } from '../../core/data'
+import { KPI, SecTitle, Empty, useTabla, TablaCard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { exportVentasExcel } from '../../core/export_ventas'
+import { excelErrorMsg } from '../../core/excel_export'
 import type { Project } from '../../core/types'
 
 // Paleta estable por vendedor (mismo orden = mismo color en todas las gráficas).
@@ -141,31 +142,40 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   const sumaDifiere = hayPropias && Math.abs(sumaMetas - meta) > 1
   const colorOf = (id: string) => PALETTE[Math.max(0, porVendedor.findIndex(r => r.v.id === id)) % PALETTE.length]
 
-  // Ventas por sistema vendido (para la dona derecha).
+  // Ventas por sistema vendido (para la dona derecha), agrupadas por el catálogo:
+  // "MINIRACK", "Mini Estándar" y "miniracks" cuentan como una sola categoría.
   const porSistema = React.useMemo(() => {
     const map = new Map<string, number>()
     for (const p of ventasMes.filter(esMio)) {
-      const k = p.sistemaVendido?.trim() || 'Sin sistema'
+      const k = normalizeSistema(p.sistemaVendido) || 'Sin sistema'
       map.set(k, (map.get(k) || 0) + (p.ventaSubtotal || 0))
     }
     return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value)
   }, [ventasMes, sellerId])   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Tendencia: últimos 12 meses (o desde el primer mes con datos).
+  // Por mes: lo COTIZADO (prospectos que llegaron a cotización, por su costo) contra
+  // lo VENDIDO (proyectos registrados). El mes de un prospecto es el mismo que usa la
+  // vista de Prospectos: fecha de asignación o, si no hay, la de alta.
   const trend = React.useMemo(() => {
     const start = ymAdd(currentYm, -11) > minYm ? ymAdd(currentYm, -11) : minYm
     const months: string[] = []
     for (let m = start; m <= currentYm; m = ymAdd(m, 1)) months.push(m)
+    const cotizados = state.prospects.filter(pr => idsVendedores.has(pr.seller) && esMio(pr) && (pr.costo || 0) > 0 &&
+      (pr.estado === 'Cotizado' || pr.estado === 'Negociación' || pr.resultado !== 'En espera'))
     return months.map(m => ({
       m,
       total: state.projects
         .filter(p => p.created.startsWith(m) && idsVendedores.has(p.seller) && esMio(p))
         .reduce((a, p) => a + (p.ventaSubtotal || 0), 0),
+      cotizado: cotizados
+        .filter(pr => (pr.fechaAsignacion || pr.createdAt || '').startsWith(m))
+        .reduce((a, pr) => a + (pr.costo || 0), 0),
       // Con vendedor elegido, su meta personal de cada mes (propia o reparto).
       meta: sellerId ? sel.salesGoalFor(state, m, sellerId) : sel.salesGoal(state, m),
     }))
   }, [state, currentYm, minYm, idsVendedores, sellerId])   // eslint-disable-line react-hooks/exhaustive-deps
-  const maxTrend = Math.max(1, ...trend.map(t => Math.max(t.total, t.meta)))
+  const maxTrend = Math.max(1, ...trend.map(t => Math.max(t.total, t.cotizado, t.meta)))
 
   // Edición de la meta del MES ELEGIDO (gerente de ventas y admin).
   const [editing, setEditing] = React.useState(false)
@@ -211,6 +221,32 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     })),
   })
 
+  // Tabla "Detalle por vendedor": filtro por nombre, orden por cualquier columna (total desc por defecto).
+  const tv = useTabla({ key: 'total', dir: -1 }, ['vendedor'] as const)
+  const filasVendedores = porVendedor.filter(r => esMio({ seller: r.v.id }))
+    .map(r => ({ r, ticket: r.n > 0 ? r.total / r.n : 0, pctMeta: r.meta > 0 ? (r.total / r.meta) * 100 : 0, pctEquipo: vendido > 0 ? (r.total / vendido) * 100 : 0 }))
+    .filter(x => tv.has(x.r.v.name, 'vendedor'))
+    .sort((a, b) => {
+      const k = tv.sort.key
+      const val = (x: typeof a): string | number =>
+        k === 'vendedor' ? x.r.v.name : k === 'n' ? x.r.n : k === 'ticket' ? x.ticket : k === 'meta' ? x.r.meta : k === 'pctMeta' ? x.pctMeta : k === 'pctEquipo' ? x.pctEquipo : x.r.total
+      return tv.cmp(val(a), val(b))
+    })
+
+  // Tabla "Ventas del mes": filtro de texto por columna, orden por cualquier columna (fecha desc por defecto).
+  const tl = useTabla({ key: 'fecha', dir: -1 }, ['fecha', 'proyecto', 'cliente', 'vendedor', 'sistema'] as const)
+  const filasVentas = ventasLista
+    .map(p => ({ p, fecha: p.created.slice(0, 10), cliente: sel.clientName(state, p.client), vendedor: sel.sellerName(state, p.seller), sistema: p.sistemaVendido || '', monto: p.ventaSubtotal || 0 }))
+    .filter(x => tl.has(fmtDateShort(x.fecha) + ' ' + x.fecha, 'fecha') && tl.has(x.p.code, 'proyecto') && tl.has(x.cliente, 'cliente') && tl.has(x.vendedor, 'vendedor') && tl.has(x.sistema, 'sistema'))
+    .sort((a, b) => {
+      const k = tl.sort.key
+      const val = (x: typeof a): string | number =>
+        k === 'proyecto' ? x.p.code : k === 'cliente' ? x.cliente : k === 'vendedor' ? x.vendedor : k === 'sistema' ? x.sistema : k === 'monto' ? x.monto : x.p.created
+      return tl.cmp(val(a), val(b))
+    })
+  const vendidoFiltrado = filasVentas.reduce((a, x) => a + x.monto, 0)
+  const filtradas = filasVentas.length !== ventasLista.length
+
   return (
     <div>
       <SecTitle title="Metas de venta" sub="Desglose mensual por vendedor" right={
@@ -244,7 +280,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
               {canEdit && <button className="btn btn-ghost btn-sm" title={`Editar la meta de ${ymLabel(ym)}`} onClick={() => { setDraft(String(Math.round(meta))); setEditing(true) }}><Icon name="edit" size={13} /></button>}
             </span>
           )}
-          {!soloPorcentaje && <button className="btn btn-sm" onClick={() => void exportar()}><Icon name="download" size={14} /> Excel</button>}
+          {!soloPorcentaje && <button className="btn btn-sm" onClick={() => exportar().catch(err => { console.error('[export] fallo al generar el Excel', err); alert(excelErrorMsg(err)) })}><Icon name="download" size={14} /> Excel</button>}
         </div>
       } />
 
@@ -354,17 +390,30 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           <div className="card-h">
             <Icon name="layers" size={17} className="text-st-5" />
             <span className="ttl">Tendencia mensual{vendedorSel ? ` · ${vendedorSel.name}` : ''}</span>
-            <span className="sub ml-auto">clic en un mes para verlo · línea punteada = {vendedorSel ? 'su meta personal' : 'meta'}</span>
+            <span className="sub ml-auto flex items-center gap-3">
+              <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 flex-none" style={{ background: 'var(--tx-3)', opacity: .55 }}></span>cotizado</span>
+              <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 flex-none" style={{ background: 'var(--acc)' }}></span>vendido</span>
+              <span>clic en un mes para verlo · línea punteada = {vendedorSel ? 'su meta personal' : 'meta'}</span>
+            </span>
           </div>
           <div className="card-b">
             <div className="flex items-end gap-2">
               {trend.map(t => {
                 const active = t.m === ym
+                const conv = t.cotizado > 0 ? (t.total / t.cotizado) * 100 : 0
                 return (
-                  <div key={t.m} className="flex-1 min-w-0 flex flex-col items-center gap-1 cursor-pointer" onClick={() => setYm(t.m)} title={`${ymLabel(t.m)}: ${fmtMoney(t.total)} de ${fmtMoney(t.meta)}`}>
-                    <span className="mono text-[9.5px] text-tx-2">{t.total > 0 ? fmtK(t.total) : ''}</span>
+                  <div key={t.m} className="flex-1 min-w-0 flex flex-col items-center gap-1 cursor-pointer" onClick={() => setYm(t.m)}
+                    title={`${ymLabel(t.m)}\nCotizado: ${fmtMoney(t.cotizado)}\nVendido: ${fmtMoney(t.total)} (${conv.toFixed(0)}% de lo cotizado)\nMeta: ${fmtMoney(t.meta)}`}>
+                    {/* Importes: cotizado (tenue) y vendido, alineados con cada barra */}
+                    <div className="w-full flex text-[9px] mono leading-none">
+                      <span className="flex-1 text-center text-tx-3 truncate">{t.cotizado > 0 ? fmtK(t.cotizado) : ''}</span>
+                      <span className="flex-1 text-center text-tx-2 font-semibold truncate">{t.total > 0 ? fmtK(t.total) : ''}</span>
+                    </div>
                     <div className="w-full h-[130px] bg-bg-1 border relative overflow-hidden" style={{ borderColor: active ? 'var(--acc)' : 'var(--line)' }}>
-                      <div className="absolute inset-x-0 bottom-0" style={{ height: `${(t.total / maxTrend) * 100}%`, background: t.total >= t.meta ? 'var(--ok)' : 'var(--acc)', opacity: active ? .95 : .55, transition: 'height .4s ease' }}></div>
+                      {/* Cotizado: mitad izquierda */}
+                      <div className="absolute bottom-0 left-0" style={{ width: 'calc(50% - 1px)', height: `${(t.cotizado / maxTrend) * 100}%`, background: 'var(--tx-3)', opacity: active ? .6 : .35, transition: 'height .4s ease' }}></div>
+                      {/* Vendido: mitad derecha */}
+                      <div className="absolute bottom-0 right-0" style={{ width: 'calc(50% - 1px)', height: `${(t.total / maxTrend) * 100}%`, background: t.total >= t.meta ? 'var(--ok)' : 'var(--acc)', opacity: active ? .95 : .55, transition: 'height .4s ease' }}></div>
                       <div className="absolute inset-x-0" style={{ bottom: `${(t.meta / maxTrend) * 100}%`, borderTop: '1.5px dashed var(--tx-3)' }}></div>
                     </div>
                     <span className={'text-[10.5px] ' + (active ? 'text-acc font-bold' : 'text-tx-2')}>{MESES[Number(t.m.slice(5)) - 1]} {t.m.slice(2, 4)}</span>
@@ -389,17 +438,19 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
       </div>
 
       {/* Detalle por vendedor */}
-      <div className="card mb-4">
-        <div className="card-h">
-          <Icon name="clients" size={17} className="text-acc" />
-          <span className="ttl">Detalle por vendedor</span>
-        </div>
-        <div className="card-b p-0">
+      <TablaCard icon="clients" title="Detalle por vendedor" t={tv} className="mb-4" maxH={520}
+        sub={filasVendedores.length !== porVendedor.filter(r => esMio({ seller: r.v.id })).length ? `${filasVendedores.length} vendedor${filasVendedores.length === 1 ? '' : 'es'} (filtrado)` : undefined}>
           <table className="tbl">
-            <thead><tr><th>Vendedor</th><th className="num">Ventas</th><th className="num">Total vendido</th><th className="num">Ticket promedio</th><th className="num">Meta personal</th><th className="num">% de su meta</th><th className="num">% del equipo</th></tr></thead>
+            <thead>
+              <tr>
+                {tv.th('vendedor', 'Vendedor')}{tv.th('n', 'Ventas', 'num')}{tv.th('total', 'Total vendido', 'num')}{tv.th('ticket', 'Ticket promedio', 'num')}
+                {tv.th('meta', 'Meta personal', 'num')}{tv.th('pctMeta', '% de su meta', 'num')}{tv.th('pctEquipo', '% del equipo', 'num')}
+              </tr>
+              {tv.verFiltros && <tr>{tv.fth('vendedor')}{tv.fth()}{tv.fth()}{tv.fth()}{tv.fth()}{tv.fth()}{tv.fth()}</tr>}
+            </thead>
             <tbody>
-              {porVendedor.filter(r => esMio({ seller: r.v.id })).map(r => {
-                const pctMeta = r.meta > 0 ? (r.total / r.meta) * 100 : 0
+              {filasVendedores.length === 0 && <tr><td colSpan={7}><Empty icon="clients">Ningún vendedor coincide con el filtro</Empty></td></tr>}
+              {filasVendedores.map(({ r, pctMeta, pctEquipo }) => {
                 return (
                   <tr key={r.v.id}>
                     <td className="text-[12.5px] font-semibold text-tx-1">
@@ -418,45 +469,42 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
                       </td>
                     </>)}
                     <td className="num font-semibold" style={{ color: pctMeta >= 100 ? 'var(--ok)' : pctMeta >= 50 ? 'var(--tx-0)' : 'var(--warn)' }}>{pctMeta.toFixed(1)}%</td>
-                    <td className="num text-[12.5px] text-tx-2">{vendido > 0 ? ((r.total / vendido) * 100).toFixed(1) : '0.0'}%</td>
+                    <td className="num text-[12.5px] text-tx-2">{pctEquipo.toFixed(1)}%</td>
                   </tr>
                 )
               })}
             </tbody>
           </table>
-        </div>
-      </div>
+      </TablaCard>
 
       {/* Ventas del mes */}
-      <div className="card">
-        <div className="card-h">
-          <Icon name="projects" size={17} className="text-acc" />
-          <span className="ttl">Ventas de {ymLabel(ym)}{vendedorSel ? ` · ${vendedorSel.name}` : ''}</span>
-          <span className="sub ml-auto">{ventasLista.length} venta{ventasLista.length === 1 ? '' : 's'} · {fmtMoney(vendidoLista)}{soloPorcentaje && !vendedorSel ? ' · solo las tuyas' : ''}</span>
-        </div>
-        <div className="card-b p-0 max-h-[420px] overflow-y-auto">
+      <TablaCard icon="projects" title={<>Ventas de {ymLabel(ym)}{vendedorSel ? ` · ${vendedorSel.name}` : ''}</>} t={tl}
+        sub={<>{filasVentas.length}{filtradas ? ` de ${ventasLista.length}` : ''} venta{filasVentas.length === 1 ? '' : 's'} · {fmtMoney(filtradas ? vendidoFiltrado : vendidoLista)}{soloPorcentaje && !vendedorSel ? ' · solo las tuyas' : ''}</>}>
           {ventasLista.length === 0 ? <Empty icon="projects">{vendedorSel ? `${vendedorSel.name} no tiene ventas registradas este mes` : 'Sin ventas registradas este mes'}</Empty> : (
             <table className="tbl">
-              <thead><tr><th>Fecha</th><th>Proyecto</th><th>Cliente</th><th>Vendedor</th><th>Sistema</th><th className="num">Venta (subtotal)</th></tr></thead>
+              <thead>
+                <tr>{tl.th('fecha', 'Fecha')}{tl.th('proyecto', 'Proyecto')}{tl.th('cliente', 'Cliente')}{tl.th('vendedor', 'Vendedor')}{tl.th('sistema', 'Sistema')}{tl.th('monto', 'Venta (subtotal)', 'num')}</tr>
+                {tl.verFiltros && <tr>{tl.fth('fecha')}{tl.fth('proyecto')}{tl.fth('cliente')}{tl.fth('vendedor')}{tl.fth('sistema')}{tl.fth()}</tr>}
+              </thead>
               <tbody>
-                {ventasLista.map(p => (
+                {filasVentas.length === 0 && <tr><td colSpan={6}><Empty icon="projects">Ninguna venta coincide con los filtros</Empty></td></tr>}
+                {filasVentas.map(({ p, fecha, cliente, vendedor, sistema, monto }) => (
                   <tr key={p.id} onClick={() => onOpenProject(p)}>
-                    <td className="num text-tx-2">{fmtDateShort(p.created.slice(0, 10))}</td>
+                    <td className="num text-tx-2">{fmtDateShort(fecha)}</td>
                     <td><span className="mono text-acc font-semibold">{p.code}</span></td>
-                    <td>{sel.clientName(state, p.client)}</td>
+                    <td>{cliente}</td>
                     <td className="text-[12.5px]">
                       <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: colorOf(p.seller) }}></span>
-                      {sel.sellerName(state, p.seller)}
+                      {vendedor}
                     </td>
-                    <td className="text-[12.5px] text-tx-2">{p.sistemaVendido || '—'}</td>
-                    <td className="num font-semibold">{fmtMoney(p.ventaSubtotal || 0)}</td>
+                    <td className="text-[12.5px] text-tx-2">{sistema || '—'}</td>
+                    <td className="num font-semibold">{fmtMoney(monto)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-        </div>
-      </div>
+      </TablaCard>
     </div>
   )
 }

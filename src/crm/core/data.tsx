@@ -215,6 +215,68 @@ export const fmtK = (n?: number | null) => {
   if (Math.abs(n) >= 1e3) return '$' + (n / 1e3).toFixed(0) + 'k'
   return '$' + n
 }
+/* ---- Catálogo de SISTEMAS (lo que se cotiza y se vende) ----
+   Lista cerrada para que las estadísticas no se fragmenten por cómo se escribe.
+   Los formularios ofrecen estas opciones más "Otro (Especificar)" (texto libre). */
+export const SISTEMAS = [
+  'Minirack estándar', 'Minirack especial', 'Selectivo', 'Entrepiso', 'Mezzanine', 'Cantilever',
+  'Pushback', 'Dinámico', 'Drive In', 'Carton Flow', 'Accesorios',
+]
+export const SISTEMA_OTRO = 'Otro (Especificar)'
+/** Sin acentos, minúsculas, espacios colapsados: para comparar textos capturados a mano. */
+const normTexto = (t?: string) =>
+  (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ')
+/** Lleva un sistema escrito a mano al catálogo ("MINIRACK", "mezanine", "Mini Estándar"…).
+ *  Devuelve '' si viene vacío y 'Otro' si no se reconoce. Cuando un texto mezcla
+ *  varios sistemas ("Mini y Selectivo") gana el sistema mayor, en el orden de abajo. */
+export const normalizeSistema = (raw?: string): string => {
+  const t = normTexto(raw)
+  if (!t) return ''
+  const exacto = SISTEMAS.find(s => normTexto(s) === t)
+  if (exacto) return exacto
+  if (/select|selecit/.test(t)) return 'Selectivo'
+  if (/mez+anin/.test(t)) return 'Mezzanine'
+  if (/entrepiso/.test(t)) return 'Entrepiso'
+  if (/drive/.test(t)) return 'Drive In'
+  if (/cantilever/.test(t)) return 'Cantilever'
+  if (/push/.test(t)) return 'Pushback'
+  if (/dinamic/.test(t)) return 'Dinámico'
+  if (/carton/.test(t)) return 'Carton Flow'
+  if (/mini|miiracks|minirak/.test(t)) return /especial/.test(t) ? 'Minirack especial' : 'Minirack estándar'
+  if (/accesorio/.test(t)) return 'Accesorios'
+  return 'Otro'
+}
+/* ---- Catálogo de ORÍGENES (de dónde llegó el lead / la venta) ----
+   Los cuatro anuncios más cuatro orígenes que NO son anuncio. Lista cerrada para
+   que "Estadísticas por origen" no se fragmente por cómo se escribe. Los formularios
+   (proyecto y prospecto) ofrecen estas opciones más "Otro (Especificar)". */
+export const ORIGENES = [
+  'WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack',
+  'Cliente existente', 'Referido', 'Contacto directo', 'Distribuidor',
+]
+export const ORIGEN_OTRO = 'Otro (Especificar)'
+/** Lleva un origen escrito a mano al catálogo ("cliente viejito", "Llegó por llamada",
+ *  "google adds"…). Devuelve '' si viene vacío o si el texto solo dice que NO hubo
+ *  anuncio / no se sabe ("No viene de un anuncio", "No dice origen"), y 'Otro' si
+ *  no se reconoce. El orden de las reglas importa: "Cliente viejito, no llegó de
+ *  anuncio" es Cliente existente; "recomendación de otro cliente" es Referido. */
+export const normalizeOrigen = (raw?: string): string => {
+  const t = normTexto(raw)
+  if (!t) return ''
+  const exacto = ORIGENES.find(o => normTexto(o) === t)
+  if (exacto) return exacto
+  if (/ctc.*industrial/.test(t)) return 'CTC Ad Racks Industriales'
+  if (/ctc.*mez/.test(t)) return 'CTC Ad Mezzanines'
+  if (/ctc.*mini/.test(t)) return 'CTC Ad Minirack'
+  if (/web ?ad|google ad/.test(t)) return 'WebAd'
+  if (/referid|recomend/.test(t)) return 'Referido'
+  if (/distribuidor|dsitribuidor/.test(t)) return 'Distribuidor'
+  if (/cliente|antiguo|recuperad|cartera|ya era prospecto/.test(t)) return 'Cliente existente'
+  if (/direct|visit|llamada|whats|correo|sucursal|cedis|linea|contact/.test(t)) return 'Contacto directo'
+  // Solo dice que no hubo anuncio, o pusieron el sistema en vez del origen: sin origen.
+  if (/anuncio|sin origen|no dice origen|respond|^(mini|select|mez|busca select|desistal)/.test(t)) return ''
+  return 'Otro'
+}
 export const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
 export const MESES_L = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 export const fmtDate = (d?: string) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return `${String(x.getDate()).padStart(2,'0')} ${MESES[x.getMonth()]} ${x.getFullYear()}` }

@@ -5,6 +5,8 @@
 // ============================================================
 
 /** Una fila de prospecto ya "aplanada" (con los campos calculados resueltos). */
+import { loadExcelJS, descargarXlsx } from './excel_export'
+
 export interface ProspectoRow {
   nombre: string
   empresa: string
@@ -95,7 +97,7 @@ const CALIDAD_FILL: Record<string, string> = {
 
 /** Genera y descarga el Excel de prospectos. `meta` describe los filtros aplicados. */
 export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtitulo: string; hoy: string }): Promise<void> {
-  const ExcelJS = (await import('exceljs')).default
+  const ExcelJS = await loadExcelJS()
   const wb = new ExcelJS.Workbook()
   wb.creator = 'CC Racks CRM'
   wb.created = new Date(meta.hoy + 'T12:00:00')
@@ -289,11 +291,5 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
     row = Math.max(row + 2, tableTopRow + Math.ceil((44 + s.data.length * 26 + 14) / 18) + 2)
   }
 
-  const buf = await wb.xlsx.writeBuffer()
-  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `Prospectos_${meta.hoy}.xlsx`
-  document.body.appendChild(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000)
+  await descargarXlsx(wb, `Prospectos_${meta.hoy}.xlsx`)
 }

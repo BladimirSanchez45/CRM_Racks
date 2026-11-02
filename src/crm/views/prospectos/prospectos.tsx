@@ -5,11 +5,12 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
 import { exportProspectosExcel, type ProspectoRow } from '../../core/export_prospectos'
+import { excelErrorMsg } from '../../core/excel_export'
 import type { AppState, Project, Prospect, ProspectComment, ProspectEstado, ProspectEvaluation, ProspectInput, ProspectResultado } from '../../core/types'
 
 const ESTADOS: ProspectEstado[] = ['Nuevo', 'Contactado', 'Cotizado', 'Negociación']
@@ -20,12 +21,6 @@ const ESTADO_COLOR: Record<ProspectEstado, string> = {
 const RESULTADO_COLOR: Record<ProspectResultado, string> = {
   'En espera': 'var(--warn)', Vendido: 'var(--ok)', Perdido: 'var(--danger)',
 }
-const ANUNCIOS = ['WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack', 'Referido', 'Otro']
-/** Catálogo de sistemas que se cotizan. */
-const SISTEMAS = [
-  'Mezzanine', 'Miniracks', 'Selectivo', 'Drive In', 'Entrepiso', 'Pushback',
-  'Dinámico', 'Cantilever', 'Cartón Flow', 'Autosoportado', 'Estantería', 'Especial',
-]
 
 /* ---- Evaluación rápida de calidad del prospecto (5 criterios × 5/3/1) ---- */
 type EvalKey = 'necesidad' | 'autoridad' | 'informacion' | 'urgencia' | 'presupuesto'
@@ -157,9 +152,10 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
   }
   const removeCotizacion = (i: number) => setP(s => ({ ...s, cotizaciones: s.cotizaciones.filter((_, idx) => idx !== i) }))
   const set = (k: keyof ProspectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
-  // Anuncio: si el valor guardado no es uno de los presets, se considera "Otro" (texto libre).
-  const presetAnuncios = ANUNCIOS.filter(a => a !== 'Otro')
-  const [anuncioOtro, setAnuncioOtro] = React.useState(() => !!p.anuncio && !presetAnuncios.includes(p.anuncio))
+  // Anuncio / origen: catálogo cerrado (el mismo que en proyectos); lo que no esté en él es "Otro" (texto libre).
+  const [anuncioOtro, setAnuncioOtro] = React.useState(() => !!p.anuncio && !ORIGENES.includes(p.anuncio))
+  // Sistema: catálogo cerrado (el mismo que en proyectos); lo que no esté en él es "Otro" (texto libre).
+  const [sistemaOtro, setSistemaOtro] = React.useState(() => !!p.sistema && !SISTEMAS.includes(p.sistema))
   const valid = p.name.trim() && p.seller
   const { requestClose, guard } = useUnsavedGuard(p, onClose)
   const save = () => {
@@ -203,19 +199,26 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
         <Field label="Fecha de asignación"><Input type="date" value={p.fechaAsignacion} onChange={e => set('fechaAsignacion', e.target.value)} /></Field>
         <Field label="Último contacto"><Input type="date" value={p.ultimoContacto} onChange={e => set('ultimoContacto', e.target.value)} /></Field>
         <Field label="Sistema">
-          <Select value={p.sistema} onChange={e => set('sistema', e.target.value)}>
+          <Select value={sistemaOtro ? SISTEMA_OTRO : p.sistema} onChange={e => {
+            const v = e.target.value
+            if (v === SISTEMA_OTRO) { setSistemaOtro(true); set('sistema', '') }
+            else { setSistemaOtro(false); set('sistema', v) }
+          }}>
             <option value="">Selecciona…</option>
             {SISTEMAS.map(s => <option key={s} value={s}>{s}</option>)}
+            <option value={SISTEMA_OTRO}>{SISTEMA_OTRO}</option>
           </Select>
         </Field>
+        {sistemaOtro && <Field label="Especificar sistema"><Input value={p.sistema} onChange={e => set('sistema', e.target.value)} placeholder="Describe el sistema" autoFocus /></Field>}
         <Field label="Anuncio / origen">
-          <Select value={anuncioOtro ? 'Otro' : (p.anuncio || '')} onChange={e => {
+          <Select value={anuncioOtro ? ORIGEN_OTRO : (p.anuncio || '')} onChange={e => {
             const v = e.target.value
-            if (v === 'Otro') { setAnuncioOtro(true); set('anuncio', '') }
+            if (v === ORIGEN_OTRO) { setAnuncioOtro(true); set('anuncio', '') }
             else { setAnuncioOtro(false); set('anuncio', v) }
           }}>
             <option value="">Selecciona…</option>
-            {ANUNCIOS.map(a => <option key={a} value={a}>{a}</option>)}
+            {ORIGENES.map(a => <option key={a} value={a}>{a}</option>)}
+            <option value={ORIGEN_OTRO}>{ORIGEN_OTRO}</option>
           </Select>
         </Field>
         {anuncioOtro && <Field label="Especificar origen"><Input value={p.anuncio} onChange={e => set('anuncio', e.target.value)} placeholder="Describe el origen" autoFocus /></Field>}
@@ -387,10 +390,20 @@ export function ProspectosPage() {
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
   const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })
-  // Orden por columna. Clic en "Seguimiento": 1º mayor→menor, 2º menor→mayor, 3º sin orden.
+  // Orden por columna: clic en el encabezado alterna 1º / 2º / sin orden. Las columnas
+  // numéricas y de fecha arrancan de mayor a menor (lo más grande o reciente arriba);
+  // las de texto, de A a Z.
   const [sort, setSort] = React.useState<{ key: string; dir: number }>({ key: '', dir: 0 })
-  const toggleSort = (key: string) => setSort(s =>
-    s.key !== key ? { key, dir: -1 } : s.dir === -1 ? { key, dir: 1 } : { key: '', dir: 0 })
+  const DESC_FIRST = ['seguimiento', 'costo', 'calidad', 'fechaAsig', 'ultContacto']
+  const toggleSort = (key: string) => setSort(s => {
+    const primero = DESC_FIRST.includes(key) ? -1 : 1
+    return s.key !== key ? { key, dir: primero } : s.dir === primero ? { key, dir: -primero } : { key: '', dir: 0 }
+  })
+  const th = (key: string, label: string, cls = '') => (
+    <th className={'sortable ' + cls} onClick={() => toggleSort(key)} title="Clic para ordenar" style={{ whiteSpace: 'nowrap' }}>
+      {label}{sort.key === key && <span className="text-acc"> {sort.dir < 0 ? '▼' : '▲'}</span>}
+    </th>
+  )
   const tabla = useFitTableHeight()
 
   const sellerName = (id: string) => sellerNameOf(state, id)
@@ -417,10 +430,30 @@ export function ProspectosPage() {
     }
     return true
   })
-  // Orden por "Seguimiento" = días sin contacto; sin contacto cuenta como el mayor rezago.
-  if (sort.key === 'seguimiento') {
-    const dias = (p: Prospect) => seguimiento(p).dias ?? 1e9
-    rows.sort((a, b) => (dias(a) - dias(b)) * sort.dir)
+  // Valor de cada columna para ordenar. Seguimiento = días sin contacto (sin contacto
+  // cuenta como el mayor rezago); estado y resultado siguen el orden del flujo; calidad
+  // por puntaje; lo vacío (sin costo, sin evaluar) queda al final en orden descendente.
+  if (sort.key) {
+    const val = (p: Prospect): string | number => {
+      switch (sort.key) {
+        case 'nombre': return p.name.toLowerCase()
+        case 'vendedor': return sellerName(p.seller).toLowerCase()
+        case 'empresa': return (p.empresa || '').toLowerCase()
+        case 'telefono': return p.phone || ''
+        case 'ciudad': return (p.city || '').toLowerCase()
+        case 'fechaAsig': return p.fechaAsignacion || ''
+        case 'estado': return ESTADOS.indexOf(p.estado)
+        case 'ultContacto': return p.ultimoContacto || ''
+        case 'seguimiento': return seguimiento(p).dias ?? 1e9
+        case 'costo': return p.costo ?? -1
+        case 'resultado': return RESULTADOS.indexOf(p.resultado)
+        case 'calidad': return scoreOf(p.evaluacion) ?? -1
+        case 'sistema': return (p.sistema || '').toLowerCase()
+        case 'anuncio': return (p.anuncio || '').toLowerCase()
+        default: return ''
+      }
+    }
+    rows.sort((a, b) => { const va = val(a), vb = val(b); return (va > vb ? 1 : va < vb ? -1 : 0) * sort.dir })
   }
 
   // Opciones de vendedor (ids presentes en los prospectos VISIBLES).
@@ -474,7 +507,7 @@ export function ProspectosPage() {
       }
     })
     exportProspectosExcel(data, { subtitulo, hoy: TODAY_ISO })
-      .catch(err => { console.error('[export] fallo al generar el Excel', err); alert('No se pudo generar el Excel.') })
+      .catch(err => { console.error('[export] fallo al generar el Excel', err); alert(excelErrorMsg(err)) })
   }
 
   const markSold = (p: Prospect) => dispatch({ type: 'SAVE_PROSPECT', prospect: { ...p, resultado: 'Vendido' } })
@@ -561,12 +594,10 @@ export function ProspectosPage() {
         <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr>
-              <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
-              <th>Fecha asig.</th><th>Estado</th><th>Últ. contacto</th>
-              <th className="sortable" onClick={() => toggleSort('seguimiento')} title="Ordenar por días sin contacto" style={{ whiteSpace: 'nowrap' }}>
-                Seguimiento{sort.key === 'seguimiento' && <span className="text-acc"> {sort.dir < 0 ? '▼' : '▲'}</span>}
-              </th>
-              <th className="num">Costo</th><th>Resultado</th><th>Calidad</th><th>Sistema</th><th>Anuncio</th><th></th>
+              {th('nombre', 'Nombre')}{th('vendedor', 'Vendedor')}{th('empresa', 'Empresa')}{th('telefono', 'Teléfono')}{th('ciudad', 'Ciudad')}
+              {th('fechaAsig', 'Fecha asig.')}{th('estado', 'Estado')}{th('ultContacto', 'Últ. contacto')}
+              {th('seguimiento', 'Seguimiento')}
+              {th('costo', 'Costo', 'num')}{th('resultado', 'Resultado')}{th('calidad', 'Calidad')}{th('sistema', 'Sistema')}{th('anuncio', 'Anuncio')}<th></th>
             </tr></thead>
             <tbody>
               {rows.map(p => {

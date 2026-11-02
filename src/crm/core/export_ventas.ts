@@ -5,6 +5,8 @@
 //  venta registrada en el mes).
 // ============================================================
 
+import { loadExcelJS, descargarXlsx } from './excel_export'
+
 /** Una venta registrada (proyecto creado en el mes), ya "aplanada". */
 export interface VentaRow {
   fecha: string        // ISO 'YYYY-MM-DD'
@@ -80,7 +82,7 @@ export async function exportVentasExcel(opts: {
   rows: VentaRow[]
 }): Promise<void> {
   const { ym, ymLabel, hoy, meta, vendido, vendedores, rows } = opts
-  const ExcelJS = (await import('exceljs')).default
+  const ExcelJS = await loadExcelJS()
   const wb = new ExcelJS.Workbook()
   wb.creator = 'CC Racks CRM'
   wb.created = new Date(hoy + 'T12:00:00')
@@ -257,11 +259,5 @@ export async function exportVentasExcel(opts: {
   for (let i = 1; i <= nCols; i++) totRow.getCell(i).border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } } }
   cols.forEach((c, i) => { ws.getColumn(i + 1).width = c.width })
 
-  const buf = await wb.xlsx.writeBuffer()
-  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `Ventas_${ym}.xlsx`
-  document.body.appendChild(a); a.click(); a.remove()
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000)
+  await descargarXlsx(wb, `Ventas_${ym}.xlsx`)
 }
