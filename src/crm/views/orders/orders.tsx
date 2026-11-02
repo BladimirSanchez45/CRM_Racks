@@ -850,7 +850,9 @@ export function OrdersPage() {
     </th>
   )
   const supplierOpts = state.suppliers.filter(s => orders.some(o => o.supplierId === s.id))
-  const sinAsignar = readOnly ? [] : state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado')
+  // Sin proveedor asignado Y sin ninguna OC: un proyecto que ya tiene OC ya tiene proveedor
+  // aunque la lista `suppliers` venga vacía (OC creadas por "Nueva OC" antes del arreglo).
+  const sinAsignar = readOnly ? [] : state.projects.filter(p => p.suppliers.length === 0 && p.stage !== 'finalizado' && sel.ordersForProject(state, p.id).length === 0)
 
   // KPIs — respetan el filtro de proveedor (NO el de estatus, para no colapsar la
   // gráfica de estatus ni el conteo de vencidas). Así, al filtrar por un proveedor

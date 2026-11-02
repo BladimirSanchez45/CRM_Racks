@@ -834,6 +834,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (proj && proj.stage === 'finalizado') {
           regenCommissions(proj, thunks, { ...s, orders: upsertBy(s.orders, full) })
         }
+        // El proveedor de la OC queda ASIGNADO al proyecto. Antes solo pasaba por el camino
+        // "Asignar proveedor → crear OC"; con "Nueva OC" eligiendo el proyecto, la OC se
+        // guardaba pero el proyecto seguía apareciendo en "Sin asignar" (PRY-2026-193).
+        if (proj && full.supplierId && !proj.suppliers.includes(full.supplierId)) {
+          const withSupplier: Project = { ...proj, suppliers: [...proj.suppliers, full.supplierId], updated: today() }
+          rawDispatch({ type: 'UPSERT_PROJECT', project: withSupplier })
+          thunks.push(() => saveProject(withSupplier))
+        }
         // Cada OC nueva entra a la COLA DE ALMACÉN (sin talla): la unidad de trabajo
         // de almacén es la orden de compra, así que un proyecto con varias OC genera
         // varios renglones. Se avisa a los usuarios con rol Almacén.
