@@ -288,6 +288,7 @@ function mapProject(r: any): Project {
     ...(r.closed_on ? { closedOn: r.closed_on } : {}),
     ...(r.remision ? { remision: r.remision } : {}),
     ...(r.restored ? { restored: true } : {}),
+    ...(r.surtido_almacen ? { surtidoAlmacen: true } : {}),
   }
 }
 function projectRow(p: Project): Record<string, unknown> {
@@ -305,6 +306,7 @@ function projectRow(p: Project): Record<string, unknown> {
     created: p.created, updated: p.updated,
     closed_on: p.closedOn ?? null, remision: p.remision ?? null,
     restored: p.restored ?? false,
+    surtido_almacen: p.surtidoAlmacen ?? false,   // requiere step38_proyecto_surtido_almacen.sql
   }
 }
 export async function fetchProjects(): Promise<Project[]> {

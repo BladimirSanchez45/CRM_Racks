@@ -114,6 +114,7 @@ type ProjectFormState = {
   updated?: string
   remision?: string
   closedOn?: string
+  surtidoAlmacen?: boolean
 }
 
 /* ---------- Move-stage control ---------- */
@@ -502,7 +503,8 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
 
           <div className="label-k mb-2">Proveedores asignados</div>
           <div className="flex flex-col gap-1.5">
-            {p.suppliers.length === 0 && <span className="meta">Sin proveedor asignado</span>}
+            {p.surtidoAlmacen && <Badge color="var(--st-7)" icon="box">Surtido de almacén propio</Badge>}
+            {p.suppliers.length === 0 && !p.surtidoAlmacen && <span className="meta">Sin proveedor asignado</span>}
             {p.suppliers.map(sid => { const s = sel.supplier(state, sid); return s ? (
               <div key={sid} className="flex items-center gap-2 text-[12.5px]"><Icon name="suppliers" size={14} className="opacity-60" /> {s.name}</div>
             ) : null })}
@@ -861,6 +863,15 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
         <Field label="Presupuesto instalación (MXN)"><MoneyInput value={p.install} onChange={v => set('install', v)} placeholder="0" /></Field>
         <Field label={<>ETA proveedor <span className="meta font-normal">(auto)</span></>}><Input type="date" value={p.eta} onChange={e => set('eta', e.target.value)} /></Field>
         <Field label="Fecha de registro"><Input type="date" value={(p.created || '').slice(0, 10)} onChange={e => set('created', e.target.value)} /></Field>
+        {/* Pedido surtido con material de almacén propio: no lleva OC a proveedor y por eso
+            puede Finalizar sin OC. Lo marca admin/logística; ventas solo lo ve. */}
+        <Field label="Origen del material">
+          <label className={'inline-flex items-center gap-2 text-[12.5px] mt-1.5 ' + (isVentas ? 'opacity-60' : 'cursor-pointer')}>
+            <input type="checkbox" className="cursor-pointer" checked={!!p.surtidoAlmacen} disabled={isVentas}
+              onChange={e => set('surtidoAlmacen', e.target.checked)} />
+            Surtido de almacén propio (sin OC a proveedor)
+          </label>
+        </Field>
       </div>
 
       {/* Carga de almacén al momento de comprometer las semanas de entrega.

@@ -2576,7 +2576,8 @@ export function autoStageFor(state: AppState, p: Project): StageId | null {
    Solo se evalúa al AVANZAR (no al regresar). Reglas:
    · Coordinación  → requiere costo de flete E instalación asignados.
    · Instalación   → requiere al menos una remisión de salida creada.
-   · Finalizado    → requiere la Carta fin de obra + ≥1 imagen de evidencia. */
+   · Finalizado    → requiere ≥1 OC del proyecto, el pedido FINIQUITADO (cliente liquidó
+                     el total con IVA), la Carta fin de obra y ≥1 imagen de evidencia. */
 export function stageBlockedReason(state: AppState, p: Project, target: StageId): string | null {
   if (target === 'coordinacion') {
     if (!((p.freightCost || 0) > 0 && (p.installCost || 0) > 0))
@@ -2587,6 +2588,18 @@ export function stageBlockedReason(state: AppState, p: Project, target: StageId)
       return 'Para pasar a Instalación primero crea la remisión de salida del proyecto.'
   }
   if (target === 'finalizado') {
+    // Sin OC no hubo compra: el proyecto no puede darse por terminado, salvo que esté
+    // marcado como SURTIDO DE ALMACÉN PROPIO (material de aquí, sin OC a proveedor).
+    if (!p.surtidoAlmacen && sel.ordersForProject(state, p.id).length === 0)
+      return 'Para Finalizar el proyecto debe tener al menos una orden de compra, o estar marcado como "Surtido de almacén propio" en Editar datos.'
+    // Finiquito: el cliente debe haber liquidado el total con IVA. Se calcula en vivo con
+    // la misma regla que la reconciliación (no depende de que `finiquito` ya esté guardado).
+    const totalCliente = sel.projectTotalConIva(p)
+    const saldo = totalCliente - sel.projectCobrado(state, p.id)
+    if (!(totalCliente > 0) || saldo > 0.5)
+      return totalCliente > 0
+        ? `Para Finalizar el pedido debe estar finiquitado: el cliente aún debe ${fmtMoney(saldo)}.`
+        : 'Para Finalizar el proyecto necesita un monto de venta y el cobro total del cliente.'
     if (!p.docs?.cartaFin?.ok)
       return 'Para Finalizar primero sube la Carta fin de obra (carta de terminación).'
     if (!(p.docs?.evidencia || []).some(d => d.ok))

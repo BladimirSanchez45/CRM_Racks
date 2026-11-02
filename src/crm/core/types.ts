@@ -399,6 +399,9 @@ export interface Project {
   /** "Restaurado": el usuario lo regresó del Historial a Proyectos manualmente, así que
    *  NO se vuelve a archivar aunque esté finalizado con comisiones pagadas. */
   restored?: boolean
+  /** Pedido SURTIDO DE ALMACÉN PROPIO: no lleva OC a proveedor. Lo marca admin/logística
+   *  y permite Finalizar sin OC (la regla general exige al menos una). */
+  surtidoAlmacen?: boolean
 }
 
 export type CommissionStatus = 'paid' | 'pending'
