@@ -277,6 +277,14 @@ export const normalizeOrigen = (raw?: string): string => {
   if (/anuncio|sin origen|no dice origen|respond|^(mini|select|mez|busca select|desistal)/.test(t)) return ''
   return 'Otro'
 }
+/** Estados de la república (entidades federativas), para el campo "Estado" de proyectos y prospectos. */
+export const ESTADOS_MX = [
+  'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas', 'Chihuahua',
+  'Ciudad de México', 'Coahuila', 'Colima', 'Durango', 'Estado de México', 'Guanajuato', 'Guerrero',
+  'Hidalgo', 'Jalisco', 'Michoacán', 'Morelos', 'Nayarit', 'Nuevo León', 'Oaxaca', 'Puebla',
+  'Querétaro', 'Quintana Roo', 'San Luis Potosí', 'Sinaloa', 'Sonora', 'Tabasco', 'Tamaulipas',
+  'Tlaxcala', 'Veracruz', 'Yucatán', 'Zacatecas',
+]
 export const MESES = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic']
 export const MESES_L = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 export const fmtDate = (d?: string) => { if (!d) return '—'; const x = new Date(d + 'T00:00:00'); return `${String(x.getDate()).padStart(2,'0')} ${MESES[x.getMonth()]} ${x.getFullYear()}` }

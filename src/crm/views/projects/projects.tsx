@@ -37,7 +37,7 @@ function KanbanCard({ p, onOpen, onDragStart, onDragEnd, dragging, draggable = t
       </div>
       <div className="font-semibold text-[13.5px] mt-[7px] leading-[1.3]">{client ? client.name : '—'}</div>
       {p.alias && <div className="text-[11.5px] text-tx-2 mt-[2px] leading-[1.25] truncate" title={p.alias}>“{p.alias}”</div>}
-      <div className="meta mt-[3px] flex items-center gap-1"><Icon name="pin" size={11} className="opacity-50" />{p.city}</div>
+      <div className="meta mt-[3px] flex items-center gap-1"><Icon name="pin" size={11} className="opacity-50" />{p.city}{p.entidad ? `, ${p.entidad}` : ''}</div>
 
       <div className="flex justify-between items-center mt-[11px]">
         <span className="font-display font-bold text-[15px]">{fmtK(sel.projectTotalConIva(p))}</span>

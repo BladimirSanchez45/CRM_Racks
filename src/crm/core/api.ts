@@ -271,6 +271,7 @@ function mapProject(r: any): Project {
   return {
     id: r.id, code: r.code, stage: r.stage,
     client: r.client ?? '', seller: r.seller ?? '', city: r.city ?? '',
+    ...(r.entidad ? { entidad: r.entidad } : {}),
     ...(r.alias ? { alias: r.alias } : {}),
     ...(r.origen ? { origen: r.origen } : {}),
     ...(r.sistema_vendido ? { sistemaVendido: r.sistema_vendido } : {}),
@@ -294,6 +295,7 @@ function mapProject(r: any): Project {
 function projectRow(p: Project): Record<string, unknown> {
   return {
     id: p.id, code: p.code, stage: p.stage, client: p.client, seller: p.seller, city: p.city,
+    entidad: p.entidad ?? null,
     alias: p.alias ?? null,
     origen: p.origen ?? null,
     sistema_vendido: p.sistemaVendido ?? null, venta_subtotal: p.ventaSubtotal ?? null,
@@ -918,6 +920,7 @@ function mapProspect(r: any): Prospect {
     ...(r.email ? { email: r.email } : {}),
     ...(r.phone ? { phone: r.phone } : {}),
     ...(r.city ? { city: r.city } : {}),
+    ...(r.entidad ? { entidad: r.entidad } : {}),
     ...(r.fecha_asignacion ? { fechaAsignacion: r.fecha_asignacion } : {}),
     ...(r.ultimo_contacto ? { ultimoContacto: r.ultimo_contacto } : {}),
     ...(r.cotizacion ? { cotizacion: r.cotizacion } : {}),
@@ -955,6 +958,7 @@ function prospectRow(p: Prospect): Record<string, unknown> {
   return {
     id: p.id, name: p.name, seller: p.seller, estado: p.estado, resultado: p.resultado,
     empresa: p.empresa ?? null, email: p.email ?? null, phone: p.phone ?? null, city: p.city ?? null,
+    entidad: p.entidad ?? null,
     fecha_asignacion: orNull(p.fechaAsignacion), ultimo_contacto: orNull(p.ultimoContacto),
     cotizacion: p.cotizacion ?? null, cotizacion_path: p.cotizacionPath ?? null,
     cotizaciones: p.cotizaciones ?? [],

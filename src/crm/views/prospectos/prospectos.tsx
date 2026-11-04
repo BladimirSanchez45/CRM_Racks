@@ -5,7 +5,7 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
@@ -118,7 +118,7 @@ function seguimiento(p: Prospect): { label: string; color: string; dias: number 
    Formulario de prospecto
    ============================================================ */
 type ProspectFormState = {
-  id?: string; name: string; seller: string; empresa: string; email: string; phone: string; city: string
+  id?: string; name: string; seller: string; empresa: string; email: string; phone: string; city: string; entidad: string
   fechaAsignacion: string; estado: ProspectEstado; ultimoContacto: string; costo: number | string
   sistema: string; anuncio: string; resultado: ProspectResultado; notas: string
   cotizacion?: string; cotizacionPath?: string; cotizaciones: { name: string; path?: string }[]
@@ -134,7 +134,7 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
   const isVentas = !canSeeAllProspects(me)
   const [p, setP] = React.useState<ProspectFormState>(() => prospect ? {
     ...prospect,
-    empresa: prospect.empresa || '', email: prospect.email || '', phone: prospect.phone || '', city: prospect.city || '',
+    empresa: prospect.empresa || '', email: prospect.email || '', phone: prospect.phone || '', city: prospect.city || '', entidad: prospect.entidad || '',
     fechaAsignacion: prospect.fechaAsignacion || '', ultimoContacto: prospect.ultimoContacto || '',
     costo: prospect.costo ?? '', sistema: prospect.sistema || '', anuncio: prospect.anuncio || '', notas: prospect.notas || '',
     // Compatibilidad: si aún no tiene lista, siembra la cotización única anterior.
@@ -142,7 +142,7 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
       ? [...prospect.cotizaciones]
       : (prospect.cotizacion ? [{ name: prospect.cotizacion, path: prospect.cotizacionPath }] : []),
   } : {
-    name: '', seller: isVentas ? me!.id : '', empresa: '', email: '', phone: '', city: '',
+    name: '', seller: isVentas ? me!.id : '', empresa: '', email: '', phone: '', city: '', entidad: '',
     fechaAsignacion: TODAY_ISO, estado: 'Nuevo', ultimoContacto: TODAY_ISO, costo: '', sistema: '', anuncio: '',
     resultado: 'En espera', notas: '', cotizaciones: [],
   })
@@ -163,7 +163,8 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
     const payload: ProspectInput = {
       ...prospect, id: prospect?.id, name: p.name.trim(), seller, estado: p.estado, resultado: p.resultado,
       empresa: p.empresa.trim() || undefined, email: p.email.trim() || undefined, phone: p.phone.trim() || undefined,
-      city: p.city.trim() || undefined, fechaAsignacion: p.fechaAsignacion || undefined, ultimoContacto: p.ultimoContacto || undefined,
+      city: p.city.trim() || undefined, entidad: p.entidad || undefined,
+      fechaAsignacion: p.fechaAsignacion || undefined, ultimoContacto: p.ultimoContacto || undefined,
       costo: p.costo === '' ? undefined : +p.costo, sistema: p.sistema.trim() || undefined, anuncio: p.anuncio.trim() || undefined,
       notas: p.notas.trim() || undefined,
       // La lista manda; los campos legado reflejan la PRIMERA cotización.
@@ -186,6 +187,12 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
         <Field label="Teléfono"><Input value={p.phone} onChange={e => set('phone', e.target.value)} placeholder="55 0000 0000" /></Field>
         <Field label="Correo"><Input value={p.email} onChange={e => set('email', e.target.value)} placeholder="correo@ejemplo.com" /></Field>
         <Field label="Ciudad"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ciudad" /></Field>
+        <Field label="Estado (república)">
+          <Select value={p.entidad} onChange={e => set('entidad', e.target.value)}>
+            <option value="">Selecciona…</option>
+            {ESTADOS_MX.map(s => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </Field>
         {!isVentas && (
           <Field label="Vendedor">
             <Select value={p.seller} onChange={e => set('seller', e.target.value)}>
@@ -528,6 +535,7 @@ export function ProspectosPage() {
   const prefillFrom = (pr: Prospect): Partial<Project> => ({
     seller: pr.seller,
     city: pr.city || '',
+    entidad: pr.entidad,
     sistemaVendido: pr.sistema,
     origen: pr.anuncio,
     alias: pr.name,
@@ -608,7 +616,7 @@ export function ProspectosPage() {
                     <td className="text-[12px]">{sellerName(p.seller)}</td>
                     <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>
                     <td className="mono text-[12px]">{p.phone || '—'}</td>
-                    <td className="text-tx-1 text-[12px]">{p.city || '—'}</td>
+                    <td className="text-tx-1 text-[12px]">{p.city || '—'}{p.entidad && <div className="meta">{p.entidad}</div>}</td>
                     <td className="num text-tx-2 text-[12px]">{p.fechaAsignacion ? fmtDateShort(p.fechaAsignacion) : '—'}</td>
                     <td><Badge color={ESTADO_COLOR[p.estado]}>{p.estado}</Badge></td>
                     <td className="num text-tx-2 text-[12px]">{p.ultimoContacto ? fmtDateShort(p.ultimoContacto) : '—'}</td>

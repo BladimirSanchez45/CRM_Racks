@@ -375,6 +375,7 @@ export interface Project {
   client: string
   seller: string
   city: string
+  entidad?: string          // Estado de la república al que va (catálogo ESTADOS_MX); aparte de la ciudad
   alias?: string            // Nombre interno / alias con el que el vendedor ubica al cliente (la razón social a veces no la reconocen)
   origen?: string           // Origen del lead/venta (WebAd, CTC Ad…)
   sistemaVendido?: string   // Sistema vendido (tipo de rack/solución)
@@ -640,6 +641,7 @@ export interface Prospect {
   email?: string
   phone?: string
   city?: string
+  entidad?: string             // Estado de la república (catálogo ESTADOS_MX); aparte de la ciudad
   fechaAsignacion?: string     // Fecha de asignación (ISO date)
   estado: ProspectEstado
   ultimoContacto?: string      // Fecha del último contacto (ISO date); base del "Seguimiento"

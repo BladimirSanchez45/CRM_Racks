@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -98,6 +98,7 @@ type ProjectFormState = {
   client: string
   seller: string
   city: string
+  entidad?: string          // Estado de la república (catálogo ESTADOS_MX)
   alias?: string
   origen?: string
   sistemaVendido?: string
@@ -457,7 +458,7 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
           {p.alias && <InfoRow k="Nombre interno / Alias">{p.alias}</InfoRow>}
           <InfoRow k="Origen">{p.origen || '—'}</InfoRow>
           <InfoRow k="Sistema vendido">{p.sistemaVendido || '—'}</InfoRow>
-          <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}</InfoRow>
+          <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}{p.entidad ? <span className="text-tx-2">, {p.entidad}</span> : null}</InfoRow>
           <InfoRow k="Vendedor"><span className="inline-flex items-center gap-1.5"><Avatar name={seller ? seller.name : ''} size={20} /> {seller ? seller.name : '—'}</span></InfoRow>
           <InfoRow k="Fecha de registro">{p.created ? fmtDate(p.created) : '—'}</InfoRow>
           <InfoRow k="Semanas de entrega"><span className="mono">{p.weeks} sem</span></InfoRow>
@@ -675,7 +676,7 @@ const nextProjectCode = (projects: Project[]) => {
 
 const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
-  client: '', seller: '', city: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
+  client: '', seller: '', city: '', entidad: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending', created: TODAY_ISO,
   docs: { cotizacion: [], layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo(), excel: [], evidencia: [] },
 })
@@ -829,7 +830,13 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
         <Field label={<>Nombre interno / Alias <span className="meta font-normal">(opcional)</span></>}>
           <Input value={p.alias || ''} onChange={e => set('alias', e.target.value)} placeholder="Cómo conoces al cliente" />
         </Field>
-        <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey, N.L." /></Field>
+        <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey" /></Field>
+        <Field label="Estado (república)">
+          <Select value={p.entidad || ''} onChange={e => set('entidad', e.target.value)}>
+            <option value="">Selecciona…</option>
+            {ESTADOS_MX.map(s => <option key={s} value={s}>{s}</option>)}
+          </Select>
+        </Field>
         <Field label="Sistema vendido">
           <Select value={sistemaOtro ? SISTEMA_OTRO : (p.sistemaVendido || '')} onChange={e => {
             const v = e.target.value
