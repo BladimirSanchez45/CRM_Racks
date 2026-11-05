@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -98,6 +98,7 @@ type ProjectFormState = {
   client: string
   seller: string
   city: string
+  division?: string
   entidad?: string          // Estado de la república (catálogo ESTADOS_MX)
   alias?: string
   origen?: string
@@ -456,6 +457,7 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
           <div className="label-k mb-2">Datos generales</div>
           <InfoRow k="Cliente">{client ? client.name : '—'}</InfoRow>
           {p.alias && <InfoRow k="Nombre interno / Alias">{p.alias}</InfoRow>}
+          <InfoRow k="División">{p.division || <span className="text-tx-3">Sin división</span>}</InfoRow>
           <InfoRow k="Origen">{p.origen || '—'}</InfoRow>
           <InfoRow k="Sistema vendido">{p.sistemaVendido || '—'}</InfoRow>
           <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}{p.entidad ? <span className="text-tx-2">, {p.entidad}</span> : null}</InfoRow>
@@ -676,7 +678,7 @@ const nextProjectCode = (projects: Project[]) => {
 
 const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
-  client: '', seller: '', city: '', entidad: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
+  client: '', seller: '', city: '', entidad: '', division: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending', created: TODAY_ISO,
   docs: { cotizacion: [], layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo(), excel: [], evidencia: [] },
 })
@@ -784,7 +786,10 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
   const removeDocLista = (k: DocListKey, i: number) => setP(s => ({ ...s, docs: { ...s.docs, [k]: (s.docs[k] || []).filter((_, idx) => idx !== i) } }))
   const docFolder = `projects/${p.code || project?.id || 'nuevos'}`
 
-  const valid = p.client && p.city && p.seller
+  // División (CC Racks / Racks Tapatíos): obligatoria al registrar; los proyectos viejos
+  // sin división se pueden seguir editando, pero el campo queda marcado para capturarla.
+  const faltaDivision = !p.division
+  const valid = p.client && p.city && p.seller && (!isNew || !faltaDivision)
   const ventaSub = +(p.ventaSubtotal || 0)
   const ventaIva = ventaSub * 0.16
   const ventaTotal = ventaSub * 1.16
@@ -829,6 +834,12 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
         </Field>
         <Field label={<>Nombre interno / Alias <span className="meta font-normal">(opcional)</span></>}>
           <Input value={p.alias || ''} onChange={e => set('alias', e.target.value)} placeholder="Cómo conoces al cliente" />
+        </Field>
+        <Field label={<>División <span style={{ color: 'var(--danger)' }}>*</span>{!isNew && faltaDivision && <span className="meta font-normal"> · sin capturar</span>}</>}>
+          <Select value={p.division || ''} onChange={e => set('division', e.target.value)}>
+            <option value="">Selecciona…</option>
+            {DIVISIONES.map(m => <option key={m} value={m}>{m}</option>)}
+          </Select>
         </Field>
         <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey" /></Field>
         <Field label="Estado (república)">

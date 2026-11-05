@@ -5,7 +5,7 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, normalizeOrigen } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, normalizeOrigen } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
@@ -120,7 +120,7 @@ function seguimiento(p: Prospect): { label: string; color: string; dias: number 
    Formulario de prospecto
    ============================================================ */
 type ProspectFormState = {
-  id?: string; name: string; seller: string; empresa: string; email: string; phone: string; city: string; entidad: string
+  id?: string; name: string; seller: string; empresa: string; email: string; phone: string; city: string; entidad: string; division: string
   fechaAsignacion: string; estado: ProspectEstado; ultimoContacto: string; costo: number | string
   sistema: string; anuncio: string; resultado: ProspectResultado; notas: string
   cotizacion?: string; cotizacionPath?: string; cotizaciones: { name: string; path?: string }[]
@@ -136,7 +136,7 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
   const isVentas = !canSeeAllProspects(me)
   const [p, setP] = React.useState<ProspectFormState>(() => prospect ? {
     ...prospect,
-    empresa: prospect.empresa || '', email: prospect.email || '', phone: prospect.phone || '', city: prospect.city || '', entidad: prospect.entidad || '',
+    empresa: prospect.empresa || '', email: prospect.email || '', phone: prospect.phone || '', city: prospect.city || '', entidad: prospect.entidad || '', division: prospect.division || '',
     fechaAsignacion: prospect.fechaAsignacion || '', ultimoContacto: prospect.ultimoContacto || '',
     costo: prospect.costo ?? '', sistema: prospect.sistema || '', anuncio: prospect.anuncio || '', notas: prospect.notas || '',
     // Compatibilidad: si aún no tiene lista, siembra la cotización única anterior.
@@ -144,7 +144,7 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
       ? [...prospect.cotizaciones]
       : (prospect.cotizacion ? [{ name: prospect.cotizacion, path: prospect.cotizacionPath }] : []),
   } : {
-    name: '', seller: isVentas ? me!.id : '', empresa: '', email: '', phone: '', city: '', entidad: '',
+    name: '', seller: isVentas ? me!.id : '', empresa: '', email: '', phone: '', city: '', entidad: '', division: '',
     fechaAsignacion: TODAY_ISO, estado: 'Nuevo', ultimoContacto: TODAY_ISO, costo: '', sistema: '', anuncio: '',
     resultado: 'En espera', notas: '', cotizaciones: [],
   })
@@ -158,14 +158,17 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
   const [anuncioOtro, setAnuncioOtro] = React.useState(() => !!p.anuncio && !ORIGENES.includes(p.anuncio))
   // Sistema: catálogo cerrado (el mismo que en proyectos); lo que no esté en él es "Otro" (texto libre).
   const [sistemaOtro, setSistemaOtro] = React.useState(() => !!p.sistema && !SISTEMAS.includes(p.sistema))
-  const valid = p.name.trim() && p.seller
+  // División (CC Racks / Racks Tapatíos): obligatoria al registrar un prospecto nuevo.
+  const isNew = !prospect
+  const faltaDivision = !p.division
+  const valid = p.name.trim() && p.seller && (!isNew || !faltaDivision)
   const { requestClose, guard } = useUnsavedGuard(p, onClose)
   const save = () => {
     const seller = isVentas ? me!.id : p.seller
     const payload: ProspectInput = {
       ...prospect, id: prospect?.id, name: p.name.trim(), seller, estado: p.estado, resultado: p.resultado,
       empresa: p.empresa.trim() || undefined, email: p.email.trim() || undefined, phone: p.phone.trim() || undefined,
-      city: p.city.trim() || undefined, entidad: p.entidad || undefined,
+      city: p.city.trim() || undefined, entidad: p.entidad || undefined, division: p.division || undefined,
       fechaAsignacion: p.fechaAsignacion || undefined, ultimoContacto: p.ultimoContacto || undefined,
       costo: p.costo === '' ? undefined : +p.costo, sistema: p.sistema.trim() || undefined, anuncio: p.anuncio.trim() || undefined,
       notas: p.notas.trim() || undefined,
@@ -185,6 +188,12 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
       </>}>
       <div className="grid grid-cols-2 gap-3.5">
         <Field label="Nombre del prospecto"><Input value={p.name} onChange={e => set('name', e.target.value)} placeholder="Contacto" autoFocus /></Field>
+        <Field label={<>División <span style={{ color: 'var(--danger)' }}>*</span>{!isNew && faltaDivision && <span className="meta font-normal"> · sin capturar</span>}</>}>
+          <Select value={p.division} onChange={e => set('division', e.target.value)}>
+            <option value="">Selecciona…</option>
+            {DIVISIONES.map(m => <option key={m} value={m}>{m}</option>)}
+          </Select>
+        </Field>
         <Field label="Empresa"><Input value={p.empresa} onChange={e => set('empresa', e.target.value)} placeholder="Opcional" /></Field>
         <Field label="Teléfono"><Input value={p.phone} onChange={e => set('phone', e.target.value)} placeholder="55 0000 0000" /></Field>
         <Field label="Correo"><Input value={p.email} onChange={e => set('email', e.target.value)} placeholder="correo@ejemplo.com" /></Field>
@@ -526,7 +535,7 @@ export function ProspectosPage() {
       const s = scoreOf(p.evaluacion)
       const proj = p.convertedProjectId ? state.projects.find(x => x.id === p.convertedProjectId) : undefined
       return {
-        nombre: p.name, empresa: p.empresa || '', vendedor: sellerName(p.seller),
+        nombre: p.name, division: p.division || '', empresa: p.empresa || '', vendedor: sellerName(p.seller),
         telefono: p.phone || '', correo: p.email || '', region: p.entidad || '', ciudad: p.city || '',
         sistema: p.sistema || '', anuncio: p.anuncio || '',
         fechaAsignacion: p.fechaAsignacion || '', mes: mesKey(p), estado: p.estado,
@@ -562,6 +571,7 @@ export function ProspectosPage() {
     seller: pr.seller,
     city: pr.city || '',
     entidad: pr.entidad,
+    division: pr.division,
     sistemaVendido: pr.sistema,
     origen: pr.anuncio,
     alias: pr.name,

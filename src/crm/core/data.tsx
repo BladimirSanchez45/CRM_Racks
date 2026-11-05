@@ -101,6 +101,12 @@ export const isSalesManager = (u?: { email?: string } | null) =>
  *  admin, superadmin, dirección y el gerente de ventas (Javier). */
 export const canEditSalesGoals = (u?: { role?: Role; email?: string } | null) =>
   !!u && (isAdminRole(u.role) || isDireccion(u.role) || isSalesManager(u))
+/** Quién ve IVA, costos y utilidad por proyecto en el Excel de ventas: admin,
+ *  superadmin y las personas de esta lista (por correo). Los demás descargan el
+ *  mismo archivo sin esas columnas. */
+export const UTILIDAD_EXCEL_EMAILS = ['drios@ccracksmexico.com']
+export const canExportUtilidad = (u?: { role?: Role; email?: string } | null) =>
+  !!u && (isAdminRole(u.role) || (!!u.email && UTILIDAD_EXCEL_EMAILS.includes(u.email.toLowerCase())))
 /** Rol Ingeniería: por ahora SOLO ve proyectos (solo lectura). Se ampliará después. */
 export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 /** Rol Marketing: por ahora SOLO ve el módulo de Estadísticas por origen (solo lectura). */
@@ -277,6 +283,9 @@ export const normalizeOrigen = (raw?: string): string => {
   if (/anuncio|sin origen|no dice origen|respond|^(mini|select|mez|busca select|desistal)/.test(t)) return ''
   return 'Otro'
 }
+/** División con la que se vende: cada proyecto y prospecto nuevo debe decir
+ *  si corresponde a CC Racks o a Racks Tapatíos (obligatorio al registrar). */
+export const DIVISIONES = ['CC Racks', 'Racks Tapatíos']
 /** Estados de la república (entidades federativas), para el campo "Estado" de proyectos y prospectos. */
 export const ESTADOS_MX = [
   'Aguascalientes', 'Baja California', 'Baja California Sur', 'Campeche', 'Chiapas', 'Chihuahua',

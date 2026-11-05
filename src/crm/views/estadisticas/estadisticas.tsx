@@ -4,8 +4,8 @@
 //  cuánta utilidad deja cada uno. Solo lectura, sin desglose de costos.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, TODAY_ISO, MESES_L, normalizeOrigen } from '../../core/data'
-import { KPI, SecTitle, Empty, useFitTableHeight, useTabla, TablaCard } from '../../core/ui'
+import { useStore, sel, fmtMoney, TODAY_ISO, MESES_L, normalizeOrigen, DIVISIONES } from '../../core/data'
+import { KPI, SecTitle, Empty, Seg, useFitTableHeight, useTabla, TablaCard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 
 /** Suma un delta de meses a un 'YYYY-MM'. */
@@ -20,6 +20,7 @@ const ymLabel = (ym: string) => `${MESES_L[Number(ym.slice(5)) - 1]} ${ym.slice(
 const PALETTE = ['#2f6feb', '#14b8a6', '#f59e0b', '#c084fc', '#f472b6', '#38bdf8', '#34d399', '#fb7185']
 
 type Grupo = { origen: string; count: number; venta: number; utilidad: number; margen: number | null }
+const SIN_DIVISION = 'Sin división'
 
 export function EstadisticasPage() {
   const tabla = useFitTableHeight()   // tabla "Proyectos por utilidad" ajustada a la pantalla
@@ -33,7 +34,22 @@ export function EstadisticasPage() {
     const months = state.projects.map(p => p.created.slice(0, 7)).filter(Boolean)
     return months.length ? months.reduce((a, b) => (a < b ? a : b)) : currentYm
   }, [state.projects, currentYm])
-  const proyectosMes = React.useMemo(() => ym ? state.projects.filter(p => p.created.startsWith(ym)) : state.projects, [state.projects, ym])
+  const proyectosPeriodo = React.useMemo(() => ym ? state.projects.filter(p => p.created.startsWith(ym)) : state.projects, [state.projects, ym])
+  // División (CC Racks / Racks Tapatíos): '' = ambas. Acota KPIs, gráficas y tabla; el
+  // bloque "Por división" siempre compara las dos sobre el periodo completo.
+  const [division, setDivision] = React.useState('')
+  const proyectosMes = React.useMemo(() => division ? proyectosPeriodo.filter(p => (p.division || SIN_DIVISION) === division) : proyectosPeriodo, [proyectosPeriodo, division])
+  const porDivision = React.useMemo(() => {
+    const filas = [...DIVISIONES, SIN_DIVISION].map(m => {
+      const ps = proyectosPeriodo.filter(p => (p.division || SIN_DIVISION) === m)
+      const venta = ps.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
+      const utilidad = ps.reduce((a, p) => a + sel.projectUtilidadSub(state, p), 0)
+      return { division: m, count: ps.length, venta, utilidad, margen: venta > 0 ? (utilidad / venta) * 100 : null }
+    })
+    // "Sin división" solo aparece si hay proyectos viejos sin capturarla.
+    return filas.filter(f => f.division !== SIN_DIVISION || f.count > 0)
+  }, [state, proyectosPeriodo])
+  const totalPeriodo = proyectosPeriodo.length
 
   // Agrupa los proyectos del periodo por su origen (anuncio), llevado al catálogo:
   // "cliente viejito", "CLIENTE EXISTENTE" y "Ya era cliente" cuentan como uno solo.
@@ -64,18 +80,18 @@ export function EstadisticasPage() {
   // Proyectos individuales del periodo (vista general, sin desglose de costos).
   const proyectosCalc = React.useMemo(() =>
     proyectosMes.map(p => ({
-      p, cliente: sel.clientName(state, p.client), origen: normalizeOrigen(p.origen),
+      p, cliente: sel.clientName(state, p.client), origen: normalizeOrigen(p.origen), division: p.division || '',
       venta: p.ventaSubtotal || 0, utilidad: sel.projectUtilidadSub(state, p),
     })),
     [state, proyectosMes])
   // Tabla: filtro de texto por proyecto / cliente / origen y orden por cualquier columna (utilidad desc por defecto).
-  const tp = useTabla({ key: 'utilidad', dir: -1 }, ['proyecto', 'cliente', 'origen'] as const)
+  const tp = useTabla({ key: 'utilidad', dir: -1 }, ['proyecto', 'division', 'cliente', 'origen'] as const)
   const proyectos = proyectosCalc
-    .filter(x => tp.has(x.p.code, 'proyecto') && tp.has(x.cliente, 'cliente') && tp.has(x.origen || 'Sin origen', 'origen'))
+    .filter(x => tp.has(x.p.code, 'proyecto') && tp.has(x.division || SIN_DIVISION, 'division') && tp.has(x.cliente, 'cliente') && tp.has(x.origen || 'Sin origen', 'origen'))
     .sort((a, b) => {
       const k = tp.sort.key
       const val = (x: typeof a): string | number =>
-        k === 'proyecto' ? x.p.code : k === 'cliente' ? x.cliente : k === 'origen' ? x.origen : k === 'venta' ? x.venta
+        k === 'proyecto' ? x.p.code : k === 'division' ? x.division : k === 'cliente' ? x.cliente : k === 'origen' ? x.origen : k === 'venta' ? x.venta
         : k === 'margen' ? (x.venta > 0 ? x.utilidad / x.venta : -Infinity) : x.utilidad
       return tp.cmp(val(a), val(b))
     })
@@ -96,6 +112,8 @@ export function EstadisticasPage() {
     <div>
       <SecTitle title="Estadísticas" sub="Rendimiento por origen · ¿qué anuncio deja más?" right={
         <div className="flex items-center gap-2">
+          {/* División: ambas o solo una */}
+          <Seg value={division} onChange={setDivision} options={[{ value: '', label: 'Ambas divisiones' }, ...DIVISIONES.map(m => ({ value: m, label: m }))]} />
           {/* Periodo: todos los meses o un mes concreto (por fecha de registro del proyecto) */}
           <button className={'btn btn-sm ' + (ym ? 'btn-ghost' : '')} onClick={() => setYm('')} title="Ver todos los meses">Todo</button>
           <button className="btn btn-ghost btn-sm" disabled={!!ym && ym <= minYm} onClick={() => setYm(ym ? ymAdd(ym, -1) : currentYm)} title="Mes anterior">
@@ -172,6 +190,36 @@ export function EstadisticasPage() {
         </div>
       </div>
 
+      {/* Por división: CC Racks vs Racks Tapatíos en el periodo (sin importar el filtro de división) */}
+      <div className="card mb-4">
+        <div className="card-h">
+          <Icon name="flag" size={17} className="text-acc" />
+          <span className="ttl">Por división</span>
+          <span className="sub ml-auto">{ym ? ymLabel(ym) : 'Todos los meses'} · {totalPeriodo} proyectos</span>
+        </div>
+        <div className="card-b p-0">
+          <table className="tbl">
+            <thead><tr><th>División</th><th className="num">Proyectos</th><th className="num">% proyectos</th><th className="num">Venta</th><th className="num">% venta</th><th className="num">Utilidad</th><th className="num">Margen</th></tr></thead>
+            <tbody>
+              {porDivision.map(f => {
+                const totalVentaP = porDivision.reduce((a, x) => a + x.venta, 0)
+                return (
+                  <tr key={f.division} className={division === f.division ? 'bg-bg-1' : ''}>
+                    <td className="text-[12.5px] font-semibold text-tx-1">{f.division === SIN_DIVISION ? <span className="text-tx-3 font-normal">{SIN_DIVISION}</span> : f.division}</td>
+                    <td className="num">{f.count}</td>
+                    <td className="num text-[12.5px] text-tx-2">{totalPeriodo > 0 ? `${((f.count / totalPeriodo) * 100).toFixed(0)}%` : '—'}</td>
+                    <td className="num text-[12.5px]">{fmtMoney(f.venta)}</td>
+                    <td className="num text-[12.5px] text-tx-2">{totalVentaP > 0 ? `${((f.venta / totalVentaP) * 100).toFixed(0)}%` : '—'}</td>
+                    <td className="num font-semibold" style={{ color: f.utilidad < 0 ? 'var(--danger)' : 'var(--ok)' }}>{fmtMoney(f.utilidad)}</td>
+                    <td className="num text-[12.5px] text-tx-2">{f.margen != null ? `${f.margen.toFixed(1)}%` : '—'}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       {/* Resumen por origen */}
       <div className="card mb-4">
         <div className="card-h">
@@ -205,14 +253,15 @@ export function EstadisticasPage() {
         sub={`${proyectos.length}${proyectos.length !== proyectosCalc.length ? ` de ${proyectosCalc.length}` : ''} proyectos`}>
           <table className="tbl">
             <thead>
-              <tr>{tp.th('proyecto', 'Proyecto')}{tp.th('cliente', 'Cliente')}{tp.th('origen', 'Anuncio (origen)')}{tp.th('venta', 'Venta', 'num')}{tp.th('utilidad', 'Utilidad', 'num')}{tp.th('margen', 'Margen', 'num')}</tr>
-              {tp.verFiltros && <tr>{tp.fth('proyecto')}{tp.fth('cliente')}{tp.fth('origen')}{tp.fth()}{tp.fth()}{tp.fth()}</tr>}
+              <tr>{tp.th('proyecto', 'Proyecto')}{tp.th('division', 'División')}{tp.th('cliente', 'Cliente')}{tp.th('origen', 'Anuncio (origen)')}{tp.th('venta', 'Venta', 'num')}{tp.th('utilidad', 'Utilidad', 'num')}{tp.th('margen', 'Margen', 'num')}</tr>
+              {tp.verFiltros && <tr>{tp.fth('proyecto')}{tp.fth('division')}{tp.fth('cliente')}{tp.fth('origen')}{tp.fth()}{tp.fth()}{tp.fth()}</tr>}
             </thead>
             <tbody>
-              {proyectos.length === 0 && <tr><td colSpan={6}><Empty icon="projects">Ningún proyecto coincide con los filtros</Empty></td></tr>}
-              {proyectos.map(({ p, cliente, origen, venta, utilidad }) => (
+              {proyectos.length === 0 && <tr><td colSpan={7}><Empty icon="projects">Ningún proyecto coincide con los filtros</Empty></td></tr>}
+              {proyectos.map(({ p, cliente, origen, division: m, venta, utilidad }) => (
                 <tr key={p.id}>
                   <td><span className="mono text-acc font-semibold">{p.code}</span></td>
+                  <td className="text-[12.5px]">{m || <span className="text-tx-3">{SIN_DIVISION}</span>}</td>
                   <td className="text-[12.5px]">{cliente}</td>
                   {/* Origen llevado al catálogo; el texto original, si difiere, va en el tooltip. */}
                   <td className="text-[12.5px]" title={p.origen?.trim() || undefined}>{origen || <span className="text-tx-3">Sin origen</span>}</td>

@@ -5,7 +5,7 @@
 //  exportación a Excel. Navegable por mes para ver el histórico.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, canSeeAllProspects, moneyDigits, fmtMoneyInput, normalizeSistema } from '../../core/data'
+import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, canSeeAllProspects, canExportUtilidad, moneyDigits, fmtMoneyInput, normalizeSistema } from '../../core/data'
 import { KPI, SecTitle, Empty, useTabla, TablaCard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { exportVentasExcel } from '../../core/export_ventas'
@@ -207,6 +207,8 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   // Mismo criterio que la vista: proyectos registrados en esos meses por el equipo
   // (o el vendedor elegido); la meta del periodo es la suma de las metas mensuales.
   const [xls, setXls] = React.useState(false)
+  // IVA, costos y utilidad por proyecto en el Excel: solo admin y autorizados (David Ríos).
+  const conUtilidad = canExportUtilidad(me)
   const exportar = (r: RangoMeses) => {
     const meses = mesesEntre(r.desde, r.hasta)
     const suma = (ps: Project[]) => ps.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
@@ -233,16 +235,22 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     return exportVentasExcel({
       ym: vendedorSel ? `${archivo}_${vendedorSel.name.replace(/\s+/g, '_')}` : archivo,
       ymLabel: vendedorSel ? `${label} · ${vendedorSel.name}` : label,
-      hoy: TODAY_ISO, meta: metaPeriodo, vendido: vendidoMio,
+      hoy: TODAY_ISO, meta: metaPeriodo, vendido: vendidoMio, conUtilidad,
       vendedores: porV,
-      rows: mios.map(p => ({
-        fecha: p.created.slice(0, 10), proyecto: p.code,
-        cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '',
-        vendedor: sel.sellerName(state, p.seller),
-        sistema: p.sistemaVendido || '', origen: p.origen || '',
-        etapa: STAGES.find(s => s.id === p.stage)?.short || p.stage,
-        monto: p.ventaSubtotal || 0,
-      })),
+      rows: mios.map(p => {
+        const monto = p.ventaSubtotal || 0
+        // Utilidad sin IVA: misma fórmula que la ficha del proyecto (venta − compras − gastos).
+        const utilidad = conUtilidad ? sel.projectUtilidadSub(state, p) : 0
+        return {
+          fecha: p.created.slice(0, 10), proyecto: p.code, division: p.division || '',
+          cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '',
+          vendedor: sel.sellerName(state, p.seller),
+          sistema: p.sistemaVendido || '', origen: p.origen || '',
+          etapa: STAGES.find(s => s.id === p.stage)?.short || p.stage,
+          monto,
+          ...(conUtilidad ? { iva: monto * 0.16, total: monto * 1.16, costos: monto - utilidad, utilidad } : {}),
+        }
+      }),
       meses: meses.map(m => {
         const del = mios.filter(p => p.created.startsWith(m))
         return { ym: m, label: mesLargo(m), meta: metaMes(m), vendido: suma(del), ventas: del.length }

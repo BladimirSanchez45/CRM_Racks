@@ -10,6 +10,7 @@ import { MESES_L } from './data'
 
 export interface ProspectoRow {
   nombre: string
+  division: string               // CC Racks / Racks Tapatíos
   empresa: string
   vendedor: string
   telefono: string
@@ -111,6 +112,7 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
 
   const cols: { header: string; key: keyof ProspectoRow | 'iva'; width: number; kind?: 'money' | 'date' | 'num' }[] = [
     { header: 'Nombre', key: 'nombre', width: 26 },
+    { header: 'División', key: 'division', width: 15 },
     { header: 'Empresa', key: 'empresa', width: 22 },
     { header: 'Vendedor', key: 'vendedor', width: 22 },
     { header: 'Teléfono', key: 'telefono', width: 15 },

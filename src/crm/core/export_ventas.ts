@@ -12,6 +12,7 @@ import { loadExcelJS, descargarXlsx } from './excel_export'
 export interface VentaRow {
   fecha: string        // ISO 'YYYY-MM-DD'
   proyecto: string     // código PRY-…
+  division: string        // CC Racks / Racks Tapatíos
   cliente: string
   region: string       // estado de la república (entidad)
   ciudad: string       // ciudad destino
@@ -20,6 +21,11 @@ export interface VentaRow {
   origen: string
   etapa: string
   monto: number        // subtotal de la venta (sin IVA)
+  // Solo cuando se exporta CON utilidad (admin y autorizados): ver canExportUtilidad.
+  iva?: number         // IVA 16% de la venta
+  total?: number       // total con IVA
+  costos?: number      // compras + pagos internos + movimientos, a subtotal (sin IVA)
+  utilidad?: number    // utilidad sin IVA = monto − costos (misma fórmula que la ficha del proyecto)
 }
 
 /** Un mes del periodo (para la hoja "Por mes" cuando se exporta un rango). */
@@ -90,12 +96,16 @@ export async function exportVentasExcel(opts: {
   hoy: string            // ISO de hoy (fecha de generación)
   meta: number           // meta del periodo (suma de las metas mensuales si es un rango)
   vendido: number
+  /** Agrega IVA, total, costos, utilidad y margen por proyecto (y utilidad del periodo en Resumen).
+   *  Solo para quien pasa canExportUtilidad; las filas deben traer esos campos. */
+  conUtilidad?: boolean
   vendedores: VendedorRow[]
   rows: VentaRow[]
   /** Desglose mensual; con más de un mes se agrega la hoja "Por mes". */
   meses?: MesRow[]
 }): Promise<void> {
-  const { ym, ymLabel, hoy, meta, vendido, vendedores, rows, meses = [] } = opts
+  const { ym, ymLabel, hoy, meta, vendido, vendedores, rows, meses = [], conUtilidad = false } = opts
+  const utilidadPeriodo = rows.reduce((a, r) => a + (r.utilidad || 0), 0)
   const esRango = meses.length > 1
   const ExcelJS = await loadExcelJS()
   const wb = new ExcelJS.Workbook()
@@ -125,6 +135,10 @@ export async function exportVentasExcel(opts: {
     ['Vendido', vendido, '$#,##0.00'],
     ['Falta para la meta', falta, '$#,##0.00'],
     ['Avance', avance, '0.0%'],
+    ...(conUtilidad ? [
+      ['Utilidad (sin IVA)', utilidadPeriodo, '$#,##0.00'] as [string, number, string],
+      ['Margen sobre venta', vendido > 0 ? utilidadPeriodo / vendido : 0, '0.0%'] as [string, number, string],
+    ] : []),
   ]
   let row = 4
   for (const [label, value, fmt] of metaBlock) {
@@ -272,19 +286,31 @@ export async function exportVentasExcel(opts: {
     views: [{ state: 'frozen', ySplit: 4 }],
     pageSetup: { fitToPage: true, orientation: 'landscape' },
   })
-  const cols: { header: string; width: number; kind?: 'money' | 'date' }[] = [
-    { header: 'Fecha', width: 13, kind: 'date' },
-    { header: 'Proyecto', width: 15 },
-    { header: 'Cliente', width: 30 },
-    { header: 'Región', width: 18 },
-    { header: 'Ciudad', width: 18 },
-    { header: 'Vendedor', width: 22 },
-    { header: 'Sistema', width: 18 },
-    { header: 'Origen', width: 18 },
-    { header: 'Etapa', width: 18 },
-    { header: 'Venta (subtotal MXN)', width: 20, kind: 'money' },
+  type ColKey = keyof VentaRow | 'margen'
+  const cols: { header: string; key: ColKey; width: number; kind?: 'money' | 'date' | 'pct' }[] = [
+    { header: 'Fecha', key: 'fecha', width: 13, kind: 'date' },
+    { header: 'Proyecto', key: 'proyecto', width: 15 },
+    { header: 'División', key: 'division', width: 15 },
+    { header: 'Cliente', key: 'cliente', width: 30 },
+    { header: 'Región', key: 'region', width: 18 },
+    { header: 'Ciudad', key: 'ciudad', width: 18 },
+    { header: 'Vendedor', key: 'vendedor', width: 22 },
+    { header: 'Sistema', key: 'sistema', width: 18 },
+    { header: 'Origen', key: 'origen', width: 18 },
+    { header: 'Etapa', key: 'etapa', width: 18 },
+    { header: 'Venta (subtotal MXN)', key: 'monto', width: 20, kind: 'money' },
+    // Columnas de utilidad: solo para admin y autorizados (canExportUtilidad).
+    ...(conUtilidad ? [
+      { header: 'IVA 16%', key: 'iva' as ColKey, width: 16, kind: 'money' as const },
+      { header: 'Total con IVA', key: 'total' as ColKey, width: 18, kind: 'money' as const },
+      { header: 'Costos (sin IVA)', key: 'costos' as ColKey, width: 18, kind: 'money' as const },
+      { header: 'Utilidad (sin IVA)', key: 'utilidad' as ColKey, width: 18, kind: 'money' as const },
+      { header: 'Margen', key: 'margen' as ColKey, width: 10, kind: 'pct' as const },
+    ] : []),
   ]
   const nCols = cols.length
+  const colIdx = (key: ColKey) => cols.findIndex(c => c.key === key) + 1
+  const letra = (i: number) => String.fromCharCode(64 + i)   // 1 → 'A' (hasta 26 columnas)
 
   ws.mergeCells(1, 1, 1, nCols)
   const tCell = ws.getCell(1, 1)
@@ -303,7 +329,7 @@ export async function exportVentasExcel(opts: {
     cell.value = c.header
     cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F6FEB' } }
-    cell.alignment = { vertical: 'middle', horizontal: c.kind === 'money' ? 'right' : 'left' }
+    cell.alignment = { vertical: 'middle', horizontal: c.kind === 'money' || c.kind === 'pct' ? 'right' : 'left' }
     cell.border = { bottom: { style: 'thin', color: { argb: 'FF1B4FB0' } } }
   })
   headRow.height = 20
@@ -311,15 +337,25 @@ export async function exportVentasExcel(opts: {
 
   rows.forEach((r, idx) => {
     const row2 = ws.getRow(5 + idx)
-    const values: (string | number | Date | null)[] = [
-      isoToDate(r.fecha), r.proyecto, r.cliente, r.region || null, r.ciudad || null, r.vendedor, r.sistema || null, r.origen || null, r.etapa, r.monto,
-    ]
-    values.forEach((v, i) => {
+    const util = r.utilidad || 0
+    const valor = (c: typeof cols[number]): string | number | Date | null => {
+      switch (c.key) {
+        case 'fecha': return isoToDate(r.fecha)
+        case 'margen': return r.monto > 0 ? util / r.monto : null
+        case 'monto': return r.monto
+        case 'iva': case 'total': case 'costos': case 'utilidad': return r[c.key] ?? 0
+        default: return r[c.key] || null
+      }
+    }
+    cols.forEach((c, i) => {
       const cell = row2.getCell(i + 1)
-      cell.value = v
+      cell.value = valor(c)
       cell.font = { name: 'Calibri', size: 10 }
-      if (cols[i].kind === 'money') { cell.numFmt = '$#,##0.00'; cell.alignment = { horizontal: 'right' } }
-      if (cols[i].kind === 'date') cell.numFmt = 'dd/mm/yyyy'
+      if (c.kind === 'money') { cell.numFmt = '$#,##0.00'; cell.alignment = { horizontal: 'right' } }
+      if (c.kind === 'pct') { cell.numFmt = '0.0%'; cell.alignment = { horizontal: 'right' } }
+      if (c.kind === 'date') cell.numFmt = 'dd/mm/yyyy'
+      // Utilidad negativa en rojo (el proyecto deja pérdida).
+      if ((c.key === 'utilidad' || c.key === 'margen') && util < 0) cell.font = { name: 'Calibri', size: 10, color: { argb: 'FFB42318' } }
     })
     if (idx % 2 === 1) {
       for (let i = 1; i <= nCols; i++) {
@@ -328,16 +364,31 @@ export async function exportVentasExcel(opts: {
     }
   })
 
+  // Fila de totales: SUMA de cada columna de importe y, con utilidad, margen global (utilidad ÷ venta).
   const totalRowIdx = 5 + rows.length
   const totRow = ws.getRow(totalRowIdx)
-  totRow.getCell(nCols - 1).value = 'TOTAL'
-  totRow.getCell(nCols - 1).font = { bold: true }
-  totRow.getCell(nCols - 1).alignment = { horizontal: 'right' }
-  const totCell = totRow.getCell(nCols)
-  const colMonto = String.fromCharCode(64 + nCols)   // letra de la última columna (el importe)
-  totCell.value = { formula: `SUM(${colMonto}5:${colMonto}${totalRowIdx - 1})`, result: vendido }
-  totCell.numFmt = '$#,##0.00'
-  totCell.font = { bold: true }
+  const cEtapa = colIdx('etapa')
+  totRow.getCell(cEtapa).value = 'TOTAL'
+  totRow.getCell(cEtapa).font = { bold: true }
+  totRow.getCell(cEtapa).alignment = { horizontal: 'right' }
+  const sumaDe = (key: keyof VentaRow) => rows.reduce((a, r) => a + (Number(r[key]) || 0), 0)
+  for (const c of cols) {
+    if (c.kind !== 'money') continue
+    const i = colIdx(c.key), L = letra(i)
+    const cell = totRow.getCell(i)
+    cell.value = { formula: `SUM(${L}5:${L}${totalRowIdx - 1})`, result: sumaDe(c.key as keyof VentaRow) }
+    cell.numFmt = '$#,##0.00'
+    cell.font = { bold: true }
+    cell.alignment = { horizontal: 'right' }
+  }
+  if (conUtilidad) {
+    const mCell = totRow.getCell(colIdx('margen'))
+    const Lm = letra(colIdx('monto')), Lu = letra(colIdx('utilidad'))
+    mCell.value = { formula: `IF(${Lm}${totalRowIdx}>0,${Lu}${totalRowIdx}/${Lm}${totalRowIdx},0)`, result: vendido > 0 ? utilidadPeriodo / vendido : 0 }
+    mCell.numFmt = '0.0%'
+    mCell.font = { bold: true }
+    mCell.alignment = { horizontal: 'right' }
+  }
   for (let i = 1; i <= nCols; i++) totRow.getCell(i).border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } } }
   cols.forEach((c, i) => { ws.getColumn(i + 1).width = c.width })
 
