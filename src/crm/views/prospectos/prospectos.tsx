@@ -5,12 +5,13 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, normalizeOrigen } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
 import { exportProspectosExcel, type ProspectoRow } from '../../core/export_prospectos'
 import { excelErrorMsg } from '../../core/excel_export'
+import { RangoMesesModal, rangoLabel, type RangoMeses } from '../../core/excel_rango'
 import type { AppState, Project, Prospect, ProspectComment, ProspectEstado, ProspectEvaluation, ProspectInput, ProspectResultado } from '../../core/types'
 
 const ESTADOS: ProspectEstado[] = ['Nuevo', 'Contactado', 'Cotizado', 'Negociación']
@@ -86,6 +87,7 @@ const calidadOf = (p: Prospect): string | null => {
   return s == null || s <= 0 ? null : bandOf(s).label
 }
 const CALIDADES = ['Caliente', 'Bueno', 'Tibio', 'Frío', 'Sin evaluar']
+const SIN_ANUNCIO = 'Sin anuncio'
 
 /** Mes al que pertenece el prospecto ('YYYY-MM'), por fecha de asignación
  *  (o la fecha de alta si no tiene). Base del filtro por mes. */
@@ -396,7 +398,7 @@ export function ProspectosPage() {
   const [deconvert, setDeconvert] = React.useState<Prospect | null>(null)
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
-  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })
+  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '', anuncio: '' })
   // Orden por columna: clic en el encabezado alterna 1º / 2º / sin orden. Las columnas
   // numéricas y de fecha arrancan de mayor a menor (lo más grande o reciente arriba);
   // las de texto, de A a Z.
@@ -422,9 +424,14 @@ export function ProspectosPage() {
   const visibles = (verTodo ? state.prospects : state.prospects.filter(p => p.seller === me?.id))
     .filter(p => p.resultado !== 'Perdido')
 
-  const rows = visibles.filter(p => {
+  // Categoría de anuncio (origen) de un prospecto, llevada al catálogo ORIGENES:
+  // lo escrito a mano se reconoce, lo no reconocido es "Otro" y lo vacío "Sin anuncio".
+  const anuncioCat = (p: Prospect) => normalizeOrigen(p.anuncio) || SIN_ANUNCIO
+  // Filtros de la tabla; el de mes se pasa aparte para que el Excel pueda usar un rango.
+  const pasa = (p: Prospect, mes: (k: string) => boolean) => {
     if (f.seller && p.seller !== f.seller) return false
-    if (f.mes && mesKey(p) !== f.mes) return false
+    if (f.anuncio && anuncioCat(p) !== f.anuncio) return false
+    if (!mes(mesKey(p))) return false
     if (f.estado && p.estado !== f.estado) return false
     if (f.resultado && p.resultado !== f.resultado) return false
     if (f.calidad) {
@@ -436,18 +443,20 @@ export function ProspectosPage() {
       if (!hay.includes(f.q.toLowerCase())) return false
     }
     return true
-  })
+  }
+  const rows = visibles.filter(p => pasa(p, k => !f.mes || k === f.mes))
   // Valor de cada columna para ordenar. Seguimiento = días sin contacto (sin contacto
   // cuenta como el mayor rezago); estado y resultado siguen el orden del flujo; calidad
   // por puntaje; lo vacío (sin costo, sin evaluar) queda al final en orden descendente.
-  if (sort.key) {
+  const ordenar = (arr: Prospect[]) => {
+    if (!sort.key) return arr
     const val = (p: Prospect): string | number => {
       switch (sort.key) {
         case 'nombre': return p.name.toLowerCase()
         case 'vendedor': return sellerName(p.seller).toLowerCase()
         case 'empresa': return (p.empresa || '').toLowerCase()
         case 'telefono': return p.phone || ''
-        case 'ciudad': return (p.city || '').toLowerCase()
+        case 'ciudad': return `${p.entidad || ''} ${p.city || ''}`.trim().toLowerCase()
         case 'fechaAsig': return p.fechaAsignacion || ''
         case 'estado': return ESTADOS.indexOf(p.estado)
         case 'ultContacto': return p.ultimoContacto || ''
@@ -460,11 +469,18 @@ export function ProspectosPage() {
         default: return ''
       }
     }
-    rows.sort((a, b) => { const va = val(a), vb = val(b); return (va > vb ? 1 : va < vb ? -1 : 0) * sort.dir })
+    return arr.sort((a, b) => { const va = val(a), vb = val(b); return (va > vb ? 1 : va < vb ? -1 : 0) * sort.dir })
   }
+  ordenar(rows)
 
   // Opciones de vendedor (ids presentes en los prospectos VISIBLES).
   const sellerOpts = [...new Set(visibles.map(p => p.seller).filter(Boolean))]
+  // Categorías de anuncio presentes en los prospectos visibles, en el orden del catálogo
+  // (luego "Otro" y "Sin anuncio" si aplican).
+  const anuncioOpts = (() => {
+    const hay = new Set(visibles.map(anuncioCat))
+    return [...ORIGENES, 'Otro', SIN_ANUNCIO].filter(o => hay.has(o))
+  })()
   // Meses presentes en los prospectos (más reciente primero).
   const mesOpts = [...new Set(visibles.map(mesKey).filter(Boolean))].sort((a, b) => (a < b ? 1 : -1))
   // KPIs — reflejan EXACTAMENTE lo que muestra la tabla (todos los filtros aplicados).
@@ -483,37 +499,47 @@ export function ProspectosPage() {
     for (const [name, n] of conteo) if (!best || n > best.n) best = { name, n }
     return best
   })()
-  const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad || f.mes
+  const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad || f.mes || f.anuncio
 
-  // Exporta a Excel lo que está en la tabla (rows ya respeta TODOS los filtros; si no hay
-  // filtros, es todo lo visible). Con detalle y formato.
-  const exportExcel = () => {
+  // Comentario más reciente del prospecto, para el Excel: "dd/mm/aaaa · Autor: texto".
+  const ultimoComentario = (p: Prospect) => {
+    const c = (p.comments || []).reduce<ProspectComment | null>((best, x) => (!best || x.at > best.at ? x : best), null)
+    return c ? `${fmtDateShort(c.at.slice(0, 10))} · ${c.authorName || '—'}: ${c.text}` : ''
+  }
+  // Exporta a Excel con los filtros de la tabla, pero el MES lo decide el modal:
+  // solo el mes filtrado, un rango o todos los meses. Con detalle y formato.
+  const [xls, setXls] = React.useState(false)
+  const exportExcel = (r: RangoMeses) => {
+    const unMes = r.desde === r.hasta
+    const data0 = ordenar(visibles.filter(p => pasa(p, k => r.todos || (k >= r.desde && k <= r.hasta))))
     const partes: string[] = []
     if (f.seller) partes.push(`Vendedor: ${sellerName(f.seller)}`)
-    if (f.mes) partes.push(`Mes: ${mesLabel(f.mes)}`)
+    partes.push(r.todos ? 'Todos los meses' : `${unMes ? 'Mes' : 'Meses'}: ${rangoLabel(r)}`)
     if (f.estado) partes.push(`Estado: ${f.estado}`)
     if (f.resultado) partes.push(`Resultado: ${f.resultado}`)
     if (f.calidad) partes.push(`Calidad: ${f.calidad}`)
+    if (f.anuncio) partes.push(`Anuncio: ${f.anuncio}`)
     if (f.q) partes.push(`Búsqueda: "${f.q}"`)
-    const subtitulo = partes.length ? `Filtros — ${partes.join('  ·  ')}` : 'Todos los prospectos (sin filtro)'
-    const data: ProspectoRow[] = rows.map(p => {
+    const subtitulo = `Filtros — ${partes.join('  ·  ')}`
+    const data: ProspectoRow[] = data0.map(p => {
       const sg = seguimiento(p)
       const s = scoreOf(p.evaluacion)
       const proj = p.convertedProjectId ? state.projects.find(x => x.id === p.convertedProjectId) : undefined
       return {
         nombre: p.name, empresa: p.empresa || '', vendedor: sellerName(p.seller),
-        telefono: p.phone || '', correo: p.email || '', ciudad: p.city || '',
+        telefono: p.phone || '', correo: p.email || '', region: p.entidad || '', ciudad: p.city || '',
         sistema: p.sistema || '', anuncio: p.anuncio || '',
-        fechaAsignacion: p.fechaAsignacion || '', estado: p.estado,
+        fechaAsignacion: p.fechaAsignacion || '', mes: mesKey(p), estado: p.estado,
         ultimoContacto: p.ultimoContacto || '', seguimiento: sg.label,
         resultado: p.resultado, costo: p.costo ?? null,
         calidad: (s != null && s > 0) ? bandOf(s).label : 'Sin evaluar',
         puntaje: (s != null && s > 0) ? `${s}/25` : '',
-        convertido: proj ? proj.code : '', comentarios: p.comments?.length || 0,
+        convertido: proj ? proj.code : '', ultimoComentario: ultimoComentario(p),
         notas: p.notas || '',
       }
     })
-    exportProspectosExcel(data, { subtitulo, hoy: TODAY_ISO })
+    const archivo = r.todos ? `todos_${TODAY_ISO}` : unMes ? r.desde : `${r.desde}_a_${r.hasta}`
+    exportProspectosExcel(data, { subtitulo, hoy: TODAY_ISO, archivo })
       .catch(err => { console.error('[export] fallo al generar el Excel', err); alert(excelErrorMsg(err)) })
   }
 
@@ -552,10 +578,14 @@ export function ProspectosPage() {
       <div className="spread mb-[18px] flex-wrap gap-3">
         <div className="sec-title m-0"><h2>Prospectos</h2><span className="sub">Seguimiento de leads antes de registrar la venta</span></div>
         <div className="flex gap-2.5 items-center">
-          <button className="btn btn-ghost" title="Exportar a Excel lo que está filtrado (o todo)" onClick={exportExcel}><Icon name="download" size={15} /> Exportar Excel</button>
+          <button className="btn btn-ghost" title="Exportar a Excel: el mes filtrado, un rango o todos los meses (con los demás filtros de la tabla)" onClick={() => setXls(true)}><Icon name="download" size={15} /> Exportar Excel</button>
           {!readOnly && <button className="btn btn-primary" onClick={() => setForm({})}><Icon name="plus" size={15} /> Nuevo prospecto</button>}
         </div>
       </div>
+      {xls && (
+        <RangoMesesModal meses={mesOpts} mesActual={f.mes} titulo="Exportar prospectos"
+          onClose={() => setXls(false)} onExportar={exportExcel} />
+      )}
 
       <div className="grid grid-cols-4 gap-3.5 mb-4">
         <KPI label={f.seller ? `Prospectos · ${sellerName(f.seller)}` : 'Total prospectos'} value={kpiBase.length} icon="clients" accent />
@@ -590,11 +620,15 @@ export function ProspectosPage() {
           <option value="">Toda calidad</option>
           {CALIDADES.map(s => <option key={s} value={s}>{s}</option>)}
         </Select>
+        <Select value={f.anuncio} onChange={e => setF({ ...f, anuncio: e.target.value })} className="w-auto min-w-[150px]" title="Filtrar por tipo de anuncio (origen)">
+          <option value="">Todos los anuncios</option>
+          {anuncioOpts.map(a => <option key={a} value={a}>{a}</option>)}
+        </Select>
         <Select value={f.mes} onChange={e => setF({ ...f, mes: e.target.value })} className="w-auto min-w-[150px]">
           <option value="">Todos los meses</option>
           {mesOpts.map(m => <option key={m} value={m}>{mesLabel(m)}</option>)}
         </Select>
-        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '' })}><Icon name="close" size={13} /> Limpiar</button>}
+        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '', anuncio: '' })}><Icon name="close" size={13} /> Limpiar</button>}
         <span className="meta">{rows.length} de {visibles.length}</span>
       </div>
 
@@ -602,7 +636,7 @@ export function ProspectosPage() {
         <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr>
-              {th('nombre', 'Nombre')}{th('vendedor', 'Vendedor')}{th('empresa', 'Empresa')}{th('telefono', 'Teléfono')}{th('ciudad', 'Ciudad')}
+              {th('nombre', 'Nombre')}{th('vendedor', 'Vendedor')}{th('empresa', 'Empresa')}{th('telefono', 'Teléfono')}{th('ciudad', 'Región / Ciudad')}
               {th('fechaAsig', 'Fecha asig.')}{th('estado', 'Estado')}{th('ultContacto', 'Últ. contacto')}
               {th('seguimiento', 'Seguimiento')}
               {th('costo', 'Costo', 'num')}{th('resultado', 'Resultado')}{th('calidad', 'Calidad')}{th('sistema', 'Sistema')}{th('anuncio', 'Anuncio')}<th></th>
@@ -616,7 +650,7 @@ export function ProspectosPage() {
                     <td className="text-[12px]">{sellerName(p.seller)}</td>
                     <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>
                     <td className="mono text-[12px]">{p.phone || '—'}</td>
-                    <td className="text-tx-1 text-[12px]">{p.city || '—'}{p.entidad && <div className="meta">{p.entidad}</div>}</td>
+                    <td className="text-tx-1 text-[12px]">{p.entidad || p.city ? <>{p.entidad || <span className="text-tx-3">Sin región</span>}{p.city && <div className="meta">{p.city}</div>}</> : '—'}</td>
                     <td className="num text-tx-2 text-[12px]">{p.fechaAsignacion ? fmtDateShort(p.fechaAsignacion) : '—'}</td>
                     <td><Badge color={ESTADO_COLOR[p.estado]}>{p.estado}</Badge></td>
                     <td className="num text-tx-2 text-[12px]">{p.ultimoContacto ? fmtDateShort(p.ultimoContacto) : '—'}</td>
@@ -784,7 +818,7 @@ export function PerdidosPage() {
         <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr>
-              <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Ciudad</th>
+              <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Región / Ciudad</th>
               <th>Sistema</th><th>Calidad</th><th>Últ. contacto</th><th></th>
             </tr></thead>
             <tbody>
@@ -794,7 +828,7 @@ export function PerdidosPage() {
                   <td className="text-[12px]">{sellerNameOf(state, p.seller)}</td>
                   <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>
                   <td className="mono text-[12px]">{p.phone || '—'}</td>
-                  <td className="text-tx-1 text-[12px]">{p.city || '—'}</td>
+                  <td className="text-tx-1 text-[12px]">{p.entidad || p.city ? <>{p.entidad || <span className="text-tx-3">Sin región</span>}{p.city && <div className="meta">{p.city}</div>}</> : '—'}</td>
                   <td className="text-tx-2 text-[12px]">{p.sistema || '—'}</td>
                   <td>{(() => {
                     const s = scoreOf(p.evaluacion)

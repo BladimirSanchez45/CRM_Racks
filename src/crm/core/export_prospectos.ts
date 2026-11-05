@@ -6,6 +6,7 @@
 
 /** Una fila de prospecto ya "aplanada" (con los campos calculados resueltos). */
 import { loadExcelJS, descargarXlsx } from './excel_export'
+import { MESES_L } from './data'
 
 export interface ProspectoRow {
   nombre: string
@@ -13,10 +14,12 @@ export interface ProspectoRow {
   vendedor: string
   telefono: string
   correo: string
+  region: string              // estado de la república (entidad)
   ciudad: string
   sistema: string
   anuncio: string
   fechaAsignacion: string     // ISO 'YYYY-MM-DD' o ''
+  mes: string                 // 'YYYY-MM' al que pertenece (asignación o alta); para el desglose por mes
   estado: string
   ultimoContacto: string      // ISO 'YYYY-MM-DD' o ''
   seguimiento: string         // "Al día", "3 días"…
@@ -25,7 +28,7 @@ export interface ProspectoRow {
   calidad: string             // Caliente / Bueno / Tibio / Frío / Sin evaluar
   puntaje: string             // "21/25" o ""
   convertido: string          // código del proyecto o ""
-  comentarios: number
+  ultimoComentario: string    // "dd/mm/aaaa · Autor: texto" del comentario más reciente, o ''
   notas: string
 }
 
@@ -96,7 +99,7 @@ const CALIDAD_FILL: Record<string, string> = {
 }
 
 /** Genera y descarga el Excel de prospectos. `meta` describe los filtros aplicados. */
-export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtitulo: string; hoy: string }): Promise<void> {
+export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtitulo: string; hoy: string; archivo?: string }): Promise<void> {
   const ExcelJS = await loadExcelJS()
   const wb = new ExcelJS.Workbook()
   wb.creator = 'CC Racks CRM'
@@ -112,6 +115,7 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
     { header: 'Vendedor', key: 'vendedor', width: 22 },
     { header: 'Teléfono', key: 'telefono', width: 15 },
     { header: 'Correo', key: 'correo', width: 24 },
+    { header: 'Región', key: 'region', width: 18 },
     { header: 'Ciudad', key: 'ciudad', width: 16 },
     { header: 'Sistema', key: 'sistema', width: 14 },
     { header: 'Anuncio', key: 'anuncio', width: 20 },
@@ -124,10 +128,14 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
     { header: 'Calidad', key: 'calidad', width: 13 },
     { header: 'Puntaje', key: 'puntaje', width: 9 },
     { header: 'Proyecto', key: 'convertido', width: 14 },
-    { header: 'Comentarios', key: 'comentarios', width: 12, kind: 'num' },
+    { header: 'Último comentario', key: 'ultimoComentario', width: 44 },
     { header: 'Notas', key: 'notas', width: 40 },
   ]
   const nCols = cols.length
+  // Índice (1-based) de una columna por su clave, para no depender de posiciones fijas.
+  const colIdx = (key: string) => cols.findIndex(c => c.key === key) + 1
+  const cResultado = colIdx('resultado'), cCosto = colIdx('costo'), cCalidad = colIdx('calidad')
+  const letraCosto = String.fromCharCode(64 + cCosto)
 
   // --- Fila 1: título ---
   ws.mergeCells(1, 1, 1, nCols)
@@ -177,7 +185,7 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
         cell.alignment = { horizontal: 'right' }
       } else {
         cell.value = raw === '' || raw == null ? null : String(raw)
-        cell.alignment = { vertical: 'top', wrapText: c.key === 'notas' }
+        cell.alignment = { vertical: 'top', wrapText: c.key === 'notas' || c.key === 'ultimoComentario' }
       }
       cell.font = { name: 'Calibri', size: 10 }
     })
@@ -189,19 +197,19 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
       }
     }
     const resFill = RESULTADO_FILL[r.resultado]
-    if (resFill) row.getCell(13).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: resFill } }
+    if (resFill) row.getCell(cResultado).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: resFill } }
     const calFill = CALIDAD_FILL[r.calidad]
-    if (calFill) row.getCell(15).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: calFill } }
+    if (calFill) row.getCell(cCalidad).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: calFill } }
   })
 
   // --- Fila de totales ---
   const totalRowIdx = 5 + rows.length
   const totRow = ws.getRow(totalRowIdx)
-  totRow.getCell(13).value = 'TOTAL'
-  totRow.getCell(13).font = { bold: true }
-  totRow.getCell(13).alignment = { horizontal: 'right' }
-  const costoCell = totRow.getCell(14)
-  costoCell.value = { formula: `SUM(N5:N${totalRowIdx - 1})`, result: totalCosto }
+  totRow.getCell(cResultado).value = 'TOTAL'
+  totRow.getCell(cResultado).font = { bold: true }
+  totRow.getCell(cResultado).alignment = { horizontal: 'right' }
+  const costoCell = totRow.getCell(cCosto)
+  costoCell.value = { formula: `SUM(${letraCosto}5:${letraCosto}${totalRowIdx - 1})`, result: totalCosto }
   costoCell.numFmt = '$#,##0.00'
   costoCell.font = { bold: true }
   for (let i = 1; i <= nCols; i++) totRow.getCell(i).border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } } }
@@ -228,7 +236,12 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
   const sortByCosto = (a: Agg[]) => [...a].sort((x, y) => y.costo - x.costo)
 
   // Cada sección: tabla (izquierda) + su gráfica (derecha), apiladas.
+  // Por mes (solo si el archivo abarca más de un mes), en orden cronológico.
+  const porMes = aggBy(rows, r => r.mes)
+    .sort((a, b) => (a.label < b.label ? -1 : 1))
+    .map(a => ({ ...a, label: /^\d{4}-\d{2}$/.test(a.label) ? `${MESES_L[Number(a.label.slice(5)) - 1]} ${a.label.slice(0, 4)}` : a.label }))
   const secciones: { titulo: string; data: Agg[]; chartVal: 'count' | 'costo'; color: string }[] = [
+    ...(porMes.length > 1 ? [{ titulo: 'Por mes', data: porMes, chartVal: 'count' as const, color: 'FF0EA5E9' }] : []),
     { titulo: 'Por resultado', data: sortByCount(aggBy(rows, r => r.resultado)), chartVal: 'count', color: 'FF2F6FEB' },
     { titulo: 'Por vendedor', data: sortByCount(aggBy(rows, r => r.vendedor)).slice(0, 12), chartVal: 'count', color: 'FF16A34A' },
     { titulo: 'Por anuncio (origen)', data: sortByCount(aggBy(rows, r => r.anuncio)).slice(0, 12), chartVal: 'count', color: 'FF9333EA' },
@@ -291,5 +304,5 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
     row = Math.max(row + 2, tableTopRow + Math.ceil((44 + s.data.length * 26 + 14) / 18) + 2)
   }
 
-  await descargarXlsx(wb, `Prospectos_${meta.hoy}.xlsx`)
+  await descargarXlsx(wb, `Prospectos_${meta.archivo || meta.hoy}.xlsx`)
 }

@@ -1,8 +1,9 @@
 // ============================================================
 //  Exportación de VENTAS DEL MES a Excel (.xlsx) con formato.
-//  Usa ExcelJS (carga diferida). Dos hojas: "Resumen" (meta, avance
-//  y desglose por vendedor, con gráfica) y "Ventas" (una fila por
-//  venta registrada en el mes).
+//  Usa ExcelJS (carga diferida). Hojas: "Resumen" (meta, avance y
+//  desglose por vendedor, con gráfica), "Por mes" (solo si el archivo
+//  abarca varios meses: meta y vendido de cada uno) y "Ventas" (una
+//  fila por venta registrada en el periodo).
 // ============================================================
 
 import { loadExcelJS, descargarXlsx } from './excel_export'
@@ -12,6 +13,8 @@ export interface VentaRow {
   fecha: string        // ISO 'YYYY-MM-DD'
   proyecto: string     // código PRY-…
   cliente: string
+  region: string       // estado de la república (entidad)
+  ciudad: string       // ciudad destino
   vendedor: string
   sistema: string
   origen: string
@@ -19,7 +22,16 @@ export interface VentaRow {
   monto: number        // subtotal de la venta (sin IVA)
 }
 
-/** Resumen de un vendedor en el mes. */
+/** Un mes del periodo (para la hoja "Por mes" cuando se exporta un rango). */
+export interface MesRow {
+  ym: string           // 'YYYY-MM'
+  label: string        // "Agosto 2026"
+  meta: number
+  vendido: number
+  ventas: number       // número de ventas
+}
+
+/** Resumen de un vendedor en el periodo. */
 export interface VendedorRow {
   vendedor: string
   ventas: number
@@ -73,15 +85,18 @@ function barChartPng(title: string, rows: VendedorRow[]): string {
 
 /** Genera y descarga el Excel de ventas del mes. */
 export async function exportVentasExcel(opts: {
-  ym: string             // 'YYYY-MM'
-  ymLabel: string        // "Agosto 2026"
+  ym: string             // 'YYYY-MM' o 'YYYY-MM_a_YYYY-MM' (va en el nombre del archivo)
+  ymLabel: string        // "Agosto 2026" / "Agosto – Octubre 2026"
   hoy: string            // ISO de hoy (fecha de generación)
-  meta: number
+  meta: number           // meta del periodo (suma de las metas mensuales si es un rango)
   vendido: number
   vendedores: VendedorRow[]
   rows: VentaRow[]
+  /** Desglose mensual; con más de un mes se agrega la hoja "Por mes". */
+  meses?: MesRow[]
 }): Promise<void> {
-  const { ym, ymLabel, hoy, meta, vendido, vendedores, rows } = opts
+  const { ym, ymLabel, hoy, meta, vendido, vendedores, rows, meses = [] } = opts
+  const esRango = meses.length > 1
   const ExcelJS = await loadExcelJS()
   const wb = new ExcelJS.Workbook()
   wb.creator = 'CC Racks CRM'
@@ -106,7 +121,7 @@ export async function exportVentasExcel(opts: {
   const falta = Math.max(0, meta - vendido)
   const avance = meta > 0 ? vendido / meta : 0
   const metaBlock: [string, number | string, string?][] = [
-    ['Meta del mes', meta, '$#,##0.00'],
+    [esRango ? `Meta del periodo (${meses.length} meses)` : 'Meta del mes', meta, '$#,##0.00'],
     ['Vendido', vendido, '$#,##0.00'],
     ['Falta para la meta', falta, '$#,##0.00'],
     ['Avance', avance, '0.0%'],
@@ -187,7 +202,71 @@ export async function exportVentasExcel(opts: {
   }
 
   // ============================================================
-  //  Hoja "Ventas": una fila por venta registrada en el mes.
+  //  Hoja "Por mes" (solo rangos): meta, vendido, falta y avance de cada mes.
+  // ============================================================
+  if (esRango) {
+    const pm = wb.addWorksheet('Por mes', { views: [{ showGridLines: false }] })
+    pm.getColumn(1).width = 20
+    ;[2, 3, 4, 5, 6].forEach(i => { pm.getColumn(i).width = 16 })
+    pm.mergeCells('A1:F1')
+    pm.getCell('A1').value = `CC RACKS · Ventas por mes · ${ymLabel}`
+    pm.getCell('A1').font = { size: 15, bold: true, color: { argb: 'FF1B2230' } }
+    pm.mergeCells('A2:F2')
+    pm.getCell('A2').value = `${meses.length} meses  ·  Vendido ${money(vendido)}  ·  Meta ${money(meta)}  ·  Generado ${hoy}`
+    pm.getCell('A2').font = { size: 10, color: { argb: 'FF667085' } }
+    const hdr = ['Mes', 'Ventas', 'Vendido', 'Meta', 'Falta', 'Avance']
+    const hr = pm.getRow(4)
+    hdr.forEach((label, i) => {
+      const cell = hr.getCell(i + 1)
+      cell.value = label
+      cell.font = { size: 10, bold: true, color: { argb: 'FFFFFFFF' } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F6FEB' } }
+      cell.alignment = { horizontal: i === 0 ? 'left' : 'right' }
+    })
+    let r = 5
+    for (const m of meses) {
+      const rr = pm.getRow(r)
+      rr.getCell(1).value = m.label
+      rr.getCell(2).value = m.ventas
+      rr.getCell(3).value = m.vendido
+      rr.getCell(4).value = m.meta
+      rr.getCell(5).value = Math.max(0, m.meta - m.vendido)
+      rr.getCell(6).value = m.meta > 0 ? m.vendido / m.meta : 0
+      ;[3, 4, 5].forEach(i => { rr.getCell(i).numFmt = '$#,##0.00' })
+      rr.getCell(6).numFmt = '0.0%'
+      for (let i = 1; i <= 6; i++) {
+        rr.getCell(i).font = { size: 10 }
+        if (i > 1) rr.getCell(i).alignment = { horizontal: 'right' }
+      }
+      // verde si ese mes cumplió su meta
+      if (m.meta > 0 && m.vendido >= m.meta) rr.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD4EDDA' } }
+      r++
+    }
+    const tt = pm.getRow(r)
+    tt.getCell(1).value = 'Total'
+    tt.getCell(2).value = meses.reduce((a, m) => a + m.ventas, 0)
+    tt.getCell(3).value = vendido
+    tt.getCell(4).value = meta
+    tt.getCell(5).value = Math.max(0, meta - vendido)
+    tt.getCell(6).value = meta > 0 ? vendido / meta : 0
+    ;[3, 4, 5].forEach(i => { tt.getCell(i).numFmt = '$#,##0.00' })
+    tt.getCell(6).numFmt = '0.0%'
+    for (let i = 1; i <= 6; i++) {
+      tt.getCell(i).font = { bold: true, size: 10 }
+      tt.getCell(i).border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } } }
+      if (i > 1) tt.getCell(i).alignment = { horizontal: 'right' }
+    }
+    // Gráfica: vendido vs meta por mes.
+    const png = barChartPng(`Vendido vs meta · ${ymLabel}`, meses.map(m => ({
+      vendedor: m.label, ventas: m.ventas, total: m.vendido, ticket: 0, metaPersonal: m.meta,
+      pctMeta: m.meta > 0 ? (m.vendido / m.meta) * 100 : 0, pctEquipo: 0,
+    })))
+    const imgId = wb.addImage({ base64: png, extension: 'png' })
+    pm.addImage(imgId, { tl: { col: 0, row: r + 2 }, ext: { width: 500, height: 44 + meses.length * 26 + 14 } })
+  }
+
+  // ============================================================
+  //  Hoja "Ventas": una fila por venta registrada en el periodo.
   // ============================================================
   const ws = wb.addWorksheet('Ventas', {
     views: [{ state: 'frozen', ySplit: 4 }],
@@ -197,6 +276,8 @@ export async function exportVentasExcel(opts: {
     { header: 'Fecha', width: 13, kind: 'date' },
     { header: 'Proyecto', width: 15 },
     { header: 'Cliente', width: 30 },
+    { header: 'Región', width: 18 },
+    { header: 'Ciudad', width: 18 },
     { header: 'Vendedor', width: 22 },
     { header: 'Sistema', width: 18 },
     { header: 'Origen', width: 18 },
@@ -231,7 +312,7 @@ export async function exportVentasExcel(opts: {
   rows.forEach((r, idx) => {
     const row2 = ws.getRow(5 + idx)
     const values: (string | number | Date | null)[] = [
-      isoToDate(r.fecha), r.proyecto, r.cliente, r.vendedor, r.sistema || null, r.origen || null, r.etapa, r.monto,
+      isoToDate(r.fecha), r.proyecto, r.cliente, r.region || null, r.ciudad || null, r.vendedor, r.sistema || null, r.origen || null, r.etapa, r.monto,
     ]
     values.forEach((v, i) => {
       const cell = row2.getCell(i + 1)
@@ -253,7 +334,8 @@ export async function exportVentasExcel(opts: {
   totRow.getCell(nCols - 1).font = { bold: true }
   totRow.getCell(nCols - 1).alignment = { horizontal: 'right' }
   const totCell = totRow.getCell(nCols)
-  totCell.value = { formula: `SUM(H5:H${totalRowIdx - 1})`, result: vendido }
+  const colMonto = String.fromCharCode(64 + nCols)   // letra de la última columna (el importe)
+  totCell.value = { formula: `SUM(${colMonto}5:${colMonto}${totalRowIdx - 1})`, result: vendido }
   totCell.numFmt = '$#,##0.00'
   totCell.font = { bold: true }
   for (let i = 1; i <= nCols; i++) totRow.getCell(i).border = { top: { style: 'thin', color: { argb: 'FFCBD5E1' } } }

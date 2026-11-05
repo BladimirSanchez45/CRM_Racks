@@ -10,6 +10,7 @@ import { KPI, SecTitle, Empty, useTabla, TablaCard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { exportVentasExcel } from '../../core/export_ventas'
 import { excelErrorMsg } from '../../core/excel_export'
+import { RangoMesesModal, mesesEntre, mesLargo, rangoLabel, type RangoMeses } from '../../core/excel_rango'
 import type { Project } from '../../core/types'
 
 // Paleta estable por vendedor (mismo orden = mismo color en todas las gráficas).
@@ -202,24 +203,52 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     setEditSeller(null)
   }
 
-  const exportar = () => exportVentasExcel({
-    ym: vendedorSel ? `${ym}_${vendedorSel.name.replace(/\s+/g, '_')}` : ym,
-    ymLabel: vendedorSel ? `${ymLabel(ym)} · ${vendedorSel.name}` : ymLabel(ym),
-    hoy: TODAY_ISO, meta: metaSel, vendido: vendidoSel,
-    vendedores: porVendedor.filter(r => esMio({ seller: r.v.id })).map(r => ({
-      vendedor: r.v.name, ventas: r.n, total: r.total,
-      ticket: r.n > 0 ? r.total / r.n : 0, metaPersonal: r.meta,
-      pctMeta: r.meta > 0 ? (r.total / r.meta) * 100 : 0,
-      pctEquipo: vendido > 0 ? (r.total / vendido) * 100 : 0,
-    })),
-    rows: ventasSel.map(p => ({
-      fecha: p.created.slice(0, 10), proyecto: p.code,
-      cliente: sel.clientName(state, p.client), vendedor: sel.sellerName(state, p.seller),
-      sistema: p.sistemaVendido || '', origen: p.origen || '',
-      etapa: STAGES.find(s => s.id === p.stage)?.short || p.stage,
-      monto: p.ventaSubtotal || 0,
-    })),
-  })
+  // Excel del mes que se ve, de un rango o de todos los meses (lo elige el modal).
+  // Mismo criterio que la vista: proyectos registrados en esos meses por el equipo
+  // (o el vendedor elegido); la meta del periodo es la suma de las metas mensuales.
+  const [xls, setXls] = React.useState(false)
+  const exportar = (r: RangoMeses) => {
+    const meses = mesesEntre(r.desde, r.hasta)
+    const suma = (ps: Project[]) => ps.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
+    const equipo = state.projects
+      .filter(p => { const m = p.created.slice(0, 7); return m >= r.desde && m <= r.hasta && idsVendedores.has(p.seller) })
+      .sort((a, b) => b.created.localeCompare(a.created))
+    const mios = equipo.filter(esMio)
+    const metaMes = (m: string) => (vendedorSel ? sel.salesGoalFor(state, m, vendedorSel.id) : sel.salesGoal(state, m))
+    const metaPeriodo = meses.reduce((a, m) => a + metaMes(m), 0)
+    const vendidoEquipo = suma(equipo), vendidoMio = suma(mios)
+    const porV = vendedores.filter(v => esMio({ seller: v.id })).map(v => {
+      const mias = mios.filter(p => p.seller === v.id)
+      const total = suma(mias)
+      const metaP = meses.reduce((a, m) => a + sel.salesGoalFor(state, m, v.id), 0)
+      return {
+        vendedor: v.name, ventas: mias.length, total,
+        ticket: mias.length > 0 ? total / mias.length : 0, metaPersonal: metaP,
+        pctMeta: metaP > 0 ? (total / metaP) * 100 : 0,
+        pctEquipo: vendidoEquipo > 0 ? (total / vendidoEquipo) * 100 : 0,
+      }
+    }).sort((a, b) => b.total - a.total)
+    const label = r.todos ? `Todos los meses (${rangoLabel(r)})` : rangoLabel(r)
+    const archivo = r.desde === r.hasta ? r.desde : `${r.desde}_a_${r.hasta}`
+    return exportVentasExcel({
+      ym: vendedorSel ? `${archivo}_${vendedorSel.name.replace(/\s+/g, '_')}` : archivo,
+      ymLabel: vendedorSel ? `${label} · ${vendedorSel.name}` : label,
+      hoy: TODAY_ISO, meta: metaPeriodo, vendido: vendidoMio,
+      vendedores: porV,
+      rows: mios.map(p => ({
+        fecha: p.created.slice(0, 10), proyecto: p.code,
+        cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '',
+        vendedor: sel.sellerName(state, p.seller),
+        sistema: p.sistemaVendido || '', origen: p.origen || '',
+        etapa: STAGES.find(s => s.id === p.stage)?.short || p.stage,
+        monto: p.ventaSubtotal || 0,
+      })),
+      meses: meses.map(m => {
+        const del = mios.filter(p => p.created.startsWith(m))
+        return { ym: m, label: mesLargo(m), meta: metaMes(m), vendido: suma(del), ventas: del.length }
+      }),
+    })
+  }
 
   // Tabla "Detalle por vendedor": filtro por nombre, orden por cualquier columna (total desc por defecto).
   const tv = useTabla({ key: 'total', dir: -1 }, ['vendedor'] as const)
@@ -234,14 +263,15 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     })
 
   // Tabla "Ventas del mes": filtro de texto por columna, orden por cualquier columna (fecha desc por defecto).
-  const tl = useTabla({ key: 'fecha', dir: -1 }, ['fecha', 'proyecto', 'cliente', 'vendedor', 'sistema'] as const)
+  // Región / Ciudad = estado de la república (campo `entidad`) + ciudad destino del proyecto.
+  const tl = useTabla({ key: 'fecha', dir: -1 }, ['fecha', 'proyecto', 'cliente', 'region', 'vendedor', 'sistema'] as const)
   const filasVentas = ventasLista
-    .map(p => ({ p, fecha: p.created.slice(0, 10), cliente: sel.clientName(state, p.client), vendedor: sel.sellerName(state, p.seller), sistema: p.sistemaVendido || '', monto: p.ventaSubtotal || 0 }))
-    .filter(x => tl.has(fmtDateShort(x.fecha) + ' ' + x.fecha, 'fecha') && tl.has(x.p.code, 'proyecto') && tl.has(x.cliente, 'cliente') && tl.has(x.vendedor, 'vendedor') && tl.has(x.sistema, 'sistema'))
+    .map(p => ({ p, fecha: p.created.slice(0, 10), cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '', vendedor: sel.sellerName(state, p.seller), sistema: p.sistemaVendido || '', monto: p.ventaSubtotal || 0 }))
+    .filter(x => tl.has(fmtDateShort(x.fecha) + ' ' + x.fecha, 'fecha') && tl.has(x.p.code, 'proyecto') && tl.has(x.cliente, 'cliente') && tl.has(`${x.region} ${x.ciudad}`, 'region') && tl.has(x.vendedor, 'vendedor') && tl.has(x.sistema, 'sistema'))
     .sort((a, b) => {
       const k = tl.sort.key
       const val = (x: typeof a): string | number =>
-        k === 'proyecto' ? x.p.code : k === 'cliente' ? x.cliente : k === 'vendedor' ? x.vendedor : k === 'sistema' ? x.sistema : k === 'monto' ? x.monto : x.p.created
+        k === 'proyecto' ? x.p.code : k === 'cliente' ? x.cliente : k === 'region' ? `${x.region} ${x.ciudad}`.trim().toLowerCase() : k === 'vendedor' ? x.vendedor : k === 'sistema' ? x.sistema : k === 'monto' ? x.monto : x.p.created
       return tl.cmp(val(a), val(b))
     })
   const vendidoFiltrado = filasVentas.reduce((a, x) => a + x.monto, 0)
@@ -280,9 +310,15 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
               {canEdit && <button className="btn btn-ghost btn-sm" title={`Editar la meta de ${ymLabel(ym)}`} onClick={() => { setDraft(String(Math.round(meta))); setEditing(true) }}><Icon name="edit" size={13} /></button>}
             </span>
           )}
-          {!soloPorcentaje && <button className="btn btn-sm" onClick={() => exportar().catch(err => { console.error('[export] fallo al generar el Excel', err); alert(excelErrorMsg(err)) })}><Icon name="download" size={14} /> Excel</button>}
+          {!soloPorcentaje && <button className="btn btn-sm" onClick={() => setXls(true)} title="Exportar a Excel: este mes, un rango o todos los meses"><Icon name="download" size={14} /> Excel</button>}
         </div>
       } />
+      {xls && (
+        <RangoMesesModal meses={mesesEntre(minYm, currentYm)} mesActual={ym}
+          titulo={`Exportar ventas${vendedorSel ? ` · ${vendedorSel.name}` : ''}`}
+          onClose={() => setXls(false)}
+          onExportar={r => exportar(r).catch(err => { console.error('[export] fallo al generar el Excel', err); alert(excelErrorMsg(err)) })} />
+      )}
 
       {/* KPIs del mes */}
       <div className="grid grid-cols-4 gap-3.5 mb-5">
@@ -483,16 +519,17 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           {ventasLista.length === 0 ? <Empty icon="projects">{vendedorSel ? `${vendedorSel.name} no tiene ventas registradas este mes` : 'Sin ventas registradas este mes'}</Empty> : (
             <table className="tbl">
               <thead>
-                <tr>{tl.th('fecha', 'Fecha')}{tl.th('proyecto', 'Proyecto')}{tl.th('cliente', 'Cliente')}{tl.th('vendedor', 'Vendedor')}{tl.th('sistema', 'Sistema')}{tl.th('monto', 'Venta (subtotal)', 'num')}</tr>
-                {tl.verFiltros && <tr>{tl.fth('fecha')}{tl.fth('proyecto')}{tl.fth('cliente')}{tl.fth('vendedor')}{tl.fth('sistema')}{tl.fth()}</tr>}
+                <tr>{tl.th('fecha', 'Fecha')}{tl.th('proyecto', 'Proyecto')}{tl.th('cliente', 'Cliente')}{tl.th('region', 'Región / Ciudad')}{tl.th('vendedor', 'Vendedor')}{tl.th('sistema', 'Sistema')}{tl.th('monto', 'Venta (subtotal)', 'num')}</tr>
+                {tl.verFiltros && <tr>{tl.fth('fecha')}{tl.fth('proyecto')}{tl.fth('cliente')}{tl.fth('region')}{tl.fth('vendedor')}{tl.fth('sistema')}{tl.fth()}</tr>}
               </thead>
               <tbody>
-                {filasVentas.length === 0 && <tr><td colSpan={6}><Empty icon="projects">Ninguna venta coincide con los filtros</Empty></td></tr>}
-                {filasVentas.map(({ p, fecha, cliente, vendedor, sistema, monto }) => (
+                {filasVentas.length === 0 && <tr><td colSpan={7}><Empty icon="projects">Ninguna venta coincide con los filtros</Empty></td></tr>}
+                {filasVentas.map(({ p, fecha, cliente, region, ciudad, vendedor, sistema, monto }) => (
                   <tr key={p.id} onClick={() => onOpenProject(p)}>
                     <td className="num text-tx-2">{fmtDateShort(fecha)}</td>
                     <td><span className="mono text-acc font-semibold">{p.code}</span></td>
                     <td>{cliente}</td>
+                    <td className="text-[12.5px]">{region || ciudad ? <>{region || <span className="text-tx-3">Sin región</span>}{ciudad && <div className="meta">{ciudad}</div>}</> : '—'}</td>
                     <td className="text-[12.5px]">
                       <span className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle" style={{ background: colorOf(p.seller) }}></span>
                       {vendedor}
