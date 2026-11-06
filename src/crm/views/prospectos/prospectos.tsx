@@ -161,7 +161,9 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
   // División (CC Racks / Racks Tapatíos): obligatoria al registrar un prospecto nuevo.
   const isNew = !prospect
   const faltaDivision = !p.division
-  const valid = p.name.trim() && p.seller && (!isNew || !faltaDivision)
+  // Estado de la república: obligatorio al registrar (dirige las campañas de marketing).
+  const faltaEntidad = !p.entidad
+  const valid = p.name.trim() && p.seller && (!isNew || (!faltaDivision && !faltaEntidad))
   const { requestClose, guard } = useUnsavedGuard(p, onClose)
   const save = () => {
     const seller = isVentas ? me!.id : p.seller
@@ -198,7 +200,7 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
         <Field label="Teléfono"><Input value={p.phone} onChange={e => set('phone', e.target.value)} placeholder="55 0000 0000" /></Field>
         <Field label="Correo"><Input value={p.email} onChange={e => set('email', e.target.value)} placeholder="correo@ejemplo.com" /></Field>
         <Field label="Ciudad"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ciudad" /></Field>
-        <Field label="Estado (república)">
+        <Field label={<>Estado (república) <span style={{ color: 'var(--danger)' }}>*</span>{!isNew && faltaEntidad && <span className="meta font-normal"> · sin capturar</span>}</>}>
           <Select value={p.entidad} onChange={e => set('entidad', e.target.value)}>
             <option value="">Selecciona…</option>
             {ESTADOS_MX.map(s => <option key={s} value={s}>{s}</option>)}

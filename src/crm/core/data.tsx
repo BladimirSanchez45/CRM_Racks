@@ -257,7 +257,7 @@ export const normalizeSistema = (raw?: string): string => {
    que "Estadísticas por origen" no se fragmente por cómo se escribe. Los formularios
    (proyecto y prospecto) ofrecen estas opciones más "Otro (Especificar)". */
 export const ORIGENES = [
-  'WebAd', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack',
+  'Google ADS', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack',
   'Cliente existente', 'Referido', 'Contacto directo', 'Distribuidor',
 ]
 export const ORIGEN_OTRO = 'Otro (Especificar)'
@@ -274,7 +274,8 @@ export const normalizeOrigen = (raw?: string): string => {
   if (/ctc.*industrial/.test(t)) return 'CTC Ad Racks Industriales'
   if (/ctc.*mez/.test(t)) return 'CTC Ad Mezzanines'
   if (/ctc.*mini/.test(t)) return 'CTC Ad Minirack'
-  if (/web ?ad|google ad/.test(t)) return 'WebAd'
+  // "WebAd" fue el nombre anterior de este origen (step44 lo renombra en la base).
+  if (/web ?ad|google ad/.test(t)) return 'Google ADS'
   if (/referid|recomend/.test(t)) return 'Referido'
   if (/distribuidor|dsitribuidor/.test(t)) return 'Distribuidor'
   if (/cliente|antiguo|recuperad|cartera|ya era prospecto/.test(t)) return 'Cliente existente'
@@ -302,6 +303,21 @@ export const fmtDateShort = (d?: string) => { if (!d) return '—'; const x = ne
 export const TODAY = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })()
 export const TODAY_ISO = `${TODAY.getFullYear()}-${String(TODAY.getMonth() + 1).padStart(2, '0')}-${String(TODAY.getDate()).padStart(2, '0')}`
 export const daysBetween = (d?: string) => { if (!d) return null; const x = new Date(d + 'T00:00:00'); return Math.round((x.getTime() - TODAY.getTime()) / 86400000) }
+/** Días de `a` a `b` (fechas ISO 'YYYY-MM-DD'); null si falta alguna. */
+export const diasEntre = (a?: string, b?: string) => {
+  if (!a || !b) return null
+  const x = new Date(a.slice(0, 10) + 'T00:00:00'), y = new Date(b.slice(0, 10) + 'T00:00:00')
+  return Math.round((y.getTime() - x.getTime()) / 86400000)
+}
+/** Fecha local 'YYYY-MM-DD' de un timestamp ISO (created_at). Se usa la hora local
+ *  para que un alta de las 7 pm no caiga en el día siguiente por el cambio a UTC. */
+export const fechaLocal = (ts?: string) => {
+  if (!ts) return ''
+  if (ts.length <= 10) return ts
+  const d = new Date(ts)
+  if (isNaN(d.getTime())) return ts.slice(0, 10)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 // Suma `days` días a una fecha ISO (o a hoy si no se da base) y devuelve ISO (YYYY-MM-DD).
 export const addDays = (days: number, base?: string) => {
   const d = base ? new Date(base + 'T00:00:00') : new Date(TODAY)
@@ -2229,6 +2245,18 @@ export function useStore(): StoreValue {
 /* ---- Selectors ---- */
 export const sel = {
   clientName: (state: AppState, id: string) => (state.clients.find(c => c.id === id) || ({} as Client)).name || '—',
+  /** Prospecto del que nació el proyecto (el que se convirtió con "Registrar venta"), o undefined
+   *  si el proyecto se registró directo. El vínculo vive en prospect.convertedProjectId. */
+  prospectOf: (state: AppState, p: Project) => state.prospects.find(x => x.convertedProjectId === p.id),
+  /** Fechas del proceso comercial de un proyecto, leídas del prospecto ligado:
+   *  alta del prospecto (fecha de origen), fecha de asignación y días de la asignación
+   *  (o del alta, si no hay asignación) al registro de la venta. */
+  prospectoFechas: (state: AppState, p: Project) => {
+    const pr = sel.prospectOf(state, p)
+    if (!pr) return { prospecto: undefined, alta: '', asignacion: '', diasCierre: null as number | null }
+    const alta = fechaLocal(pr.createdAt), asignacion = pr.fechaAsignacion || ''
+    return { prospecto: pr, alta, asignacion, diasCierre: diasEntre(asignacion || alta, p.created) }
+  },
   /** Abono del banco ligado a un cobro (si el cobro se concilió desde Bancos). */
   bankTxForPayment: (state: AppState, cpId: string) => state.bankTxs.find(t => t.clientPaymentId === cpId),
   /** CFDI (facturas / complementos) de un abono, en orden de carga. */

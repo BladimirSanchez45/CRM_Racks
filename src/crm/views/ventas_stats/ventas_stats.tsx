@@ -241,11 +241,13 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
         const monto = p.ventaSubtotal || 0
         // Utilidad sin IVA: misma fórmula que la ficha del proyecto (venta − compras − gastos).
         const utilidad = conUtilidad ? sel.projectUtilidadSub(state, p) : 0
+        const pf = sel.prospectoFechas(state, p)
         return {
           fecha: p.created.slice(0, 10), proyecto: p.code, division: p.division || '',
           cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '',
           vendedor: sel.sellerName(state, p.seller),
           sistema: p.sistemaVendido || '', origen: p.origen || '',
+          prospectoAlta: pf.alta, prospectoAsignacion: pf.asignacion, diasCierre: pf.diasCierre,
           etapa: STAGES.find(s => s.id === p.stage)?.short || p.stage,
           monto,
           ...(conUtilidad ? { iva: monto * 0.16, total: monto * 1.16, costos: monto - utilidad, utilidad } : {}),
@@ -272,14 +274,16 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
 
   // Tabla "Ventas del mes": filtro de texto por columna, orden por cualquier columna (fecha desc por defecto).
   // Región / Ciudad = estado de la república (campo `entidad`) + ciudad destino del proyecto.
-  const tl = useTabla({ key: 'fecha', dir: -1 }, ['fecha', 'proyecto', 'cliente', 'region', 'vendedor', 'sistema'] as const)
+  // Prospecto = alta y asignación del prospecto del que nació la venta ("Directo" si no hubo).
+  const tl = useTabla({ key: 'fecha', dir: -1 }, ['fecha', 'proyecto', 'cliente', 'region', 'vendedor', 'sistema', 'prospecto'] as const)
   const filasVentas = ventasLista
-    .map(p => ({ p, fecha: p.created.slice(0, 10), cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '', vendedor: sel.sellerName(state, p.seller), sistema: p.sistemaVendido || '', monto: p.ventaSubtotal || 0 }))
-    .filter(x => tl.has(fmtDateShort(x.fecha) + ' ' + x.fecha, 'fecha') && tl.has(x.p.code, 'proyecto') && tl.has(x.cliente, 'cliente') && tl.has(`${x.region} ${x.ciudad}`, 'region') && tl.has(x.vendedor, 'vendedor') && tl.has(x.sistema, 'sistema'))
+    .map(p => ({ p, fecha: p.created.slice(0, 10), cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '', vendedor: sel.sellerName(state, p.seller), sistema: p.sistemaVendido || '', monto: p.ventaSubtotal || 0, pf: sel.prospectoFechas(state, p) }))
+    .filter(x => tl.has(fmtDateShort(x.fecha) + ' ' + x.fecha, 'fecha') && tl.has(x.p.code, 'proyecto') && tl.has(x.cliente, 'cliente') && tl.has(`${x.region} ${x.ciudad}`, 'region') && tl.has(x.vendedor, 'vendedor') && tl.has(x.sistema, 'sistema')
+      && tl.has(x.pf.prospecto ? `${x.pf.prospecto.name} ${fmtDateShort(x.pf.alta)} ${fmtDateShort(x.pf.asignacion)} ${x.pf.alta} ${x.pf.asignacion}` : 'Directo', 'prospecto'))
     .sort((a, b) => {
       const k = tl.sort.key
       const val = (x: typeof a): string | number =>
-        k === 'proyecto' ? x.p.code : k === 'cliente' ? x.cliente : k === 'region' ? `${x.region} ${x.ciudad}`.trim().toLowerCase() : k === 'vendedor' ? x.vendedor : k === 'sistema' ? x.sistema : k === 'monto' ? x.monto : x.p.created
+        k === 'proyecto' ? x.p.code : k === 'cliente' ? x.cliente : k === 'region' ? `${x.region} ${x.ciudad}`.trim().toLowerCase() : k === 'vendedor' ? x.vendedor : k === 'sistema' ? x.sistema : k === 'monto' ? x.monto : k === 'prospecto' ? (x.pf.asignacion || x.pf.alta || '') : x.p.created
       return tl.cmp(val(a), val(b))
     })
   const vendidoFiltrado = filasVentas.reduce((a, x) => a + x.monto, 0)
@@ -527,12 +531,12 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           {ventasLista.length === 0 ? <Empty icon="projects">{vendedorSel ? `${vendedorSel.name} no tiene ventas registradas este mes` : 'Sin ventas registradas este mes'}</Empty> : (
             <table className="tbl">
               <thead>
-                <tr>{tl.th('fecha', 'Fecha')}{tl.th('proyecto', 'Proyecto')}{tl.th('cliente', 'Cliente')}{tl.th('region', 'Región / Ciudad')}{tl.th('vendedor', 'Vendedor')}{tl.th('sistema', 'Sistema')}{tl.th('monto', 'Venta (subtotal)', 'num')}</tr>
-                {tl.verFiltros && <tr>{tl.fth('fecha')}{tl.fth('proyecto')}{tl.fth('cliente')}{tl.fth('region')}{tl.fth('vendedor')}{tl.fth('sistema')}{tl.fth()}</tr>}
+                <tr>{tl.th('fecha', 'Fecha')}{tl.th('proyecto', 'Proyecto')}{tl.th('cliente', 'Cliente')}{tl.th('region', 'Región / Ciudad')}{tl.th('vendedor', 'Vendedor')}{tl.th('sistema', 'Sistema')}{tl.th('prospecto', 'Prospecto (alta · asignación)')}{tl.th('monto', 'Venta (subtotal)', 'num')}</tr>
+                {tl.verFiltros && <tr>{tl.fth('fecha')}{tl.fth('proyecto')}{tl.fth('cliente')}{tl.fth('region')}{tl.fth('vendedor')}{tl.fth('sistema')}{tl.fth('prospecto')}{tl.fth()}</tr>}
               </thead>
               <tbody>
-                {filasVentas.length === 0 && <tr><td colSpan={7}><Empty icon="projects">Ninguna venta coincide con los filtros</Empty></td></tr>}
-                {filasVentas.map(({ p, fecha, cliente, region, ciudad, vendedor, sistema, monto }) => (
+                {filasVentas.length === 0 && <tr><td colSpan={8}><Empty icon="projects">Ninguna venta coincide con los filtros</Empty></td></tr>}
+                {filasVentas.map(({ p, fecha, cliente, region, ciudad, vendedor, sistema, monto, pf }) => (
                   <tr key={p.id} onClick={() => onOpenProject(p)}>
                     <td className="num text-tx-2">{fmtDateShort(fecha)}</td>
                     <td><span className="mono text-acc font-semibold">{p.code}</span></td>
@@ -543,6 +547,11 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
                       {vendedor}
                     </td>
                     <td className="text-[12.5px] text-tx-2">{sistema || '—'}</td>
+                    {/* Fechas del prospecto de origen: alta (registro) y asignación, con los días hasta la venta. */}
+                    <td className="text-[12.5px]">{pf.prospecto ? (
+                      <><span title={pf.prospecto.name}>{fmtDateShort(pf.alta)}</span>{pf.asignacion && <span className="text-tx-2"> · {fmtDateShort(pf.asignacion)}</span>}
+                        {pf.diasCierre != null && <div className="meta">{pf.diasCierre} día{pf.diasCierre === 1 ? '' : 's'} a cierre</div>}</>
+                    ) : <span className="text-tx-3" title="Proyecto registrado directo, sin prospecto">Directo</span>}</td>
                     <td className="num font-semibold">{fmtMoney(monto)}</td>
                   </tr>
                 ))}

@@ -378,7 +378,7 @@ export interface Project {
   entidad?: string          // Estado de la república al que va (catálogo ESTADOS_MX); aparte de la ciudad
   division?: string            // 'CC Racks' | 'Racks Tapatíos' (catálogo DIVISIONES); obligatorio al registrar, vacío en registros viejos
   alias?: string            // Nombre interno / alias con el que el vendedor ubica al cliente (la razón social a veces no la reconocen)
-  origen?: string           // Origen del lead/venta (WebAd, CTC Ad…)
+  origen?: string           // Origen del lead/venta (Google ADS, CTC Ad…)
   sistemaVendido?: string   // Sistema vendido (tipo de rack/solución)
   ventaSubtotal?: number    // Subtotal de la venta (YA incluye flete e instalación). IVA y total se calculan de aquí.
   freight: number           // Presupuesto de flete (informativo; incluido en ventaSubtotal)
@@ -529,7 +529,7 @@ export interface VacationRequest {
  *  de la campaña; el % es derivado (amount / campaign.budget). */
 export interface CampaignAd {
   id: string
-  name: string            // nombre del anuncio (ej. "Anuncio 1", "WebAd Mezzanines")
+  name: string            // nombre del anuncio (ej. "Anuncio 1", "Google ADS Mezzanines")
   amount: number          // presupuesto asignado al anuncio (MXN)
 }
 

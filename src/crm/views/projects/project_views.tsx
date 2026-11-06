@@ -306,6 +306,8 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
   const p = state.projects.find(x => x.id === project.id) || project
   const client = sel.client(state, p.client)
   const seller = sel.seller(state, p.seller)
+  // Prospecto del que nació la venta (si se registró con "Registrar venta" desde Prospectos).
+  const pf = sel.prospectoFechas(state, p)
   const ocs = sel.ordersForProject(state, p.id)
   const eta = daysBetween(p.eta)
   const ventaSub = p.ventaSubtotal || 0
@@ -463,6 +465,12 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
           <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}{p.entidad ? <span className="text-tx-2">, {p.entidad}</span> : null}</InfoRow>
           <InfoRow k="Vendedor"><span className="inline-flex items-center gap-1.5"><Avatar name={seller ? seller.name : ''} size={20} /> {seller ? seller.name : '—'}</span></InfoRow>
           <InfoRow k="Fecha de registro">{p.created ? fmtDate(p.created) : '—'}</InfoRow>
+          {pf.prospecto && (
+            <InfoRow k="Prospecto de origen">
+              {pf.prospecto.name}
+              <div className="meta">Alta {fmtDate(pf.alta)}{pf.asignacion && <> · Asignado {fmtDate(pf.asignacion)}</>}{pf.diasCierre != null && <> · {pf.diasCierre} día{pf.diasCierre === 1 ? '' : 's'} a cierre</>}</div>
+            </InfoRow>
+          )}
           <InfoRow k="Semanas de entrega"><span className="mono">{p.weeks} sem</span></InfoRow>
           <InfoRow k="ETA proveedor">{p.eta ? <span>{fmtDate(p.eta)} {eta != null && <span className="font-mono text-[11px]" style={{ color: eta < 0 ? 'var(--danger)' : eta < 7 ? 'var(--warn)' : 'var(--tx-2)' }}>({eta < 0 ? `${-eta}d vencido` : eta + 'd'})</span>}</span> : '—'}</InfoRow>
           <InfoRow k="Finiquito"><PayBadge status={p.finiquito} /></InfoRow>
@@ -789,7 +797,9 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
   // División (CC Racks / Racks Tapatíos): obligatoria al registrar; los proyectos viejos
   // sin división se pueden seguir editando, pero el campo queda marcado para capturarla.
   const faltaDivision = !p.division
-  const valid = p.client && p.city && p.seller && (!isNew || !faltaDivision)
+  // Estado de la república: obligatorio al registrar (dirige las campañas de marketing).
+  const faltaEntidad = !p.entidad
+  const valid = p.client && p.city && p.seller && (!isNew || (!faltaDivision && !faltaEntidad))
   const ventaSub = +(p.ventaSubtotal || 0)
   const ventaIva = ventaSub * 0.16
   const ventaTotal = ventaSub * 1.16
@@ -842,7 +852,7 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
           </Select>
         </Field>
         <Field label="Ciudad destino"><Input value={p.city} onChange={e => set('city', e.target.value)} placeholder="Ej. Monterrey" /></Field>
-        <Field label="Estado (república)">
+        <Field label={<>Estado (república) <span style={{ color: 'var(--danger)' }}>*</span>{!isNew && faltaEntidad && <span className="meta font-normal"> · sin capturar</span>}</>}>
           <Select value={p.entidad || ''} onChange={e => set('entidad', e.target.value)}>
             <option value="">Selecciona…</option>
             {ESTADOS_MX.map(s => <option key={s} value={s}>{s}</option>)}

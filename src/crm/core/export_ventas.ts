@@ -3,7 +3,8 @@
 //  Usa ExcelJS (carga diferida). Hojas: "Resumen" (meta, avance y
 //  desglose por vendedor, con gráfica), "Por mes" (solo si el archivo
 //  abarca varios meses: meta y vendido de cada uno) y "Ventas" (una
-//  fila por venta registrada en el periodo).
+//  fila por venta registrada en el periodo, con las fechas del prospecto
+//  de origen cuando la venta nació de uno).
 // ============================================================
 
 import { loadExcelJS, descargarXlsx } from './excel_export'
@@ -20,6 +21,10 @@ export interface VentaRow {
   sistema: string
   origen: string
   etapa: string
+  // Proceso comercial, leído del prospecto ligado (vacío si el proyecto se registró directo).
+  prospectoAlta: string        // alta del prospecto (fecha de origen) ISO 'YYYY-MM-DD'
+  prospectoAsignacion: string  // fecha de asignación del prospecto ISO 'YYYY-MM-DD'
+  diasCierre: number | null    // días de la asignación (o alta) al registro de la venta
   monto: number        // subtotal de la venta (sin IVA)
   // Solo cuando se exporta CON utilidad (admin y autorizados): ver canExportUtilidad.
   iva?: number         // IVA 16% de la venta
@@ -287,7 +292,7 @@ export async function exportVentasExcel(opts: {
     pageSetup: { fitToPage: true, orientation: 'landscape' },
   })
   type ColKey = keyof VentaRow | 'margen'
-  const cols: { header: string; key: ColKey; width: number; kind?: 'money' | 'date' | 'pct' }[] = [
+  const cols: { header: string; key: ColKey; width: number; kind?: 'money' | 'date' | 'pct' | 'int' }[] = [
     { header: 'Fecha', key: 'fecha', width: 13, kind: 'date' },
     { header: 'Proyecto', key: 'proyecto', width: 15 },
     { header: 'División', key: 'division', width: 15 },
@@ -297,6 +302,9 @@ export async function exportVentasExcel(opts: {
     { header: 'Vendedor', key: 'vendedor', width: 22 },
     { header: 'Sistema', key: 'sistema', width: 18 },
     { header: 'Origen', key: 'origen', width: 18 },
+    { header: 'Alta prospecto', key: 'prospectoAlta', width: 15, kind: 'date' },
+    { header: 'Asignación prospecto', key: 'prospectoAsignacion', width: 19, kind: 'date' },
+    { header: 'Días a cierre', key: 'diasCierre', width: 13, kind: 'int' },
     { header: 'Etapa', key: 'etapa', width: 18 },
     { header: 'Venta (subtotal MXN)', key: 'monto', width: 20, kind: 'money' },
     // Columnas de utilidad: solo para admin y autorizados (canExportUtilidad).
@@ -329,7 +337,7 @@ export async function exportVentasExcel(opts: {
     cell.value = c.header
     cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F6FEB' } }
-    cell.alignment = { vertical: 'middle', horizontal: c.kind === 'money' || c.kind === 'pct' ? 'right' : 'left' }
+    cell.alignment = { vertical: 'middle', horizontal: c.kind === 'money' || c.kind === 'pct' || c.kind === 'int' ? 'right' : 'left' }
     cell.border = { bottom: { style: 'thin', color: { argb: 'FF1B4FB0' } } }
   })
   headRow.height = 20
@@ -341,6 +349,8 @@ export async function exportVentasExcel(opts: {
     const valor = (c: typeof cols[number]): string | number | Date | null => {
       switch (c.key) {
         case 'fecha': return isoToDate(r.fecha)
+        case 'prospectoAlta': case 'prospectoAsignacion': return isoToDate(r[c.key])
+        case 'diasCierre': return r.diasCierre
         case 'margen': return r.monto > 0 ? util / r.monto : null
         case 'monto': return r.monto
         case 'iva': case 'total': case 'costos': case 'utilidad': return r[c.key] ?? 0
@@ -354,6 +364,7 @@ export async function exportVentasExcel(opts: {
       if (c.kind === 'money') { cell.numFmt = '$#,##0.00'; cell.alignment = { horizontal: 'right' } }
       if (c.kind === 'pct') { cell.numFmt = '0.0%'; cell.alignment = { horizontal: 'right' } }
       if (c.kind === 'date') cell.numFmt = 'dd/mm/yyyy'
+      if (c.kind === 'int') { cell.numFmt = '0'; cell.alignment = { horizontal: 'right' } }
       // Utilidad negativa en rojo (el proyecto deja pérdida).
       if ((c.key === 'utilidad' || c.key === 'margen') && util < 0) cell.font = { name: 'Calibri', size: 10, color: { argb: 'FFB42318' } }
     })
