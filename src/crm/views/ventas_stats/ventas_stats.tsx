@@ -5,7 +5,7 @@
 //  exportación a Excel. Navegable por mes para ver el histórico.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, canSeeAllProspects, canExportUtilidad, moneyDigits, fmtMoneyInput, normalizeSistema } from '../../core/data'
+import { useStore, sel, STAGES, fmtMoney, fmtK, fmtDateShort, TODAY_ISO, MESES, MESES_L, canEditSalesGoals, canSeeAllProspects, canExportUtilidad, canExportCostos, moneyDigits, fmtMoneyInput, normalizeSistema } from '../../core/data'
 import { KPI, SecTitle, Empty, useTabla, TablaCard } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { exportVentasExcel } from '../../core/export_ventas'
@@ -207,8 +207,10 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
   // Mismo criterio que la vista: proyectos registrados en esos meses por el equipo
   // (o el vendedor elegido); la meta del periodo es la suma de las metas mensuales.
   const [xls, setXls] = React.useState(false)
-  // IVA, costos y utilidad por proyecto en el Excel: solo admin y autorizados (David Ríos).
+  // IVA, total y utilidad por proyecto en el Excel: solo admin y autorizados (David Ríos).
+  // La columna de costos (lo que se rebaja) es solo para admin.
   const conUtilidad = canExportUtilidad(me)
+  const conCostos = canExportCostos(me)
   const exportar = (r: RangoMeses) => {
     const meses = mesesEntre(r.desde, r.hasta)
     const suma = (ps: Project[]) => ps.reduce((a, p) => a + (p.ventaSubtotal || 0), 0)
@@ -235,7 +237,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
     return exportVentasExcel({
       ym: vendedorSel ? `${archivo}_${vendedorSel.name.replace(/\s+/g, '_')}` : archivo,
       ymLabel: vendedorSel ? `${label} · ${vendedorSel.name}` : label,
-      hoy: TODAY_ISO, meta: metaPeriodo, vendido: vendidoMio, conUtilidad,
+      hoy: TODAY_ISO, meta: metaPeriodo, vendido: vendidoMio, conUtilidad, conCostos,
       vendedores: porV,
       rows: mios.map(p => {
         const monto = p.ventaSubtotal || 0
@@ -250,7 +252,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           prospectoAlta: pf.alta, prospectoAsignacion: pf.asignacion, diasCierre: pf.diasCierre,
           etapa: STAGES.find(s => s.id === p.stage)?.short || p.stage,
           monto,
-          ...(conUtilidad ? { iva: monto * 0.16, total: monto * 1.16, costos: monto - utilidad, utilidad } : {}),
+          ...(conUtilidad ? { iva: monto * 0.16, total: monto * 1.16, utilidad, ...(conCostos ? { costos: monto - utilidad } : {}) } : {}),
         }
       }),
       meses: meses.map(m => {

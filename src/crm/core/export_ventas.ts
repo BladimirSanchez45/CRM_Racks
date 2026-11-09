@@ -29,7 +29,7 @@ export interface VentaRow {
   // Solo cuando se exporta CON utilidad (admin y autorizados): ver canExportUtilidad.
   iva?: number         // IVA 16% de la venta
   total?: number       // total con IVA
-  costos?: number      // compras + pagos internos + movimientos, a subtotal (sin IVA)
+  costos?: number      // compras + pagos internos + movimientos, a subtotal (sin IVA); solo con conCostos
   utilidad?: number    // utilidad sin IVA = monto − costos (misma fórmula que la ficha del proyecto)
 }
 
@@ -101,15 +101,19 @@ export async function exportVentasExcel(opts: {
   hoy: string            // ISO de hoy (fecha de generación)
   meta: number           // meta del periodo (suma de las metas mensuales si es un rango)
   vendido: number
-  /** Agrega IVA, total, costos, utilidad y margen por proyecto (y utilidad del periodo en Resumen).
+  /** Agrega IVA, total, utilidad y margen por proyecto (y utilidad del periodo en Resumen).
    *  Solo para quien pasa canExportUtilidad; las filas deben traer esos campos. */
   conUtilidad?: boolean
+  /** Agrega también la columna "Costos (sin IVA)" (lo que se rebaja). Solo admin
+   *  (canExportCostos); los demás autorizados ven la utilidad sin ese desglose. */
+  conCostos?: boolean
   vendedores: VendedorRow[]
   rows: VentaRow[]
   /** Desglose mensual; con más de un mes se agrega la hoja "Por mes". */
   meses?: MesRow[]
 }): Promise<void> {
   const { ym, ymLabel, hoy, meta, vendido, vendedores, rows, meses = [], conUtilidad = false } = opts
+  const conCostos = conUtilidad && !!opts.conCostos
   const utilidadPeriodo = rows.reduce((a, r) => a + (r.utilidad || 0), 0)
   const esRango = meses.length > 1
   const ExcelJS = await loadExcelJS()
@@ -311,7 +315,7 @@ export async function exportVentasExcel(opts: {
     ...(conUtilidad ? [
       { header: 'IVA 16%', key: 'iva' as ColKey, width: 16, kind: 'money' as const },
       { header: 'Total con IVA', key: 'total' as ColKey, width: 18, kind: 'money' as const },
-      { header: 'Costos (sin IVA)', key: 'costos' as ColKey, width: 18, kind: 'money' as const },
+      ...(conCostos ? [{ header: 'Costos (sin IVA)', key: 'costos' as ColKey, width: 18, kind: 'money' as const }] : []),
       { header: 'Utilidad (sin IVA)', key: 'utilidad' as ColKey, width: 18, kind: 'money' as const },
       { header: 'Margen', key: 'margen' as ColKey, width: 10, kind: 'pct' as const },
     ] : []),
