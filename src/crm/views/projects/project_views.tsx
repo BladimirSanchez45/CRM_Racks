@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, anunciosDe } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -102,6 +102,7 @@ type ProjectFormState = {
   entidad?: string          // Estado de la república (catálogo ESTADOS_MX)
   alias?: string
   origen?: string
+  anuncioCodigo?: string
   sistemaVendido?: string
   ventaSubtotal?: number | string
   freight: number | string
@@ -460,7 +461,7 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
           <InfoRow k="Cliente">{client ? client.name : '—'}</InfoRow>
           {p.alias && <InfoRow k="Nombre interno / Alias">{p.alias}</InfoRow>}
           <InfoRow k="División">{p.division || <span className="text-tx-3">Sin división</span>}</InfoRow>
-          <InfoRow k="Origen">{p.origen || '—'}</InfoRow>
+          <InfoRow k="Origen">{p.origen || '—'}{p.anuncioCodigo && <span className="mono text-tx-2"> · {p.anuncioCodigo}</span>}</InfoRow>
           <InfoRow k="Sistema vendido">{p.sistemaVendido || '—'}</InfoRow>
           <InfoRow k="Ciudad destino"><Icon name="pin" size={12} className="align-[-1px] opacity-60" /> {p.city}{p.entidad ? <span className="text-tx-2">, {p.entidad}</span> : null}</InfoRow>
           <InfoRow k="Vendedor"><span className="inline-flex items-center gap-1.5"><Avatar name={seller ? seller.name : ''} size={20} /> {seller ? seller.name : '—'}</span></InfoRow>
@@ -686,7 +687,7 @@ const nextProjectCode = (projects: Project[]) => {
 
 const blank = (): ProjectFormState => ({
   code: '', stage: 'registro',
-  client: '', seller: '', city: '', entidad: '', division: '', alias: '', origen: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
+  client: '', seller: '', city: '', entidad: '', division: '', alias: '', origen: '', anuncioCodigo: '', sistemaVendido: '', ventaSubtotal: '', freight: '', install: '', weeks: '', obs: '',
   suppliers: [], eta: '', finiquito: 'pending', created: TODAY_ISO,
   docs: { cotizacion: [], layout: docNo(), anticipo: docNo(), ordenCompra: [], finiquito: docNo(), remision: docNo(), cartaFin: docNo(), excel: [], evidencia: [] },
 })
@@ -772,6 +773,8 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
   const set = (k: keyof ProjectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   // Origen: catálogo cerrado (el mismo que en prospectos); lo que no esté en él es "Otro" (texto libre).
   const [origenOtro, setOrigenOtro] = React.useState(() => !!p.origen && !ORIGENES.includes(p.origen))
+  // Anuncio individual: solo CC Racks con una campaña CTC como origen (catálogo ANUNCIOS_CTC).
+  const anuncios = anunciosDe(p.division, p.origen)
   // Sistema vendido: catálogo cerrado; lo que no esté en él se trata como "Otro" (texto libre).
   const [sistemaOtro, setSistemaOtro] = React.useState(() => !!p.sistemaVendido && !SISTEMAS.includes(p.sistemaVendido))
   const [showClient, setShowClient] = React.useState(false)
@@ -808,7 +811,9 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
   const save = () => {
     // Ventas: el vendedor SIEMPRE es él mismo (no puede registrar ventas a nombre de otro).
     const seller = isVentas ? me!.id : p.seller
-    const project = { ...p, seller, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } as Project
+    // El código de anuncio solo se conserva si sigue siendo válido para la división y el origen elegidos.
+    const anuncioCodigo = anuncios.includes(p.anuncioCodigo || '') ? p.anuncioCodigo : undefined
+    const project = { ...p, seller, anuncioCodigo, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } as Project
     dispatch({ type: 'SAVE_PROJECT', project })
     onSaved?.(project)
     onClose()
@@ -883,6 +888,14 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
           </Select>
         </Field>
         {origenOtro && <Field label="Especificar origen"><Input value={p.origen || ''} onChange={e => set('origen', e.target.value)} placeholder="Describe el origen" autoFocus /></Field>}
+        {anuncios.length > 0 && (
+          <Field label="Anuncio">
+            <Select value={anuncios.includes(p.anuncioCodigo || '') ? p.anuncioCodigo : ''} onChange={e => set('anuncioCodigo', e.target.value)}>
+              <option value="">Selecciona…</option>
+              {anuncios.map(a => <option key={a} value={a}>{a}</option>)}
+            </Select>
+          </Field>
+        )}
 
         <Field label="Vendedor">
           <Select value={p.seller} onChange={e => set('seller', e.target.value)} disabled={isVentas}>

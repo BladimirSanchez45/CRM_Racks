@@ -19,6 +19,7 @@ export interface ProspectoRow {
   ciudad: string
   sistema: string
   anuncio: string
+  anuncioCodigo: string       // anuncio individual de la campaña CTC (CCMR 101…) o ''
   fechaAsignacion: string     // ISO 'YYYY-MM-DD' o ''
   mes: string                 // 'YYYY-MM' al que pertenece (asignación o alta); para el desglose por mes
   estado: string
@@ -121,6 +122,7 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
     { header: 'Ciudad', key: 'ciudad', width: 16 },
     { header: 'Sistema', key: 'sistema', width: 14 },
     { header: 'Anuncio', key: 'anuncio', width: 20 },
+    { header: 'Núm. anuncio', key: 'anuncioCodigo', width: 13 },
     { header: 'Fecha asignación', key: 'fechaAsignacion', width: 16, kind: 'date' },
     { header: 'Estado', key: 'estado', width: 14 },
     { header: 'Último contacto', key: 'ultimoContacto', width: 15, kind: 'date' },

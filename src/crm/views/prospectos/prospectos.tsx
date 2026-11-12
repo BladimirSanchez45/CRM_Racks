@@ -5,7 +5,7 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, normalizeOrigen } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, normalizeOrigen, normalizeSistema, anunciosDe } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
@@ -88,6 +88,7 @@ const calidadOf = (p: Prospect): string | null => {
 }
 const CALIDADES = ['Caliente', 'Bueno', 'Tibio', 'Frío', 'Sin evaluar']
 const SIN_ANUNCIO = 'Sin anuncio'
+const SIN_SISTEMA = 'Sin sistema'
 
 /** Mes al que pertenece el prospecto ('YYYY-MM'), por fecha de asignación
  *  (o la fecha de alta si no tiene). Base del filtro por mes. */
@@ -122,7 +123,7 @@ function seguimiento(p: Prospect): { label: string; color: string; dias: number 
 type ProspectFormState = {
   id?: string; name: string; seller: string; empresa: string; email: string; phone: string; city: string; entidad: string; division: string
   fechaAsignacion: string; estado: ProspectEstado; ultimoContacto: string; costo: number | string
-  sistema: string; anuncio: string; resultado: ProspectResultado; notas: string
+  sistema: string; anuncio: string; anuncioCodigo: string; resultado: ProspectResultado; notas: string
   cotizacion?: string; cotizacionPath?: string; cotizaciones: { name: string; path?: string }[]
   convertedProjectId?: string; createdAt?: string
 }
@@ -138,14 +139,14 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
     ...prospect,
     empresa: prospect.empresa || '', email: prospect.email || '', phone: prospect.phone || '', city: prospect.city || '', entidad: prospect.entidad || '', division: prospect.division || '',
     fechaAsignacion: prospect.fechaAsignacion || '', ultimoContacto: prospect.ultimoContacto || '',
-    costo: prospect.costo ?? '', sistema: prospect.sistema || '', anuncio: prospect.anuncio || '', notas: prospect.notas || '',
+    costo: prospect.costo ?? '', sistema: prospect.sistema || '', anuncio: prospect.anuncio || '', anuncioCodigo: prospect.anuncioCodigo || '', notas: prospect.notas || '',
     // Compatibilidad: si aún no tiene lista, siembra la cotización única anterior.
     cotizaciones: prospect.cotizaciones?.length
       ? [...prospect.cotizaciones]
       : (prospect.cotizacion ? [{ name: prospect.cotizacion, path: prospect.cotizacionPath }] : []),
   } : {
     name: '', seller: isVentas ? me!.id : '', empresa: '', email: '', phone: '', city: '', entidad: '', division: '',
-    fechaAsignacion: TODAY_ISO, estado: 'Nuevo', ultimoContacto: TODAY_ISO, costo: '', sistema: '', anuncio: '',
+    fechaAsignacion: TODAY_ISO, estado: 'Nuevo', ultimoContacto: TODAY_ISO, costo: '', sistema: '', anuncio: '', anuncioCodigo: '',
     resultado: 'En espera', notas: '', cotizaciones: [],
   })
   const addCotizacion = (v: { name: string; path: string }) => {
@@ -156,6 +157,8 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
   const set = (k: keyof ProspectFormState, v: unknown) => setP(s => ({ ...s, [k]: v }))
   // Anuncio / origen: catálogo cerrado (el mismo que en proyectos); lo que no esté en él es "Otro" (texto libre).
   const [anuncioOtro, setAnuncioOtro] = React.useState(() => !!p.anuncio && !ORIGENES.includes(p.anuncio))
+  // Anuncio individual: solo CC Racks con una campaña CTC como origen (catálogo ANUNCIOS_CTC).
+  const anuncios = anunciosDe(p.division, p.anuncio)
   // Sistema: catálogo cerrado (el mismo que en proyectos); lo que no esté en él es "Otro" (texto libre).
   const [sistemaOtro, setSistemaOtro] = React.useState(() => !!p.sistema && !SISTEMAS.includes(p.sistema))
   // División (CC Racks / Racks Tapatíos): obligatoria al registrar un prospecto nuevo.
@@ -173,6 +176,8 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
       city: p.city.trim() || undefined, entidad: p.entidad || undefined, division: p.division || undefined,
       fechaAsignacion: p.fechaAsignacion || undefined, ultimoContacto: p.ultimoContacto || undefined,
       costo: p.costo === '' ? undefined : +p.costo, sistema: p.sistema.trim() || undefined, anuncio: p.anuncio.trim() || undefined,
+      // Solo se conserva si sigue siendo válido para la división y el origen elegidos.
+      anuncioCodigo: anuncios.includes(p.anuncioCodigo) ? p.anuncioCodigo : undefined,
       notas: p.notas.trim() || undefined,
       // La lista manda; los campos legado reflejan la PRIMERA cotización.
       cotizaciones: p.cotizaciones,
@@ -242,6 +247,14 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
           </Select>
         </Field>
         {anuncioOtro && <Field label="Especificar origen"><Input value={p.anuncio} onChange={e => set('anuncio', e.target.value)} placeholder="Describe el origen" autoFocus /></Field>}
+        {anuncios.length > 0 && (
+          <Field label="Anuncio">
+            <Select value={anuncios.includes(p.anuncioCodigo) ? p.anuncioCodigo : ''} onChange={e => set('anuncioCodigo', e.target.value)}>
+              <option value="">Selecciona…</option>
+              {anuncios.map(a => <option key={a} value={a}>{a}</option>)}
+            </Select>
+          </Field>
+        )}
         <Field label="Costo / cotización (Sin IVA)"><MoneyInput value={p.costo} onChange={v => set('costo', v)} placeholder="0" /></Field>
         {/* Hasta 3 cotizaciones: a veces se cotiza más de una opción al mismo prospecto. */}
         <Field label={`Cotizaciones (${p.cotizaciones.length}/${MAX_COTIZACIONES})`} span={2}>
@@ -409,7 +422,7 @@ export function ProspectosPage() {
   const [deconvert, setDeconvert] = React.useState<Prospect | null>(null)
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
-  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '', anuncio: '' })
+  const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '', anuncio: '', sistema: '' })
   // Orden por columna: clic en el encabezado alterna 1º / 2º / sin orden. Las columnas
   // numéricas y de fecha arrancan de mayor a menor (lo más grande o reciente arriba);
   // las de texto, de A a Z.
@@ -438,10 +451,13 @@ export function ProspectosPage() {
   // Categoría de anuncio (origen) de un prospecto, llevada al catálogo ORIGENES:
   // lo escrito a mano se reconoce, lo no reconocido es "Otro" y lo vacío "Sin anuncio".
   const anuncioCat = (p: Prospect) => normalizeOrigen(p.anuncio) || SIN_ANUNCIO
+  // Lo mismo para el sistema, llevado al catálogo SISTEMAS ("MINIRACK" → Minirack estándar…).
+  const sistemaCat = (p: Prospect) => normalizeSistema(p.sistema) || SIN_SISTEMA
   // Filtros de la tabla; el de mes se pasa aparte para que el Excel pueda usar un rango.
   const pasa = (p: Prospect, mes: (k: string) => boolean) => {
     if (f.seller && p.seller !== f.seller) return false
     if (f.anuncio && anuncioCat(p) !== f.anuncio) return false
+    if (f.sistema && sistemaCat(p) !== f.sistema) return false
     if (!mes(mesKey(p))) return false
     if (f.estado && p.estado !== f.estado) return false
     if (f.resultado && p.resultado !== f.resultado) return false
@@ -492,6 +508,11 @@ export function ProspectosPage() {
     const hay = new Set(visibles.map(anuncioCat))
     return [...ORIGENES, 'Otro', SIN_ANUNCIO].filter(o => hay.has(o))
   })()
+  // Sistemas presentes en los prospectos visibles, en el orden del catálogo.
+  const sistemaOpts = (() => {
+    const hay = new Set(visibles.map(sistemaCat))
+    return [...SISTEMAS, 'Otro', SIN_SISTEMA].filter(o => hay.has(o))
+  })()
   // Meses presentes en los prospectos (más reciente primero).
   const mesOpts = [...new Set(visibles.map(mesKey).filter(Boolean))].sort((a, b) => (a < b ? 1 : -1))
   // KPIs — reflejan EXACTAMENTE lo que muestra la tabla (todos los filtros aplicados).
@@ -510,7 +531,7 @@ export function ProspectosPage() {
     for (const [name, n] of conteo) if (!best || n > best.n) best = { name, n }
     return best
   })()
-  const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad || f.mes || f.anuncio
+  const hasFilters = f.q || f.seller || f.estado || f.resultado || f.calidad || f.mes || f.anuncio || f.sistema
 
   // Comentario más reciente del prospecto, para el Excel: "dd/mm/aaaa · Autor: texto".
   const ultimoComentario = (p: Prospect) => {
@@ -530,6 +551,7 @@ export function ProspectosPage() {
     if (f.resultado) partes.push(`Resultado: ${f.resultado}`)
     if (f.calidad) partes.push(`Calidad: ${f.calidad}`)
     if (f.anuncio) partes.push(`Anuncio: ${f.anuncio}`)
+    if (f.sistema) partes.push(`Sistema: ${f.sistema}`)
     if (f.q) partes.push(`Búsqueda: "${f.q}"`)
     const subtitulo = `Filtros — ${partes.join('  ·  ')}`
     const data: ProspectoRow[] = data0.map(p => {
@@ -539,7 +561,7 @@ export function ProspectosPage() {
       return {
         nombre: p.name, division: p.division || '', empresa: p.empresa || '', vendedor: sellerName(p.seller),
         telefono: p.phone || '', correo: p.email || '', region: p.entidad || '', ciudad: p.city || '',
-        sistema: p.sistema || '', anuncio: p.anuncio || '',
+        sistema: p.sistema || '', anuncio: p.anuncio || '', anuncioCodigo: p.anuncioCodigo || '',
         fechaAsignacion: p.fechaAsignacion || '', mes: mesKey(p), estado: p.estado,
         ultimoContacto: p.ultimoContacto || '', seguimiento: sg.label,
         resultado: p.resultado, costo: p.costo ?? null,
@@ -576,6 +598,7 @@ export function ProspectosPage() {
     division: pr.division,
     sistemaVendido: pr.sistema,
     origen: pr.anuncio,
+    anuncioCodigo: pr.anuncioCodigo,
     alias: pr.name,
     ventaSubtotal: pr.costo,
     obs: `Prospecto: ${pr.name}${pr.empresa ? ' · ' + pr.empresa : ''}${pr.phone ? ' · Tel: ' + pr.phone : ''}${pr.email ? ' · ' + pr.email : ''}`,
@@ -636,11 +659,15 @@ export function ProspectosPage() {
           <option value="">Todos los anuncios</option>
           {anuncioOpts.map(a => <option key={a} value={a}>{a}</option>)}
         </Select>
+        <Select value={f.sistema} onChange={e => setF({ ...f, sistema: e.target.value })} className="w-auto min-w-[150px]" title="Filtrar por tipo de sistema">
+          <option value="">Todos los sistemas</option>
+          {sistemaOpts.map(a => <option key={a} value={a}>{a}</option>)}
+        </Select>
         <Select value={f.mes} onChange={e => setF({ ...f, mes: e.target.value })} className="w-auto min-w-[150px]">
           <option value="">Todos los meses</option>
           {mesOpts.map(m => <option key={m} value={m}>{mesLabel(m)}</option>)}
         </Select>
-        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '', anuncio: '' })}><Icon name="close" size={13} /> Limpiar</button>}
+        {hasFilters && <button className="btn btn-ghost btn-sm" onClick={() => setF({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '', anuncio: '', sistema: '' })}><Icon name="close" size={13} /> Limpiar</button>}
         <span className="meta">{rows.length} de {visibles.length}</span>
       </div>
 
@@ -681,7 +708,7 @@ export function ProspectosPage() {
                       })()}
                     </td>
                     <td className="text-tx-2 text-[12px]">{p.sistema || '—'}</td>
-                    <td className="text-tx-2 text-[12px]">{p.anuncio || '—'}</td>
+                    <td className="text-tx-2 text-[12px]">{p.anuncio || '—'}{p.anuncioCodigo && <div className="meta mono">{p.anuncioCodigo}</div>}</td>
                     <td onClick={e => e.stopPropagation()}>
                       <div className="flex gap-1.5 justify-end items-center flex-nowrap">
                         {!readOnly && (

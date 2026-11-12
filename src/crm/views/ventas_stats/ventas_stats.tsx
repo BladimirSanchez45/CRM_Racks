@@ -248,7 +248,7 @@ export function SalesStatsPage({ onOpenProject }: { onOpenProject: (p: Project) 
           fecha: p.created.slice(0, 10), proyecto: p.code, division: p.division || '',
           cliente: sel.clientName(state, p.client), region: p.entidad || '', ciudad: p.city || '',
           vendedor: sel.sellerName(state, p.seller),
-          sistema: p.sistemaVendido || '', origen: p.origen || '',
+          sistema: p.sistemaVendido || '', origen: p.origen || '', anuncio: p.anuncioCodigo || '',
           prospectoAlta: pf.alta, prospectoAsignacion: pf.asignacion, diasCierre: pf.diasCierre,
           etapa: STAGES.find(s => s.id === p.stage)?.short || p.stage,
           monto,

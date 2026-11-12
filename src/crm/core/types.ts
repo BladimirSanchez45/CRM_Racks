@@ -379,6 +379,7 @@ export interface Project {
   division?: string            // 'CC Racks' | 'Racks Tapatíos' (catálogo DIVISIONES); obligatorio al registrar, vacío en registros viejos
   alias?: string            // Nombre interno / alias con el que el vendedor ubica al cliente (la razón social a veces no la reconocen)
   origen?: string           // Origen del lead/venta (Google ADS, CTC Ad…)
+  anuncioCodigo?: string    // Anuncio individual de la campaña CTC (CCMR 101…); solo división CC Racks (catálogo ANUNCIOS_CTC)
   sistemaVendido?: string   // Sistema vendido (tipo de rack/solución)
   ventaSubtotal?: number    // Subtotal de la venta (YA incluye flete e instalación). IVA y total se calculan de aquí.
   freight: number           // Presupuesto de flete (informativo; incluido en ventaSubtotal)
@@ -656,6 +657,7 @@ export interface Prospect {
   resultado: ProspectResultado
   sistema?: string             // Sistema (→ project.sistemaVendido)
   anuncio?: string             // Anuncio / origen del lead (→ project.origen)
+  anuncioCodigo?: string       // Anuncio individual de la campaña CTC (CCMR 101…); solo CC Racks (→ project.anuncioCodigo)
   notas?: string
   comments?: ProspectComment[] // Hilo de comentarios de seguimiento
   evaluacion?: ProspectEvaluation  // Evaluación rápida de calidad (5 criterios)

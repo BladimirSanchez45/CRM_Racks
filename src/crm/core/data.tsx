@@ -265,6 +265,19 @@ export const ORIGENES = [
   'Cliente existente', 'Referido', 'Contacto directo', 'Distribuidor',
 ]
 export const ORIGEN_OTRO = 'Otro (Especificar)'
+/** Anuncios individuales de las campañas CTC, por código (CCMR 101…). Solo aplican a la
+ *  división CC Racks: al registrar un proyecto o prospecto de CC Racks con una de estas
+ *  campañas como origen aparece un desplegable para decir de cuál anuncio llegó.
+ *  Racks Tapatíos no tiene anuncios individuales. */
+const codigosAnuncio = (prefijo: string, n: number) => Array.from({ length: n }, (_, i) => `${prefijo} ${101 + i}`)
+export const ANUNCIOS_CTC: Record<string, string[]> = {
+  'CTC Ad Minirack': codigosAnuncio('CCMR', 3),
+  'CTC Ad Mezzanines': codigosAnuncio('CCMZ', 13),
+  'CTC Ad Racks Industriales': codigosAnuncio('CCRI', 13),
+}
+/** Códigos de anuncio que se pueden elegir para una división y un origen; [] si no aplica. */
+export const anunciosDe = (division?: string, origen?: string): string[] =>
+  division === 'CC Racks' && origen ? (ANUNCIOS_CTC[origen] || []) : []
 /** Lleva un origen escrito a mano al catálogo ("cliente viejito", "Llegó por llamada",
  *  "google adds"…). Devuelve '' si viene vacío o si el texto solo dice que NO hubo
  *  anuncio / no se sabe ("No viene de un anuncio", "No dice origen"), y 'Otro' si

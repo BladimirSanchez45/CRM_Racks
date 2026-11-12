@@ -20,6 +20,7 @@ export interface VentaRow {
   vendedor: string
   sistema: string
   origen: string
+  anuncio: string      // anuncio individual de la campaña CTC (CCMR 101…) o ''
   etapa: string
   // Proceso comercial, leído del prospecto ligado (vacío si el proyecto se registró directo).
   prospectoAlta: string        // alta del prospecto (fecha de origen) ISO 'YYYY-MM-DD'
@@ -306,6 +307,7 @@ export async function exportVentasExcel(opts: {
     { header: 'Vendedor', key: 'vendedor', width: 22 },
     { header: 'Sistema', key: 'sistema', width: 18 },
     { header: 'Origen', key: 'origen', width: 18 },
+    { header: 'Núm. anuncio', key: 'anuncio', width: 13 },
     { header: 'Alta prospecto', key: 'prospectoAlta', width: 15, kind: 'date' },
     { header: 'Asignación prospecto', key: 'prospectoAsignacion', width: 19, kind: 'date' },
     { header: 'Días a cierre', key: 'diasCierre', width: 13, kind: 'int' },

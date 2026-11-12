@@ -275,6 +275,7 @@ function mapProject(r: any): Project {
     ...(r.division ? { division: r.division } : {}),
     ...(r.alias ? { alias: r.alias } : {}),
     ...(r.origen ? { origen: r.origen } : {}),
+    ...(r.anuncio_codigo ? { anuncioCodigo: r.anuncio_codigo } : {}),
     ...(r.sistema_vendido ? { sistemaVendido: r.sistema_vendido } : {}),
     ...(r.venta_subtotal != null ? { ventaSubtotal: Number(r.venta_subtotal) } : {}),
     freight: Number(r.freight ?? 0), install: Number(r.install ?? 0), weeks: r.weeks ?? 0,
@@ -300,6 +301,7 @@ function projectRow(p: Project): Record<string, unknown> {
     division: p.division ?? null,
     alias: p.alias ?? null,
     origen: p.origen ?? null,
+    anuncio_codigo: p.anuncioCodigo ?? null,
     sistema_vendido: p.sistemaVendido ?? null, venta_subtotal: p.ventaSubtotal ?? null,
     freight: p.freight, install: p.install,
     freight_supplier_id: p.freightSupplierId ?? null, freight_cost: p.freightCost ?? null,
@@ -937,6 +939,7 @@ function mapProspect(r: any): Prospect {
     ...(r.costo != null ? { costo: Number(r.costo) } : {}),
     ...(r.sistema ? { sistema: r.sistema } : {}),
     ...(r.anuncio ? { anuncio: r.anuncio } : {}),
+    ...(r.anuncio_codigo ? { anuncioCodigo: r.anuncio_codigo } : {}),
     ...(r.notas ? { notas: r.notas } : {}),
     ...((() => {
       // El JSONB puede llegar como arreglo (REST) o, en algunos casos de realtime, como texto.
@@ -966,7 +969,7 @@ function prospectRow(p: Prospect): Record<string, unknown> {
     fecha_asignacion: orNull(p.fechaAsignacion), ultimo_contacto: orNull(p.ultimoContacto),
     cotizacion: p.cotizacion ?? null, cotizacion_path: p.cotizacionPath ?? null,
     cotizaciones: p.cotizaciones ?? [],
-    costo: p.costo ?? null, sistema: p.sistema ?? null, anuncio: p.anuncio ?? null, notas: p.notas ?? null,
+    costo: p.costo ?? null, sistema: p.sistema ?? null, anuncio: p.anuncio ?? null, anuncio_codigo: p.anuncioCodigo ?? null, notas: p.notas ?? null,
     comments: p.comments ?? [], evaluacion: p.evaluacion ?? null,
     converted_project_id: p.convertedProjectId ?? null, created_at: p.createdAt, updated: p.updated ?? null,
   }
