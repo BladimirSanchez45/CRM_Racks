@@ -545,6 +545,32 @@ export interface Campaign {
   createdAt: string       // ISO
 }
 
+/* ---- PEDIDOS DE MATERIAL ----
+   Registro ligero de "alguien pidió material": quién, cuándo, qué y cuándo llega.
+   Sirve para saber qué está pedido y cuándo va a llegar. NO es una OC: no lleva
+   importes, pagos ni afecta inventario. */
+export interface MaterialRequestItem {
+  id: string
+  description: string     // qué se pidió
+  qty: string             // cantidad en texto libre ("20", "3 cajas", "120 m")
+}
+/** 'pedido' = ya se pidió y no ha llegado · 'recibido' = ya llegó · 'cancelado'. */
+export type MaterialRequestStatus = 'pedido' | 'recibido' | 'cancelado'
+export interface MaterialRequest {
+  id: string
+  requestedBy: string     // quién lo solicitó (nombre, texto libre)
+  requestedAt: string     // 'YYYY-MM-DD' — cuándo se pidió
+  supplier: string        // a quién se le pidió (texto libre)
+  reference?: string      // para qué es: proyecto, cliente, stock…
+  items: MaterialRequestItem[]
+  eta?: string            // 'YYYY-MM-DD' — cuándo se espera que llegue
+  status: MaterialRequestStatus
+  receivedAt?: string     // 'YYYY-MM-DD' — cuándo llegó de verdad
+  notes?: string
+  createdBy?: string
+  createdAt: string       // ISO
+}
+
 /* ============================================================
    BANCOS — renglones del estado de cuenta importados (BBVA .exp/.txt)
    ============================================================ */
@@ -832,6 +858,7 @@ export interface AppState {
   movementLists: MovementList[]
   movements: Movement[]
   campaigns: Campaign[]
+  materialRequests: MaterialRequest[]
   bankTxs: BankTransaction[]
   cfdiDocs: CfdiDoc[]
   agendaEvents: AgendaEvent[]
@@ -899,6 +926,11 @@ export type AgendaEventInput = Omit<AgendaEvent, 'id' | 'userId' | 'done' | 'cre
   createdAt?: string
 }
 export type CampaignInput = Omit<Campaign, 'id' | 'createdBy' | 'createdAt'> & {
+  id?: string
+  createdBy?: string
+  createdAt?: string
+}
+export type MaterialRequestInput = Omit<MaterialRequest, 'id' | 'createdBy' | 'createdAt'> & {
   id?: string
   createdBy?: string
   createdAt?: string
@@ -1004,6 +1036,8 @@ export type Action =
   | { type: 'DECIDE_MOVEMENT'; id: string; approve: boolean; reason?: string }
   | { type: 'SAVE_CAMPAIGN'; campaign: CampaignInput }
   | { type: 'DELETE_CAMPAIGN'; id: string }
+  | { type: 'SAVE_MATERIAL_REQUEST'; request: MaterialRequestInput }
+  | { type: 'DELETE_MATERIAL_REQUEST'; id: string }
   /* ---- Bancos ---- */
   /** Importa renglones del estado de cuenta (ya parseados y sin duplicados). */
   | { type: 'IMPORT_BANK_TXS'; txs: BankTransactionInput[] }
@@ -1106,6 +1140,8 @@ export type StateAction =
   | { type: 'REMOVE_MOVEMENT'; id: string }
   | { type: 'UPSERT_CAMPAIGN'; campaign: Campaign }
   | { type: 'REMOVE_CAMPAIGN'; id: string }
+  | { type: 'UPSERT_MATERIAL_REQUEST'; request: MaterialRequest }
+  | { type: 'REMOVE_MATERIAL_REQUEST'; id: string }
   | { type: 'UPSERT_BANK_TX'; tx: BankTransaction }
   | { type: 'UPSERT_BANK_TXS'; txs: BankTransaction[] }
   | { type: 'REMOVE_BANK_TX'; id: string }

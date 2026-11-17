@@ -28,6 +28,7 @@ import { MovementsPage } from './views/movements/movements'
 import { EstadisticasPage } from './views/estadisticas/estadisticas'
 import { SalesStatsPage } from './views/ventas_stats/ventas_stats'
 import { CampaignsPage } from './views/campaigns/campaigns'
+import { PedidosPage } from './views/pedidos/pedidos'
 import { LayoutsPage } from './views/layouts/layouts'
 import { AdminPage } from './views/admin/admin'
 import { VacacionesPage } from './views/vacaciones/vacaciones'
@@ -39,7 +40,7 @@ import type { Project, Role } from './core/types'
 //import strakkLogoBlanco from '../assets/logos/strakk_logo_blanco.png'
 import cclogo from '../assets/logos/CCLOGO.png'
 
-type Route = 'dashboard' | 'agenda' | 'vacaciones' | 'almacen' | 'inventario' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'layouts' | 'admin' | 'settings'
+type Route = 'dashboard' | 'agenda' | 'vacaciones' | 'almacen' | 'inventario' | 'prospectos' | 'perdidos' | 'projects' | 'historial' | 'suppliers' | 'orders' | 'pedidos' | 'asignacion' | 'remisiones' | 'internal_payments' | 'movements' | 'payments' | 'cobranza' | 'clients' | 'commissions' | 'estadisticas' | 'ventas_stats' | 'campaigns' | 'layouts' | 'admin' | 'settings'
 type CountKey = 'activeProjects' | 'suppliers' | 'orders' | 'payments' | 'clients'
 
 // Las vistas se agrupan por ÁREA/función en la barra lateral. Las secciones que
@@ -69,6 +70,9 @@ const NAV: { id: Route; label: string; icon: IconName; countKey?: CountKey; admi
   { id: 'layouts',     label: 'Conteo de layout', icon: 'ruler',   section: 'Comercial' },
   { id: 'suppliers',   label: 'Proveedores',  icon: 'suppliers',   section: 'Compras' },
   { id: 'orders',      label: 'Órdenes de Compra', icon: 'orders',  section: 'Compras' },
+  // Pedidos de material: qué está pedido y cuándo llega. Almacén, Logística y Admin
+  // (Dirección en solo lectura); Javier Castañeda entra por correo (EXTRA_ROUTES).
+  { id: 'pedidos',     label: 'Pedidos de material', icon: 'docPlus', roles: ['almacen', 'logistica', 'admin', 'superadmin', 'direccion'], section: 'Compras' },
   // Almacén: su cola de trabajo. La ven almacén, admin y dirección (lectura).
   { id: 'almacen',     label: 'Almacén',      icon: 'pkg', roles: ['almacen', 'admin', 'superadmin', 'direccion'], section: 'Logística' },
   // Inventario: existencias del almacén. Lo operan almacén y admin; dirección y logística lo consultan (solo lectura).
@@ -96,17 +100,17 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   admin: [
     'dashboard', 'agenda', 'vacaciones', 'estadisticas', 'ventas_stats', 'campaigns',
     'projects', 'historial', 'clients', 'commissions', 'layouts',
-    'suppliers', 'orders', 'almacen', 'inventario',
+    'suppliers', 'orders', 'pedidos', 'almacen', 'inventario',
     'payments', 'cobranza', 'internal_payments', 'movements',
     'admin', 'settings',
   ],
   // Almacén: SOLO su cola de trabajo y su inventario (+ panel recortado, agenda
   // y configuración). Nada de proyectos, pagos, comisiones ni movimientos.
-  almacen: ['dashboard', 'almacen', 'inventario', 'agenda', 'vacaciones', 'ventas_stats', 'settings'],
+  almacen: ['dashboard', 'almacen', 'inventario', 'pedidos', 'agenda', 'vacaciones', 'ventas_stats', 'settings'],
   ventas: ['dashboard', 'agenda', 'vacaciones', 'prospectos', 'perdidos', 'projects', 'orders', 'ventas_stats', 'layouts', 'settings'],
   // Logística: ve todos los proyectos, OC y proveedores, más sus módulos propios.
   // (Sin pagos, cobranza, clientes ni comisiones.)
-  logistica: ['dashboard', 'agenda', 'vacaciones', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'inventario', 'ventas_stats', 'settings'],
+  logistica: ['dashboard', 'agenda', 'vacaciones', 'projects', 'suppliers', 'orders', 'asignacion', 'remisiones', 'internal_payments', 'inventario', 'pedidos', 'ventas_stats', 'settings'],
   // Ingeniería: por ahora SOLO proyectos (solo lectura). Se ampliará después.
   ingenieria: ['dashboard', 'agenda', 'vacaciones', 'projects', 'ventas_stats', 'layouts', 'settings'],
   // Marketing: Estadísticas por origen, Campañas y Prospectos (solo lectura, ve a
@@ -121,8 +125,10 @@ const EXTRA_ROUTES: Record<string, Partial<Record<Route, Role>>> = {
   'drios@ccracksmexico.com': {
     projects: 'logistica', suppliers: 'logistica', orders: 'logistica',
     asignacion: 'logistica', remisiones: 'logistica', internal_payments: 'logistica',
-    almacen: 'almacen', inventario: 'almacen',
+    almacen: 'almacen', inventario: 'almacen', pedidos: 'logistica',
   },
+  // Javier Castañeda (Ventas, gerente): también lleva los pedidos de material.
+  'jcastaneda@ccracksmexico.com': { pedidos: 'logistica' },
 }
 type Who = { role?: Role | null; email?: string } | null | undefined
 /** Rol con el que esta persona ve una vista prestada; undefined = no es prestada. */
@@ -148,7 +154,7 @@ const landingRoute = (u: Who): Route => {
 }
 const TITLES: Record<Route, string> = {
   dashboard: 'Panel general', agenda: 'Agenda', vacaciones: 'Vacaciones', prospectos: 'Prospectos', perdidos: 'Prospectos perdidos', projects: 'Proyectos', historial: 'Historial de proyectos', suppliers: 'Proveedores',
-  orders: 'Órdenes de Compra', almacen: 'Almacén', inventario: 'Inventario', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
+  orders: 'Órdenes de Compra', pedidos: 'Pedidos de material', almacen: 'Almacén', inventario: 'Inventario', asignacion: 'Asignación de servicios', remisiones: 'Remisiones de salida',
   internal_payments: 'Pagos internos', movements: 'Movimientos', payments: 'Pagos', cobranza: 'Cobranza', clients: 'Clientes', commissions: 'Comisiones',
   estadisticas: 'Estadísticas por origen', ventas_stats: 'Metas de venta', campaigns: 'Campañas',
   layouts: 'Conteo de layout', admin: 'Administración', settings: 'Configuración',
@@ -288,6 +294,7 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
       case 'historial':   return <HistorialPage />
       case 'suppliers':   return <SuppliersPage />
       case 'orders':      return <OrdersPage />
+      case 'pedidos':     return <PedidosPage />
       case 'asignacion':  return <AsignacionPage />
       case 'remisiones':  return <RemisionesPage />
       case 'internal_payments': return <InternalPaymentsPage openId={openIPId} onConsumed={() => setOpenIPId(null)} />

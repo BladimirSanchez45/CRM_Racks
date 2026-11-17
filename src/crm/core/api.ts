@@ -7,7 +7,7 @@ import { supabase } from './supabase'
 import type {
   Client, Supplier, User, Seller, Project, Order, Payment,
   ClientPayment, Commission, Activity, Notification, AppState,
-  Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, Prospect,
+  Remision, InternalPayment, Movement, MovementList, AppSettings, Campaign, MaterialRequest, Prospect,
   AgendaEvent, WarehouseItem, InventoryFamily, InventoryItem, InventoryMove, InventoryKit, BankTransaction, CfdiDoc,
   Employee, VacationEntitlement, VacationRequest,
 } from './types'
@@ -566,6 +566,44 @@ export async function fetchCampaigns(): Promise<Campaign[]> {
 export const saveCampaign = (c: Campaign) => upsert('campaigns', campaignRow(c))
 export const deleteCampaign = (id: string) => removeRow('campaigns', id)
 
+/* ---- Pedidos de material (renglones en JSONB) ---- */
+const dateOnly = (v: unknown): string | undefined => (v ? String(v).slice(0, 10) : undefined)
+function mapMaterialRequest(r: any): MaterialRequest {
+  const eta = dateOnly(r.eta), receivedAt = dateOnly(r.received_at)
+  return {
+    id: r.id, requestedBy: r.requested_by ?? '', requestedAt: dateOnly(r.requested_at) ?? '',
+    supplier: r.supplier ?? '',
+    items: Array.isArray(r.items) ? r.items.map((i: any) => ({ id: String(i.id), description: i.description ?? '', qty: String(i.qty ?? '') })) : [],
+    status: r.status ?? 'pedido', createdAt: r.created_at,
+    ...(r.reference ? { reference: r.reference } : {}),
+    ...(eta ? { eta } : {}),
+    ...(receivedAt ? { receivedAt } : {}),
+    ...(r.notes ? { notes: r.notes } : {}),
+    ...(r.created_by ? { createdBy: r.created_by } : {}),
+  }
+}
+function materialRequestRow(m: MaterialRequest): Record<string, unknown> {
+  return {
+    id: m.id, requested_by: m.requestedBy, requested_at: m.requestedAt, supplier: m.supplier,
+    reference: m.reference ?? null, items: m.items, eta: m.eta ?? null, status: m.status,
+    received_at: m.receivedAt ?? null, notes: m.notes ?? null,
+    created_by: m.createdBy ?? null, created_at: m.createdAt,
+  }
+}
+export async function fetchMaterialRequests(): Promise<MaterialRequest[]> {
+  // Tolerante: si la tabla aún no existe (falta correr step46), la app carga igual
+  // con la lista vacía en vez de tronar toda la carga inicial.
+  try {
+    const data = await selectAll('material_requests', { column: 'requested_at', ascending: false })
+    return (data ?? []).map(mapMaterialRequest)
+  } catch (e) {
+    console.error('[supabase] material_requests no se pudo cargar (falta correr step46_pedidos_material.sql?)', e)
+    return []
+  }
+}
+export const saveMaterialRequest = (m: MaterialRequest) => upsert('material_requests', materialRequestRow(m))
+export const deleteMaterialRequest = (id: string) => removeRow('material_requests', id)
+
 /* ---- Bancos: renglones del estado de cuenta ---- */
 function mapBankTx(r: any): BankTransaction {
   return {
@@ -1106,6 +1144,7 @@ const REALTIME_MAP: Record<string, (r: any) => any> = {
   movement_lists: mapMovementList,
   movements: mapMovement,
   campaigns: mapCampaign,
+  material_requests: mapMaterialRequest,
   bank_transactions: mapBankTx,
   cfdi_docs: mapCfdi,
   prospects: mapProspect,
@@ -1192,14 +1231,14 @@ export async function deleteDoc(path: string): Promise<void> {
 /* ---- Carga inicial de TODO el estado (tras login) ---- */
 export async function loadAll(): Promise<Partial<AppState>> {
   dataWarnings.length = 0
-  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications] =
+  const [clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, materialRequests, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications] =
     await Promise.all([
       fetchClients(), fetchSuppliers(), fetchUsers(), fetchSellers(), fetchProjects(),
       fetchOrders(), fetchPayments(), fetchClientPayments(), fetchCommissions(),
-      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchBankTxs(), fetchCfdiDocs(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(),
+      fetchRemisiones(), fetchInternalPayments(), fetchMovementLists(), fetchMovements(), fetchCampaigns(), fetchMaterialRequests(), fetchBankTxs(), fetchCfdiDocs(), fetchProspects(), fetchAgendaEvents(), fetchWarehouse(),
       fetchInvFamilies(), fetchInvItems(), fetchInvMoves(), fetchInvKits(), fetchInvConsumedOrders(),
       fetchEmployees(), fetchVacEntitlements(), fetchVacRequests(),
       fetchSettings(), fetchActivity(), fetchNotifications(),
     ])
-  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications, dataWarnings: [...dataWarnings] }
+  return { clients, suppliers, users, sellers, projects, orders, payments, clientPayments, commissions, remisiones, internalPayments, movementLists, movements, campaigns, materialRequests, bankTxs, cfdiDocs, prospects, agendaEvents, warehouse, invFamilies, invItems, invMoves, invKits, invConsumedOrders, employees, vacationEntitlements, vacationRequests, settings, activity, notifications, dataWarnings: [...dataWarnings] }
 }

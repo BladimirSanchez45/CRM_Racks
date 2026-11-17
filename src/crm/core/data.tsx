@@ -26,7 +26,7 @@ import type {
   InternalPayment,
   Movement,
   MovementList,
-  Campaign,
+  Campaign, MaterialRequest,
   BankTransaction,
   CfdiDoc,
   Prospect,
@@ -54,6 +54,7 @@ import {
   saveMovementList, deleteMovementList as apiDeleteMovementList,
   saveMovement, deleteMovement as apiDeleteMovement,
   saveCampaign, deleteCampaign as apiDeleteCampaign,
+  saveMaterialRequest, deleteMaterialRequest as apiDeleteMaterialRequest,
   saveBankTx, insertBankTxs, deleteBankTx as apiDeleteBankTx,
   saveCfdiDoc, deleteCfdiDoc as apiDeleteCfdiDoc, deleteDoc as apiDeleteDoc,
   saveAgendaEvent, deleteAgendaEvent as apiDeleteAgendaEvent,
@@ -115,6 +116,12 @@ export const canExportCostos = (u?: { role?: Role } | null) => !!u && isAdminRol
 export const isIngenieria = (role?: Role | null) => role === 'ingenieria'
 /** Rol Marketing: por ahora SOLO ve el módulo de Estadísticas por origen (solo lectura). */
 export const isMarketing = (role?: Role | null) => role === 'marketing'
+/** Quién, teniendo Prospectos en SOLO LECTURA, puede abrir la ficha completa de un
+ *  prospecto al darle clic (teléfono, correo, cotizaciones, notas): Dirección y las
+ *  personas de esta lista (por correo). El resto de Marketing solo ve la tabla. */
+export const PROSPECT_DETAIL_EMAILS = ['drios@ccracksmexico.com']
+export const canOpenProspectDetail = (u?: { role?: Role; email?: string } | null) =>
+  !!u && (isDireccion(u.role) || (!!u.email && PROSPECT_DETAIL_EMAILS.includes(u.email.toLowerCase())))
 
 /* ---- Agenda compartida ----
    Una anotación con `participants` aparece en la agenda de todos ellos. El
@@ -436,7 +443,7 @@ export const regimenLabel = (code?: string) =>
 const initial: AppState = {
   projects: [], suppliers: [], orders: [], payments: [], clientPayments: [],
   clients: [], sellers: [], commissions: [], remisiones: [], internalPayments: [],
-  movementLists: [], movements: [], campaigns: [], bankTxs: [], cfdiDocs: [], prospects: [], agendaEvents: [], warehouse: [],
+  movementLists: [], movements: [], campaigns: [], materialRequests: [], bankTxs: [], cfdiDocs: [], prospects: [], agendaEvents: [], warehouse: [],
   invFamilies: [], invItems: [], invMoves: [], invKits: [], invConsumedOrders: [],
   employees: [], vacationEntitlements: [], vacationRequests: [],
   settings: { bankBalance: 0, whDays: WAREHOUSE_DAYS_DEFAULT, salesGoals: {}, salesGoalsPersonal: {} },
@@ -563,6 +570,8 @@ function reducer(state: AppState, a: StateAction): AppState {
     case 'REMOVE_MOVEMENT': return { ...state, movements: state.movements.filter(m => m.id !== a.id) }
     case 'UPSERT_CAMPAIGN': return { ...state, campaigns: upsertBy(state.campaigns, a.campaign) }
     case 'REMOVE_CAMPAIGN': return { ...state, campaigns: state.campaigns.filter(c => c.id !== a.id) }
+    case 'UPSERT_MATERIAL_REQUEST': return { ...state, materialRequests: upsertBy(state.materialRequests, a.request) }
+    case 'REMOVE_MATERIAL_REQUEST': return { ...state, materialRequests: state.materialRequests.filter(m => m.id !== a.id) }
     case 'UPSERT_BANK_TX': return { ...state, bankTxs: upsertBy(state.bankTxs, a.tx) }
     case 'UPSERT_BANK_TXS': {
       // Lote: se ignoran los que ya existan por hash (mismo criterio que la base).
@@ -1556,6 +1565,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         persist([() => apiDeleteCampaign(action.id)]); return
       }
 
+      /* ---- Pedidos de material ---- */
+      case 'SAVE_MATERIAL_REQUEST': {
+        const isNew = !action.request.id || !s.materialRequests.some(m => m.id === action.request.id)
+        const full: MaterialRequest = {
+          ...(action.request as MaterialRequest),
+          id: action.request.id ?? uid('pm'),
+          createdBy: action.request.createdBy ?? s.currentUser?.id,
+          createdAt: action.request.createdAt ?? nowISO(),
+        }
+        rawDispatch({ type: 'UPSERT_MATERIAL_REQUEST', request: full })
+        const thunks: (() => Promise<void>)[] = [() => saveMaterialRequest(full)]
+        if (isNew) {
+          const activity: Activity = { id: uid('a'), t: nowISO(), icon: 'pkg', who: whoName(s), txt: 'registró un pedido de material', tgt: full.supplier || full.items[0]?.description || '', kind: 'info' }
+          rawDispatch({ type: 'PUSH_ACTIVITY', activity })
+          thunks.push(() => saveActivity(activity))
+        }
+        persist(thunks); return
+      }
+      case 'DELETE_MATERIAL_REQUEST': {
+        rawDispatch({ type: 'REMOVE_MATERIAL_REQUEST', id: action.id })
+        persist([() => apiDeleteMaterialRequest(action.id)]); return
+      }
+
       /* ---- Bancos: estado de cuenta ---- */
       case 'IMPORT_BANK_TXS': {
         const seen = new Set(s.bankTxs.map(t => t.hash))
@@ -2205,6 +2237,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movement_lists':  rawDispatch({ type: 'REMOVE_MOVEMENT_LIST', id: c.id }); break
           case 'movements':       rawDispatch({ type: 'REMOVE_MOVEMENT', id: c.id }); break
           case 'campaigns':       rawDispatch({ type: 'REMOVE_CAMPAIGN', id: c.id }); break
+          case 'material_requests': rawDispatch({ type: 'REMOVE_MATERIAL_REQUEST', id: c.id }); break
           case 'bank_transactions': rawDispatch({ type: 'REMOVE_BANK_TX', id: c.id }); break
           case 'cfdi_docs':       rawDispatch({ type: 'REMOVE_CFDI_DOC', id: c.id }); break
           case 'prospects':       rawDispatch({ type: 'REMOVE_PROSPECT', id: c.id }); break
@@ -2232,6 +2265,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           case 'movement_lists':  rawDispatch({ type: 'UPSERT_MOVEMENT_LIST', list: c.row }); break
           case 'movements':       rawDispatch({ type: 'UPSERT_MOVEMENT', movement: c.row }); break
           case 'campaigns':       rawDispatch({ type: 'UPSERT_CAMPAIGN', campaign: c.row }); break
+          case 'material_requests': rawDispatch({ type: 'UPSERT_MATERIAL_REQUEST', request: c.row }); break
           case 'bank_transactions': rawDispatch({ type: 'UPSERT_BANK_TX', tx: c.row }); break
           case 'cfdi_docs':       rawDispatch({ type: 'UPSERT_CFDI_DOC', doc: c.row }); break
           case 'prospects':       rawDispatch({ type: 'UPSERT_PROSPECT', prospect: c.row }); break

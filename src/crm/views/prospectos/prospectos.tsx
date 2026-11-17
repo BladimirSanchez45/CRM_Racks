@@ -5,7 +5,7 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, normalizeOrigen, normalizeSistema, anunciosDe } from '../../core/data'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, canOpenProspectDetail, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, normalizeOrigen, normalizeSistema, anunciosDe } from '../../core/data'
 import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
@@ -129,7 +129,9 @@ type ProspectFormState = {
 }
 /** Máximo de cotizaciones que se pueden adjuntar a un prospecto. */
 const MAX_COTIZACIONES = 3
-function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () => void }) {
+/** `readOnly` = ficha de consulta: mismos campos, deshabilitados y sin Guardar
+ *  (las cotizaciones sí se pueden abrir). */
+function ProspectForm({ prospect, onClose, readOnly = false }: { prospect?: Prospect; onClose: () => void; readOnly?: boolean }) {
   const { state, dispatch } = useStore()
   const me = state.currentUser
   // Un vendedor "de piso" solo puede crear prospectos a su nombre; los gerentes
@@ -187,14 +189,16 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
     dispatch({ type: 'SAVE_PROSPECT', prospect: payload }); onClose()
   }
   return (
-    <Modal width={640} icon={prospect ? 'edit' : 'plus'} title={prospect ? 'Editar prospecto' : 'Nuevo prospecto'} onClose={requestClose}
-      footer={<>
+    <Modal width={640} icon={readOnly ? 'eye' : prospect ? 'edit' : 'plus'} title={readOnly ? 'Prospecto' : prospect ? 'Editar prospecto' : 'Nuevo prospecto'}
+      sub={readOnly ? 'Solo consulta' : undefined} onClose={readOnly ? onClose : requestClose}
+      footer={readOnly ? <button className="btn btn-ghost" onClick={onClose}>Cerrar</button> : <>
         <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <div className="flex-1"></div>
         <button className={'btn btn-primary' + (!valid ? ' opacity-50' : '')} disabled={!valid} onClick={save}><Icon name="check" size={15} /> Guardar</button>
       </>}>
-      <div className="grid grid-cols-2 gap-3.5">
-        <Field label="Nombre del prospecto"><Input value={p.name} onChange={e => set('name', e.target.value)} placeholder="Contacto" autoFocus /></Field>
+      {/* El fieldset deshabilita de un golpe todos los campos en modo consulta. */}
+      <fieldset disabled={readOnly} className="grid grid-cols-2 gap-3.5 border-0 p-0 m-0 min-w-0">
+        <Field label="Nombre del prospecto"><Input value={p.name} onChange={e => set('name', e.target.value)} placeholder="Contacto" autoFocus={!readOnly} /></Field>
         <Field label={<>División <span style={{ color: 'var(--danger)' }}>*</span>{!isNew && faltaDivision && <span className="meta font-normal"> · sin capturar</span>}</>}>
           <Select value={p.division} onChange={e => set('division', e.target.value)}>
             <option value="">Selecciona…</option>
@@ -256,16 +260,21 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
           </Field>
         )}
         <Field label="Costo / cotización (Sin IVA)"><MoneyInput value={p.costo} onChange={v => set('costo', v)} placeholder="0" /></Field>
+      </fieldset>
+      {/* Fuera del fieldset: en modo consulta las cotizaciones deben poder abrirse. */}
+      <div className="grid grid-cols-2 gap-3.5 mt-3.5">
         {/* Hasta 3 cotizaciones: a veces se cotiza más de una opción al mismo prospecto. */}
         <Field label={`Cotizaciones (${p.cotizaciones.length}/${MAX_COTIZACIONES})`} span={2}>
           <div className="flex flex-col gap-2">
             {p.cotizaciones.map((c, i) => (
               <div key={i} className="flex items-center gap-2">
                 <div className="flex-1 min-w-0"><DocChip doc={{ name: c.name, ok: true, path: c.path }} label={c.name || `Cotización ${i + 1}`} /></div>
-                <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar cotización" onClick={() => removeCotizacion(i)}><Icon name="trash" size={13} /></button>
+                {!readOnly && <button type="button" className="btn btn-sm btn-ghost shrink-0" title="Quitar cotización" onClick={() => removeCotizacion(i)}><Icon name="trash" size={13} /></button>}
               </div>
             ))}
-            {p.cotizaciones.length < MAX_COTIZACIONES ? (
+            {readOnly ? (
+              p.cotizaciones.length === 0 && <div className="meta">Sin cotizaciones</div>
+            ) : p.cotizaciones.length < MAX_COTIZACIONES ? (
               <FileField label="" value="" folder={`prospects/${prospect?.id || 'nuevos'}`}
                 onChange={addCotizacion} accept=".pdf,.xlsx,.xls,.jpg,.png" />
             ) : (
@@ -273,7 +282,7 @@ function ProspectForm({ prospect, onClose }: { prospect?: Prospect; onClose: () 
             )}
           </div>
         </Field>
-        <Field label="Notas" span={2}><Input value={p.notas} onChange={e => set('notas', e.target.value)} placeholder="Seguimiento, detalles…" /></Field>
+        <Field label="Notas" span={2}><Input value={p.notas} onChange={e => set('notas', e.target.value)} placeholder="Seguimiento, detalles…" disabled={readOnly} /></Field>
       </div>
       {guard}
     </Modal>
@@ -415,6 +424,8 @@ export function ProspectosPage() {
   const { state, dispatch } = useStore()
   const me = state.currentUser
   const readOnly = isDireccion(me?.role) || isMarketing(me?.role)   // dirección y marketing: solo lectura
+  // En solo lectura, el clic en un renglón abre la ficha de consulta solo a quien está autorizado.
+  const canDetail = canOpenProspectDetail(me)
 
   const [form, setForm] = React.useState<Prospect | {} | null>(null)
   const [convert, setConvert] = React.useState<Prospect | null>(null)
@@ -684,7 +695,7 @@ export function ProspectosPage() {
               {rows.map(p => {
                 const sg = seguimiento(p)
                 return (
-                  <tr key={p.id} onClick={() => !readOnly && setForm(p)} style={readOnly ? { cursor: 'default' } : undefined}>
+                  <tr key={p.id} onClick={() => (!readOnly || canDetail) && setForm(p)} style={readOnly && !canDetail ? { cursor: 'default' } : undefined}>
                     <td className="font-semibold text-tx-1 text-[12.5px]">{p.name}</td>
                     <td className="text-[12px]">{sellerName(p.seller)}</td>
                     <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>
@@ -757,7 +768,7 @@ export function ProspectosPage() {
         {rows.length === 0 && <Empty icon="clients">Sin prospectos{hasFilters ? ' que coincidan con los filtros' : ' — agrega el primero'}</Empty>}
       </div>
 
-      {form && <ProspectForm prospect={'id' in form ? form : undefined} onClose={() => setForm(null)} />}
+      {form && <ProspectForm prospect={'id' in form ? form : undefined} readOnly={readOnly} onClose={() => setForm(null)} />}
       {convert && (
         <ProjectForm prefill={prefillFrom(convert)} onClose={() => setConvert(null)} onSaved={(project) => onConverted(convert, project)} />
       )}
@@ -894,7 +905,7 @@ export function PerdidosPage() {
         {rows.length === 0 && <Empty icon="eyeOff">Sin prospectos perdidos{q || fSeller ? ' que coincidan' : ''}</Empty>}
       </div>
 
-      {form && <ProspectForm prospect={form} onClose={() => setForm(null)} />}
+      {form && <ProspectForm prospect={form} readOnly={readOnly} onClose={() => setForm(null)} />}
       {comments && <ProspectComments prospect={comments} onClose={() => setComments(null)} />}
       {del && (
         <Confirm title="Eliminar prospecto" danger
