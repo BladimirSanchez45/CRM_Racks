@@ -24,12 +24,14 @@ const STATUS_META: Record<WarehouseStatus, { label: string; color: string }> = {
   pendiente: { label: WAREHOUSE_STATUS_LABEL.pendiente, color: 'var(--tx-2)' },
   proceso:   { label: WAREHOUSE_STATUS_LABEL.proceso,   color: 'var(--warn)' },
   pausado:   { label: WAREHOUSE_STATUS_LABEL.pausado,   color: 'var(--st-5)' },
+  // "Pendiente" = detenido porque le falta algo (no confundir con la clave 'pendiente' = "Por iniciar").
+  espera:    { label: WAREHOUSE_STATUS_LABEL.espera,    color: 'var(--st-3)' },
   // "Listo" = preparado en almacén, esperando salir. "Terminado" = ya salió (deja la cola).
   preparado: { label: WAREHOUSE_STATUS_LABEL.preparado, color: 'var(--ok)' },
   listo:     { label: WAREHOUSE_STATUS_LABEL.listo,     color: 'var(--acc)' },
 }
 /** Orden en que se ofrecen los estatus en el selector. */
-const STATUSES: WarehouseStatus[] = ['pendiente', 'proceso', 'pausado', 'preparado', 'listo']
+const STATUSES: WarehouseStatus[] = ['pendiente', 'proceso', 'pausado', 'espera', 'preparado', 'listo']
 
 /** ¿Este usuario puede MOVER la cola? Almacén (dueño del proceso) y admin. */
 const canManageWarehouse = (role?: string | null) => role === 'almacen' || role === 'admin' || role === 'superadmin'
@@ -411,7 +413,7 @@ export function WarehousePage() {
           <div className="k-foot">{load.total} proyecto{load.total === 1 ? '' : 's'} en cola</div>
         </div>
         <div className="kpi"><div className="k-label">En proceso</div><div className="k-val text-[26px] text-warn">{load.proceso}</div><div className="k-foot">{load.diasProceso} días</div></div>
-        <div className="kpi"><div className="k-label">Por iniciar / pausados</div><div className="k-val text-[26px]">{load.pendiente}<span className="text-[17px] text-tx-2"> / {load.pausado}</span></div><div className="k-foot">esperando turno</div></div>
+        <div className="kpi"><div className="k-label">Por iniciar / pausados</div><div className="k-val text-[26px]">{load.pendiente}<span className="text-[17px] text-tx-2"> / {load.pausado}</span></div><div className="k-foot">{load.espera > 0 ? `esperando turno · ${load.espera} pendiente${load.espera === 1 ? '' : 's'}` : 'esperando turno'}</div></div>
         <div className="kpi"><div className="k-label">Listos</div><div className="k-val text-[26px] text-ok">{load.preparado}</div><div className="k-foot">preparados, esperan salir</div></div>
         <div className="kpi"><div className="k-label">Sin clasificar</div><div className="k-val text-[26px]" style={{ color: load.sinClasificar ? 'var(--warn)' : undefined }}>{load.sinClasificar}</div><div className="k-foot">no suman a la carga</div></div>
       </div>
@@ -560,9 +562,10 @@ export function WarehouseLoadCard() {
           <div style={{ width: `${100 - pct}%`, background: 'var(--acc)', opacity: 0.35 }}></div>
         </div>
 
-        {(load.pausado > 0 || load.preparado > 0 || load.sinClasificar > 0) && (
+        {(load.pausado > 0 || load.espera > 0 || load.preparado > 0 || load.sinClasificar > 0) && (
           <div className="meta mt-2.5 flex flex-col gap-0.5">
             {load.pausado > 0 && <span>{load.pausado} pausado{load.pausado === 1 ? '' : 's'}: ya arrancaron pero están detenidos.</span>}
+            {load.espera > 0 && <span>{load.espera} pendiente{load.espera === 1 ? '' : 's'}: detenido{load.espera === 1 ? '' : 's'} porque les falta algo.</span>}
             {load.preparado > 0 && <span>{load.preparado} listo{load.preparado === 1 ? '' : 's'} en almacén: ya preparado{load.preparado === 1 ? '' : 's'}, espera{load.preparado === 1 ? '' : 'n'} salir.</span>}
             {load.sinClasificar > 0 && <span>{load.sinClasificar} sin clasificar: aún no suma{load.sinClasificar === 1 ? '' : 'n'} días.</span>}
           </div>
@@ -633,6 +636,12 @@ export function WarehouseLoadStrip() {
           <>
             <span className="text-tx-3">·</span>
             <span className="text-[12.5px]"><b>{load.pausado}</b> pausado{load.pausado === 1 ? '' : 's'}</span>
+          </>
+        )}
+        {load.espera > 0 && (
+          <>
+            <span className="text-tx-3">·</span>
+            <span className="text-[12.5px]"><b>{load.espera}</b> pendiente{load.espera === 1 ? '' : 's'}</span>
           </>
         )}
         {load.preparado > 0 && (
@@ -748,7 +757,7 @@ export function WarehouseDashboard({ onNavigate }: { onNavigate: (route: string)
           <div className="k-foot">{load.total} OC en tu cola</div>
         </div>
         <div className="kpi"><div className="k-label">En proceso</div><div className="k-val text-[26px] text-warn">{load.proceso}</div><div className="k-foot">{load.diasProceso} días</div></div>
-        <div className="kpi"><div className="k-label">Por iniciar / pausados</div><div className="k-val text-[26px]">{load.pendiente}<span className="text-[17px] text-tx-2"> / {load.pausado}</span></div><div className="k-foot">esperando turno</div></div>
+        <div className="kpi"><div className="k-label">Por iniciar / pausados</div><div className="k-val text-[26px]">{load.pendiente}<span className="text-[17px] text-tx-2"> / {load.pausado}</span></div><div className="k-foot">{load.espera > 0 ? `esperando turno · ${load.espera} pendiente${load.espera === 1 ? '' : 's'}` : 'esperando turno'}</div></div>
         <div className="kpi"><div className="k-label">Listos</div><div className="k-val text-[26px] text-ok">{load.preparado}</div><div className="k-foot">preparados, esperan salir</div></div>
         <div className="kpi"><div className="k-label">Terminadas (7 días)</div><div className="k-val text-[26px] text-ok">{recientes.length}</div><div className="k-foot">de {done.length} en total</div></div>
       </div>

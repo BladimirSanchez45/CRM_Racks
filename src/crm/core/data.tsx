@@ -150,7 +150,7 @@ export const canSeeAllProspects = (u?: { role?: Role; title?: string } | null): 
 
 /** Etiquetas de los estatus de la cola de almacén (las comparten Almacén e Inventario). */
 export const WAREHOUSE_STATUS_LABEL: Record<WarehouseStatus, string> = {
-  pendiente: 'Por iniciar', proceso: 'En proceso', pausado: 'Pausado', preparado: 'Listo', listo: 'Terminado',
+  pendiente: 'Por iniciar', proceso: 'En proceso', pausado: 'Pausado', espera: 'Pendiente', preparado: 'Listo', listo: 'Terminado',
 }
 
 /** Comisión bancaria sobre la lista de movimientos "por fuera" (total = subtotal × (1 + tasa)).
@@ -2259,6 +2259,19 @@ export function useStore(): StoreValue {
   return ctx
 }
 
+/** Hace que las vistas de adentro vean al usuario actual con OTRO rol. Solo cambia
+ *  lo que LEEN las vistas (state.currentUser.role); el reducer y lo que se guarda
+ *  siguen usando el usuario real (nombre, id y rol verdadero). Sirve para prestarle
+ *  a una persona vistas que su rol no tiene, con los permisos del rol que las presta. */
+export function ViewAsRole({ role, children }: { role: Role; children: React.ReactNode }) {
+  const ctx = useStore()
+  const value = React.useMemo<StoreValue>(() => {
+    const me = ctx.state.currentUser
+    return me ? { ...ctx, state: { ...ctx.state, currentUser: { ...me, role } } } : ctx
+  }, [ctx, role])
+  return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>
+}
+
 /* ---- Selectors ---- */
 export const sel = {
   clientName: (state: AppState, id: string) => (state.clients.find(c => c.id === id) || ({} as Client)).name || '—',
@@ -2357,6 +2370,8 @@ export const sel = {
       proceso: proceso.length,
       pendiente: pendiente.length,
       pausado: pausado.length,
+      // "Pendiente" en pantalla: detenido porque le falta algo. Sigue siendo carga.
+      espera: q.filter(w => w.status === 'espera').length,
       preparado: preparado.length,
       total: q.length,
       sinClasificar: carga.filter(w => !sel.warehouseClasificado(w)).length,

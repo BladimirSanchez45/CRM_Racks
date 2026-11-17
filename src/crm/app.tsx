@@ -2,7 +2,7 @@
 //  APP SHELL — sidebar, topbar, routing, tweaks
 // ============================================================
 import * as React from 'react'
-import { StoreProvider, useStore, isAdminRole, isSuperadmin, isDireccion, roleLabel } from './core/data'
+import { StoreProvider, ViewAsRole, useStore, isAdminRole, isSuperadmin, isDireccion, roleLabel } from './core/data'
 import { signOut } from './core/api'
 import { ProjectDetail, ProjectForm } from './views/projects/project_views'
 import { DueSoonModal } from './views/projects/due_soon'
@@ -113,12 +113,36 @@ const ROLE_ROUTES: Partial<Record<Role, Route[]>> = {
   // todo el equipo) + agenda, metas y configuración personal.
   marketing: ['agenda', 'vacaciones', 'prospectos', 'estadisticas', 'campaigns', 'ventas_stats', 'settings'],
 }
-/** Rutas a las que puede entrar el rol; null = sin restricción (ve todo). */
-const allowedRoutes = (role?: Role | null): Route[] | null => (role && ROLE_ROUTES[role]) || null
+/** Vistas EXTRA por persona (por correo), además de las de su rol. Cada vista se le
+ *  muestra CON EL ROL indicado (ver `ViewAsRole`), así que puede hacer en ella lo
+ *  mismo que ese rol. Aquí: David Ríos (Marketing) trabaja las vistas de Logística
+ *  y de Almacén como ellos. No incluye el Panel. */
+const EXTRA_ROUTES: Record<string, Partial<Record<Route, Role>>> = {
+  'drios@ccracksmexico.com': {
+    projects: 'logistica', suppliers: 'logistica', orders: 'logistica',
+    asignacion: 'logistica', remisiones: 'logistica', internal_payments: 'logistica',
+    almacen: 'almacen', inventario: 'almacen',
+  },
+}
+type Who = { role?: Role | null; email?: string } | null | undefined
+/** Rol con el que esta persona ve una vista prestada; undefined = no es prestada. */
+const extraRoleFor = (u: Who, r: Route): Role | undefined => {
+  const base = u?.role ? ROLE_ROUTES[u.role] : undefined
+  if (!base || base.includes(r)) return undefined   // rol sin restricción o vista ya propia
+  return (u?.email && EXTRA_ROUTES[u.email.toLowerCase()]?.[r]) || undefined
+}
+/** Vistas extra de esta persona que su rol NO le da por sí mismo. */
+const extraRoutes = (u: Who): Route[] =>
+  (Object.keys((u?.email && EXTRA_ROUTES[u.email.toLowerCase()]) || {}) as Route[]).filter(r => !!extraRoleFor(u, r))
+/** Rutas a las que puede entrar el usuario; null = sin restricción (ve todo). */
+const allowedRoutes = (u: Who): Route[] | null => {
+  const base = (u?.role && ROLE_ROUTES[u.role]) || null
+  return base ? [...base, ...extraRoutes(u)] : null
+}
 /** Ruta de aterrizaje del rol: el Panel si puede verlo, si no la primera ruta permitida.
  *  Evita que un rol sin acceso al Panel (p. ej. Marketing) caiga en él por defecto. */
-const landingRoute = (role?: Role | null): Route => {
-  const allowed = allowedRoutes(role)
+const landingRoute = (u: Who): Route => {
+  const allowed = allowedRoutes(u)
   if (!allowed || allowed.includes('dashboard')) return 'dashboard'
   return allowed[0] ?? 'dashboard'
 }
@@ -159,8 +183,10 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
     payments: state.payments.length,
     clients: state.clients.length,
   }
-  const allowed = allowedRoutes(me?.role)
+  const allowed = allowedRoutes(me)
+  const extra = extraRoutes(me)
   const nav = NAV.filter(n => {
+    if (extra.includes(n.id)) return true   // vista prestada por correo
     if (n.roles) return me?.role ? n.roles.includes(me.role) : false   // whitelist explícita de roles
     if (n.adminOnly) return isAdminRole(me?.role)
     return allowed ? allowed.includes(n.id) : true
@@ -231,7 +257,7 @@ function Sidebar({ route, setRoute }: { route: Route; setRoute: (r: Route) => vo
 function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
   const { state } = useStore()
   const me = state.currentUser
-  const [route, setRoute] = React.useState<Route>(() => landingRoute(me?.role))
+  const [route, setRoute] = React.useState<Route>(() => landingRoute(me))
   const [collapsed, setCollapsed] = React.useState(false)
   const [openProj, setOpenProj] = React.useState<Project | null>(null)
   const [editProj, setEditProj] = React.useState<Project | null>(null)
@@ -243,8 +269,13 @@ function Shell({ t, setTweak }: { t: Tweaks; setTweak: SetTweak }) {
   const page = () => {
     // Un rol restringido solo puede entrar a sus rutas; cualquier otra cae a su
     // ruta de aterrizaje (Panel, o la primera permitida si no tiene Panel).
-    const allowed = allowedRoutes(me?.role)
-    const r: Route = (allowed && !allowed.includes(route)) ? landingRoute(me?.role) : route
+    const allowed = allowedRoutes(me)
+    const r: Route = (allowed && !allowed.includes(route)) ? landingRoute(me) : route
+    // Vista prestada por correo: se muestra (y se opera) con el rol que la presta.
+    const asRole = extraRoleFor(me, r)
+    return asRole ? <ViewAsRole key={asRole} role={asRole}>{pageFor(r)}</ViewAsRole> : pageFor(r)
+  }
+  const pageFor = (r: Route) => {
     switch (r) {
       case 'dashboard':   return <DashboardPage onNavigate={(x) => setRoute(x as Route)} onOpenProject={onOpenProject} />
       case 'agenda':      return <AgendaPage onOpenProject={onOpenProject} />

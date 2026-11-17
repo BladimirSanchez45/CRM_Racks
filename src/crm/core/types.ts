@@ -676,8 +676,11 @@ export type WarehouseSize = 'S' | 'M' | 'L'
  *  ejemplo, para darle prioridad a otro): se distingue de 'pendiente', que
  *  nunca se ha tocado. 'preparado' ("Listo" en pantalla) = almacén ya lo tiene
  *  preparado y espera a que salga: sigue en la cola pero ya no suma carga.
- *  'listo' ("Terminado" en pantalla) = ya salió de almacén; deja la cola. */
-export type WarehouseStatus = 'pendiente' | 'proceso' | 'pausado' | 'preparado' | 'listo'
+ *  'listo' ("Terminado" en pantalla) = ya salió de almacén; deja la cola.
+ *  'espera' ("Pendiente" en pantalla) = detenido porque le falta algo (material,
+ *  información…): sigue en la cola y sigue sumando carga. OJO: la clave
+ *  'pendiente' es la que en pantalla dice "Por iniciar"; no son lo mismo. */
+export type WarehouseStatus = 'pendiente' | 'proceso' | 'pausado' | 'espera' | 'preparado' | 'listo'
 
 /** Renglón de la cola de almacén: uno por ORDEN DE COMPRA.
  *  La unidad de trabajo de almacén es la OC (el material que llega de un
