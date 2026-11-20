@@ -2,7 +2,7 @@
 //  PROJECT VIEWS — detail drawer + create/edit form
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, anunciosDe } from '../../core/data'
+import { useStore, sel, STAGES, stageIndex, manualNextStage, manualPrevStage, fmtMoney, fmtDate, fmtDateShort, daysBetween, addDays, docNo, docCount, DOC_LABELS, type DocKey, type DocListKey, MAX_DOCS_LISTA, stageBlockedReason, TODAY_ISO, uid, canEditProject, isAdminRole, isDireccion, isIngenieria, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, anunciosDe, prospectFolio, canSeeAllProspects } from '../../core/data'
 import { Modal, useUnsavedGuard, Field, Input, TextArea, Select, Combobox, FileField, MoneyInput, StageBadge, DocChip, PayBadge, Badge, Avatar, OCStatus, Empty } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { printRemision, remisionStatusBadge } from '../remisiones/remisiones'
@@ -779,6 +779,24 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
   const [sistemaOtro, setSistemaOtro] = React.useState(() => !!p.sistemaVendido && !SISTEMAS.includes(p.sistemaVendido))
   const [showClient, setShowClient] = React.useState(false)
   const [addClient, setAddClient] = React.useState(false)
+  // Prospecto de origen: se elige aquí para ligar la venta con su prospecto (el vínculo vive
+  // en prospect.convertedProjectId). Cuando el formulario se abre desde Prospectos con
+  // "Registrar venta" (trae `prefill`), el vínculo lo hace esa pantalla y el campo no se muestra.
+  const ligaProspecto = !prefill
+  const prospectoPrevio = project ? sel.prospectOf(state, project) : undefined
+  const [prospectId, setProspectId] = React.useState(prospectoPrevio?.id || '')
+  // Se ofrecen los prospectos que aún no están ligados a otra venta. Un vendedor de piso
+  // solo ve los suyos (igual que en Prospectos); primero los del vendedor del proyecto.
+  const prospectOpts = !ligaProspecto ? [] : state.prospects
+    // (El que ya está ligado a este proyecto siempre aparece, sea de quien sea.)
+    .filter(x => x.convertedProjectId === p.id || (!x.convertedProjectId && (canSeeAllProspects(me) || x.seller === me?.id)))
+    .sort((a, b) => ((a.createdAt || '') < (b.createdAt || '') ? 1 : -1))
+    .sort((a, b) => Number(b.seller === p.seller) - Number(a.seller === p.seller))
+    .map(x => ({
+      value: x.id,
+      label: [prospectFolio(x), x.name].filter(Boolean).join(' · '),
+      sub: [x.empresa, sel.sellerName(state, x.seller), x.resultado, x.costo != null ? fmtMoney(x.costo) : ''].filter(s => s && s !== '—').join(' · '),
+    }))
   // ETA proveedor automático: fecha base (creación o hoy) + semanas de entrega × 7 días.
   const etaBase = (project?.created || '').slice(0, 10) || TODAY_ISO
   const setWeeks = (v: string) => setP(s => {
@@ -807,7 +825,7 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
   const ventaIva = ventaSub * 0.16
   const ventaTotal = ventaSub * 1.16
   // Guardia de cambios sin guardar: si el formulario se tocó, confirma antes de salir.
-  const { requestClose, guard } = useUnsavedGuard(p, onClose)
+  const { requestClose, guard } = useUnsavedGuard({ p, prospectId }, onClose)
   const save = () => {
     // Ventas: el vendedor SIEMPRE es él mismo (no puede registrar ventas a nombre de otro).
     const seller = isVentas ? me!.id : p.seller
@@ -815,6 +833,13 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
     const anuncioCodigo = anuncios.includes(p.anuncioCodigo || '') ? p.anuncioCodigo : undefined
     const project = { ...p, seller, anuncioCodigo, ventaSubtotal: ventaSub, freight: +p.freight || 0, install: +p.install || 0, weeks: +p.weeks || 0 } as Project
     dispatch({ type: 'SAVE_PROJECT', project })
+    // Prospecto de origen: si cambió, se suelta el anterior (vuelve a "En espera") y el
+    // elegido queda Vendido apuntando a este proyecto.
+    if (ligaProspecto && prospectId !== (prospectoPrevio?.id || '')) {
+      if (prospectoPrevio) dispatch({ type: 'SAVE_PROSPECT', prospect: { ...prospectoPrevio, convertedProjectId: undefined, resultado: 'En espera' } })
+      const nuevo = state.prospects.find(x => x.id === prospectId)
+      if (nuevo) dispatch({ type: 'SAVE_PROSPECT', prospect: { ...nuevo, resultado: 'Vendido', convertedProjectId: project.id } })
+    }
     onSaved?.(project)
     onClose()
   }
@@ -894,6 +919,13 @@ export function ProjectForm({ project, prefill, onClose, onSaved }: { project?: 
               <option value="">Selecciona…</option>
               {anuncios.map(a => <option key={a} value={a}>{a}</option>)}
             </Select>
+          </Field>
+        )}
+
+        {ligaProspecto && (
+          <Field span={3} label={<>Prospecto de origen <span className="meta font-normal">(opcional · liga la venta con su prospecto)</span></>}>
+            <Combobox value={prospectId} onChange={setProspectId} options={prospectOpts}
+              placeholder="Buscar por folio, nombre o empresa…" emptyText="No hay prospectos sin venta ligada" />
           </Field>
         )}
 

@@ -267,12 +267,13 @@ export const normalizeSistema = (raw?: string): string => {
   return 'Otro'
 }
 /* ---- Catálogo de ORÍGENES (de dónde llegó el lead / la venta) ----
-   Los cuatro anuncios más cuatro orígenes que NO son anuncio. Lista cerrada para
+   Los cuatro anuncios más cinco orígenes que NO son anuncio ("Prospección" = el
+   vendedor buscó al cliente, no llegó solo). Lista cerrada para
    que "Estadísticas por origen" no se fragmente por cómo se escribe. Los formularios
    (proyecto y prospecto) ofrecen estas opciones más "Otro (Especificar)". */
 export const ORIGENES = [
   'Google ADS', 'CTC Ad Racks Industriales', 'CTC Ad Mezzanines', 'CTC Ad Minirack',
-  'Cliente existente', 'Referido', 'Contacto directo', 'Distribuidor',
+  'Cliente existente', 'Referido', 'Contacto directo', 'Prospección', 'Distribuidor',
 ]
 export const ORIGEN_OTRO = 'Otro (Especificar)'
 /** Anuncios individuales de las campañas CTC, por código (CCMR 101…). Solo aplican a la
@@ -305,6 +306,8 @@ export const normalizeOrigen = (raw?: string): string => {
   if (/web ?ad|google ad/.test(t)) return 'Google ADS'
   if (/referid|recomend/.test(t)) return 'Referido'
   if (/distribuidor|dsitribuidor/.test(t)) return 'Distribuidor'
+  // Antes de la regla de "cliente": "prospección de clientes" es Prospección.
+  if (/prospecc/.test(t)) return 'Prospección'
   if (/cliente|antiguo|recuperad|cartera|ya era prospecto/.test(t)) return 'Cliente existente'
   if (/direct|visit|llamada|whats|correo|sucursal|cedis|linea|contact/.test(t)) return 'Contacto directo'
   // Solo dice que no hubo anuncio, o pusieron el sistema en vez del origen: sin origen.
