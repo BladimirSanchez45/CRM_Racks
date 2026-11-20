@@ -9,6 +9,7 @@ import { loadExcelJS, descargarXlsx } from './excel_export'
 import { MESES_L } from './data'
 
 export interface ProspectoRow {
+  folio: string                  // PROS-0042 (clave para rastrearlo hasta su venta) o ''
   nombre: string
   division: string               // CC Racks / Racks Tapatíos
   empresa: string
@@ -112,6 +113,7 @@ export async function exportProspectosExcel(rows: ProspectoRow[], meta: { subtit
   })
 
   const cols: { header: string; key: keyof ProspectoRow | 'iva'; width: number; kind?: 'money' | 'date' | 'num' }[] = [
+    { header: 'Folio', key: 'folio', width: 12 },
     { header: 'Nombre', key: 'nombre', width: 26 },
     { header: 'División', key: 'division', width: 15 },
     { header: 'Empresa', key: 'empresa', width: 22 },

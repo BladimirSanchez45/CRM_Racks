@@ -958,6 +958,7 @@ function mapProspect(r: any): Prospect {
     id: r.id, name: r.name ?? '', seller: r.seller ?? '',
     estado: (r.estado ?? 'Nuevo') as Prospect['estado'],
     resultado: (r.resultado ?? 'En espera') as Prospect['resultado'],
+    ...(r.folio != null ? { folio: Number(r.folio) } : {}),
     ...(r.empresa ? { empresa: r.empresa } : {}),
     ...(r.email ? { email: r.email } : {}),
     ...(r.phone ? { phone: r.phone } : {}),
@@ -999,6 +1000,8 @@ function mapProspect(r: any): Prospect {
   }
 }
 function prospectRow(p: Prospect): Record<string, unknown> {
+  // OJO: `folio` NO se manda. Lo asigna la base al crear (trigger de step47) y, al no
+  // ir en el upsert, una edición nunca lo pisa.
   return {
     id: p.id, name: p.name, seller: p.seller, estado: p.estado, resultado: p.resultado,
     empresa: p.empresa ?? null, email: p.email ?? null, phone: p.phone ?? null, city: p.city ?? null,

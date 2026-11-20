@@ -5,8 +5,8 @@
 //  prellenando el formulario con los datos del prospecto.
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, canOpenProspectDetail, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, normalizeOrigen, normalizeSistema, anunciosDe } from '../../core/data'
-import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
+import { useStore, sel, fmtMoney, fmtDateShort, daysBetween, TODAY_ISO, uid, isDireccion, isMarketing, canSeeAllProspects, canOpenProspectDetail, SISTEMAS, SISTEMA_OTRO, ORIGENES, ORIGEN_OTRO, ESTADOS_MX, DIVISIONES, normalizeOrigen, normalizeSistema, anunciosDe, prospectFolio } from '../../core/data'
+import { Modal, Field, Input, TextArea, Select, MoneyInput, FileField, DocChip, Badge, Avatar, Empty, KPI, Confirm, Combobox, useUnsavedGuard, useFitTableHeight } from '../../core/ui'
 import { Icon } from '../../core/icons'
 import { ProjectForm } from '../projects/project_views'
 import { exportProspectosExcel, type ProspectoRow } from '../../core/export_prospectos'
@@ -190,7 +190,7 @@ function ProspectForm({ prospect, onClose, readOnly = false }: { prospect?: Pros
   }
   return (
     <Modal width={640} icon={readOnly ? 'eye' : prospect ? 'edit' : 'plus'} title={readOnly ? 'Prospecto' : prospect ? 'Editar prospecto' : 'Nuevo prospecto'}
-      sub={readOnly ? 'Solo consulta' : undefined} onClose={readOnly ? onClose : requestClose}
+      sub={[prospectFolio(prospect), readOnly ? 'Solo consulta' : ''].filter(Boolean).join(' · ') || undefined} onClose={readOnly ? onClose : requestClose}
       footer={readOnly ? <button className="btn btn-ghost" onClick={onClose}>Cerrar</button> : <>
         <button className="btn btn-ghost" onClick={requestClose}>Cancelar</button>
         <div className="flex-1"></div>
@@ -418,6 +418,49 @@ function ProspectEval({ prospect, onClose }: { prospect: Prospect; onClose: () =
 }
 
 /* ============================================================
+   Ligar un prospecto a una venta (proyecto) que YA está registrada.
+   Para las ventas que se capturaron directo en Proyectos sin pasar por
+   "Registrar venta": el prospecto queda Vendido y apuntando a ese proyecto.
+   ============================================================ */
+function ProspectLink({ prospect, onClose }: { prospect: Prospect; onClose: () => void }) {
+  const { state, dispatch } = useStore()
+  const [pid, setPid] = React.useState('')
+  // Solo proyectos que todavía no tienen prospecto de origen (un proyecto, un prospecto).
+  const ligados = new Set(state.prospects.map(x => x.convertedProjectId).filter(Boolean))
+  const opciones = state.projects
+    .filter(x => !ligados.has(x.id))
+    .sort((a, b) => (a.created < b.created ? 1 : -1))
+    // Primero las ventas del mismo vendedor: es donde casi siempre está la que se busca.
+    .sort((a, b) => Number(b.seller === prospect.seller) - Number(a.seller === prospect.seller))
+    .map(x => ({
+      value: x.id,
+      label: `${x.code} · ${sel.clientName(state, x.client)}`,
+      sub: [x.alias, sel.sellerName(state, x.seller), fmtDateShort(x.created.slice(0, 10)), fmtMoney(x.ventaSubtotal || 0)].filter(Boolean).join(' · '),
+    }))
+  const save = () => {
+    if (!pid) return
+    dispatch({ type: 'SAVE_PROSPECT', prospect: { ...prospect, resultado: 'Vendido', convertedProjectId: pid } })
+    onClose()
+  }
+  return (
+    <Modal width={520} icon="clip" title="Ligar a una venta registrada" sub={[prospectFolio(prospect), prospect.name].filter(Boolean).join(' · ')} onClose={onClose}
+      footer={<>
+        <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+        <div className="flex-1"></div>
+        <button className={'btn btn-primary' + (!pid ? ' opacity-50' : '')} disabled={!pid} onClick={save}><Icon name="check" size={15} /> Ligar</button>
+      </>}>
+      <p className="text-[13px] text-tx-1 mb-3">
+        Úsalo cuando la venta de este prospecto <b>ya está en Proyectos</b>. Si aún no se registra, cierra esta ventana y usa <b>Registrar venta</b>.
+      </p>
+      <Field label="Proyecto">
+        <Combobox value={pid} onChange={setPid} options={opciones} placeholder="Buscar por código, cliente o alias…" emptyText="No hay proyectos sin prospecto ligado" />
+      </Field>
+      <div className="meta mt-2">Solo aparecen los proyectos que todavía no tienen un prospecto de origen.</div>
+    </Modal>
+  )
+}
+
+/* ============================================================
    Página de Prospectos
    ============================================================ */
 export function ProspectosPage() {
@@ -431,14 +474,17 @@ export function ProspectosPage() {
   const [convert, setConvert] = React.useState<Prospect | null>(null)
   const [del, setDel] = React.useState<Prospect | null>(null)
   const [deconvert, setDeconvert] = React.useState<Prospect | null>(null)
+  const [link, setLink] = React.useState<Prospect | null>(null)
   const [comments, setComments] = React.useState<Prospect | null>(null)
   const [evalP, setEvalP] = React.useState<Prospect | null>(null)
+  // Código del proyecto ligado a un prospecto (PRY-2026-042), o '' si no hay.
+  const projectCodeOf = (p: Prospect) => (p.convertedProjectId && state.projects.find(x => x.id === p.convertedProjectId)?.code) || ''
   const [f, setF] = React.useState({ q: '', seller: '', estado: '', resultado: '', calidad: '', mes: '', anuncio: '', sistema: '' })
   // Orden por columna: clic en el encabezado alterna 1º / 2º / sin orden. Las columnas
   // numéricas y de fecha arrancan de mayor a menor (lo más grande o reciente arriba);
   // las de texto, de A a Z.
   const [sort, setSort] = React.useState<{ key: string; dir: number }>({ key: '', dir: 0 })
-  const DESC_FIRST = ['seguimiento', 'costo', 'calidad', 'fechaAsig', 'ultContacto']
+  const DESC_FIRST = ['folio', 'seguimiento', 'costo', 'calidad', 'fechaAsig', 'ultContacto']
   const toggleSort = (key: string) => setSort(s => {
     const primero = DESC_FIRST.includes(key) ? -1 : 1
     return s.key !== key ? { key, dir: primero } : s.dir === primero ? { key, dir: -primero } : { key: '', dir: 0 }
@@ -477,7 +523,8 @@ export function ProspectosPage() {
       if (f.calidad === 'Sin evaluar' ? c !== null : c !== f.calidad) return false
     }
     if (f.q) {
-      const hay = `${p.name} ${p.empresa || ''} ${p.phone || ''} ${p.city || ''} ${p.sistema || ''}`.toLowerCase()
+      // También por folio (PROS-0042) y por el código del proyecto ligado (PRY-2026-042).
+      const hay = `${p.name} ${p.empresa || ''} ${p.phone || ''} ${p.city || ''} ${p.sistema || ''} ${prospectFolio(p)} ${projectCodeOf(p)}`.toLowerCase()
       if (!hay.includes(f.q.toLowerCase())) return false
     }
     return true
@@ -490,6 +537,7 @@ export function ProspectosPage() {
     if (!sort.key) return arr
     const val = (p: Prospect): string | number => {
       switch (sort.key) {
+        case 'folio': return p.folio ?? -1
         case 'nombre': return p.name.toLowerCase()
         case 'vendedor': return sellerName(p.seller).toLowerCase()
         case 'empresa': return (p.empresa || '').toLowerCase()
@@ -570,6 +618,7 @@ export function ProspectosPage() {
       const s = scoreOf(p.evaluacion)
       const proj = p.convertedProjectId ? state.projects.find(x => x.id === p.convertedProjectId) : undefined
       return {
+        folio: prospectFolio(p),
         nombre: p.name, division: p.division || '', empresa: p.empresa || '', vendedor: sellerName(p.seller),
         telefono: p.phone || '', correo: p.email || '', region: p.entidad || '', ciudad: p.city || '',
         sistema: p.sistema || '', anuncio: p.anuncio || '', anuncioCodigo: p.anuncioCodigo || '',
@@ -644,7 +693,7 @@ export function ProspectosPage() {
       <div className="flex gap-2 mb-3.5 items-center flex-wrap">
         <div className="relative flex-[1_1_220px] max-w-[300px]">
           <Icon name="search" size={15} className="absolute left-[11px] top-2.5 text-tx-3" />
-          <input className="input pl-[34px]" placeholder="Buscar nombre, empresa, teléfono…" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} />
+          <input className="input pl-[34px]" placeholder="Buscar nombre, empresa, teléfono, folio…" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} />
         </div>
         {/* El filtro por vendedor solo tiene sentido para quien ve a todo el equipo. */}
         {verTodo && (
@@ -686,7 +735,7 @@ export function ProspectosPage() {
         <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr>
-              {th('nombre', 'Nombre')}{th('vendedor', 'Vendedor')}{th('empresa', 'Empresa')}{th('telefono', 'Teléfono')}{th('ciudad', 'Región / Ciudad')}
+              {th('folio', 'Folio')}{th('nombre', 'Nombre')}{th('vendedor', 'Vendedor')}{th('empresa', 'Empresa')}{th('telefono', 'Teléfono')}{th('ciudad', 'Región / Ciudad')}
               {th('fechaAsig', 'Fecha asig.')}{th('estado', 'Estado')}{th('ultContacto', 'Últ. contacto')}
               {th('seguimiento', 'Seguimiento')}
               {th('costo', 'Costo', 'num')}{th('resultado', 'Resultado')}{th('calidad', 'Calidad')}{th('sistema', 'Sistema')}{th('anuncio', 'Anuncio')}<th></th>
@@ -696,6 +745,7 @@ export function ProspectosPage() {
                 const sg = seguimiento(p)
                 return (
                   <tr key={p.id} onClick={() => (!readOnly || canDetail) && setForm(p)} style={readOnly && !canDetail ? { cursor: 'default' } : undefined}>
+                    <td className="mono text-[12px] text-tx-2 whitespace-nowrap">{prospectFolio(p) || '—'}</td>
                     <td className="font-semibold text-tx-1 text-[12.5px]">{p.name}</td>
                     <td className="text-[12px]">{sellerName(p.seller)}</td>
                     <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>
@@ -726,12 +776,13 @@ export function ProspectosPage() {
                           <>
                             {p.convertedProjectId ? (
                               <>
-                                <Badge color="var(--st-9)" icon="check">En Proyectos</Badge>
+                                <Badge color="var(--st-9)" icon="check">{projectCodeOf(p) || 'En Proyectos'}</Badge>
                                 <button className="icon-btn w-8 h-8" title="Regresar a prospecto (desvincular / eliminar el proyecto)" onClick={() => setDeconvert(p)}><Icon name="collapse" size={13} /></button>
                               </>
                             ) : p.resultado === 'Vendido' ? (
                               <>
                                 <button className="btn btn-primary btn-sm h-8 whitespace-nowrap" onClick={() => setConvert(p)}><Icon name="flag" size={13} /> Registrar venta</button>
+                                <button className="icon-btn w-8 h-8" title="Ligar a una venta que ya está registrada en Proyectos" onClick={() => setLink(p)}><Icon name="clip" size={13} /></button>
                                 <button className="icon-btn w-8 h-8" title="Deshacer 'Vendido' (regresar a En espera)" onClick={() => unmarkSold(p)}><Icon name="collapse" size={13} /></button>
                               </>
                             ) : (
@@ -772,8 +823,9 @@ export function ProspectosPage() {
       {convert && (
         <ProjectForm prefill={prefillFrom(convert)} onClose={() => setConvert(null)} onSaved={(project) => onConverted(convert, project)} />
       )}
+      {link && <ProspectLink prospect={link} onClose={() => setLink(null)} />}
       {comments && <ProspectComments prospect={comments} onClose={() => setComments(null)} />}
-      {evalP && <ProspectEval prospect={evalP} onClose={() => setEvalP(null)} />}
+      {evalP &&<ProspectEval prospect={evalP} onClose={() => setEvalP(null)} />}
       {del && (
         <Confirm title="Eliminar prospecto" danger
           message={`¿Seguro que quieres eliminar el prospecto "${del.name}"? Esta acción no se puede deshacer.`}
@@ -828,7 +880,7 @@ export function PerdidosPage() {
     .filter(p => p.resultado === 'Perdido')
   const rows = base.filter(p =>
     (!fSeller || p.seller === fSeller) &&
-    (!q || `${p.name} ${p.empresa || ''} ${p.phone || ''} ${p.city || ''} ${p.sistema || ''}`.toLowerCase().includes(q.toLowerCase())),
+    (!q || `${p.name} ${p.empresa || ''} ${p.phone || ''} ${p.city || ''} ${p.sistema || ''} ${prospectFolio(p)}`.toLowerCase().includes(q.toLowerCase())),
   ).sort((a, b) => ((a.updated || a.createdAt || '') < (b.updated || b.createdAt || '') ? 1 : -1))
 
   const sellerOpts = [...new Set(base.map(p => p.seller).filter(Boolean))]
@@ -868,12 +920,13 @@ export function PerdidosPage() {
         <div ref={tabla.ref} className="overflow-auto" style={{ maxHeight: tabla.maxH }}>
           <table className="tbl">
             <thead><tr>
-              <th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Región / Ciudad</th>
+              <th>Folio</th><th>Nombre</th><th>Vendedor</th><th>Empresa</th><th>Teléfono</th><th>Región / Ciudad</th>
               <th>Sistema</th><th>Calidad</th><th>Últ. contacto</th><th></th>
             </tr></thead>
             <tbody>
               {rows.map(p => (
                 <tr key={p.id} onClick={() => setForm(p)}>
+                  <td className="mono text-[12px] text-tx-2 whitespace-nowrap">{prospectFolio(p) || '—'}</td>
                   <td className="font-semibold text-tx-1 text-[12.5px]">{p.name}</td>
                   <td className="text-[12px]">{sellerNameOf(state, p.seller)}</td>
                   <td className="text-tx-2 text-[12px]">{p.empresa || '—'}</td>

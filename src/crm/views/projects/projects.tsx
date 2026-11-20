@@ -2,7 +2,7 @@
 //  PROJECTS — Kanban board (drag + menu) + Table view
 // ============================================================
 import * as React from 'react'
-import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion, isIngenieria, isAdminRole } from '../../core/data'
+import { useStore, sel, STAGES, STAGE_MAP, stageIndex, fmtMoney, fmtK, fmtDateShort, daysBetween, docCount, cityAbbr, isDireccion, isIngenieria, isAdminRole, prospectFolio } from '../../core/data'
 import type { AppState } from '../../core/types'
 import { StageBadge, Seg, Empty, Badge, Avatar, Select, useFitTableHeight } from '../../core/ui'
 import { ProjectDetail, ProjectForm } from './project_views'
@@ -252,7 +252,8 @@ export function ProjectsPage() {
     if (f.supplier && !p.suppliers.includes(f.supplier)) return false
     if (f.seller && p.seller !== f.seller) return false
     if (f.q) {
-      const hay = (p.code + ' ' + sel.clientName(state, p.client) + ' ' + (p.alias || '') + ' ' + p.city).toLowerCase()
+      // Incluye el folio del prospecto de origen (PROS-0042) para rastrear la venta desde él.
+      const hay = (p.code + ' ' + sel.clientName(state, p.client) + ' ' + (p.alias || '') + ' ' + p.city + ' ' + prospectFolio(sel.prospectOf(state, p))).toLowerCase()
       if (!hay.includes(f.q.toLowerCase())) return false
     }
     return true

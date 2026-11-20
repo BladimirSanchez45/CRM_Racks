@@ -468,7 +468,7 @@ export function ProjectDetail({ project, onClose, onEdit, historial = false }: {
           <InfoRow k="Fecha de registro">{p.created ? fmtDate(p.created) : '—'}</InfoRow>
           {pf.prospecto && (
             <InfoRow k="Prospecto de origen">
-              {pf.prospecto.name}
+              {pf.folio && <span className="mono text-acc">{pf.folio} · </span>}{pf.prospecto.name}
               <div className="meta">Alta {fmtDate(pf.alta)}{pf.asignacion && <> · Asignado {fmtDate(pf.asignacion)}</>}{pf.diasCierre != null && <> · {pf.diasCierre} día{pf.diasCierre === 1 ? '' : 's'} a cierre</>}</div>
             </InfoRow>
           )}

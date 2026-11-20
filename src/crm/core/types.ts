@@ -663,6 +663,9 @@ export interface ProspectEvaluation {
  *  Proyecto prellenando el formulario con estos datos. */
 export interface Prospect {
   id: string
+  /** Folio consecutivo (se muestra PROS-0001). Lo asigna la BASE al crear el prospecto
+   *  (step47) y no cambia: es la clave para rastrearlo hasta su venta. El front solo lo lee. */
+  folio?: number
   name: string                 // Nombre del prospecto / contacto
   seller: string               // vendedor dueño del prospecto (seller id)
   empresa?: string

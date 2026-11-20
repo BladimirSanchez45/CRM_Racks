@@ -146,6 +146,9 @@ export const PUESTOS_VENTAS_GLOBAL = ['GERENTE GENERAL', 'GERENTE DE VENTAS']
 /** Normaliza un puesto para compararlo: mayúsculas, sin acentos ni espacios de más. */
 const normTitle = (t?: string) =>
   (t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim().replace(/\s+/g, ' ')
+/** Folio legible de un prospecto: "PROS-0042" ('' si la base aún no se lo asigna). */
+export const prospectFolio = (p?: { folio?: number } | null): string =>
+  p?.folio ? `PROS-${String(p.folio).padStart(4, '0')}` : ''
 /** ¿El usuario ve TODOS los prospectos (no solo los suyos)?
  *  - Roles distintos de "ventas" (admin, superadmin, dirección…): sí.
  *  - Rol "ventas": solo si su PUESTO es Gerente General o Gerente de Ventas. */
@@ -2124,8 +2127,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       case 'SAVE_PROSPECT': {
+        // El folio lo asigna la base y llega por realtime: si el formulario se abrió antes
+        // de que llegara, se conserva el que ya está en el estado para no perderlo en pantalla.
+        const prev = action.prospect.id ? s.prospects.find(x => x.id === action.prospect.id) : undefined
         const full: Prospect = {
           ...(action.prospect as Prospect),
+          folio: action.prospect.folio ?? prev?.folio,
           id: action.prospect.id ?? uid('pr'),
           createdAt: action.prospect.createdAt ?? nowISO(),
           updated: nowISO(),
@@ -2317,9 +2324,9 @@ export const sel = {
    *  (o del alta, si no hay asignación) al registro de la venta. */
   prospectoFechas: (state: AppState, p: Project) => {
     const pr = sel.prospectOf(state, p)
-    if (!pr) return { prospecto: undefined, alta: '', asignacion: '', diasCierre: null as number | null }
+    if (!pr) return { prospecto: undefined, folio: '', alta: '', asignacion: '', diasCierre: null as number | null }
     const alta = fechaLocal(pr.createdAt), asignacion = pr.fechaAsignacion || ''
-    return { prospecto: pr, alta, asignacion, diasCierre: diasEntre(asignacion || alta, p.created) }
+    return { prospecto: pr, folio: prospectFolio(pr), alta, asignacion, diasCierre: diasEntre(asignacion || alta, p.created) }
   },
   /** Abono del banco ligado a un cobro (si el cobro se concilió desde Bancos). */
   bankTxForPayment: (state: AppState, cpId: string) => state.bankTxs.find(t => t.clientPaymentId === cpId),

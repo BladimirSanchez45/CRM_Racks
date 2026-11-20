@@ -15,6 +15,10 @@ export interface VentaRow {
   proyecto: string     // código PRY-…
   division: string        // CC Racks / Racks Tapatíos
   cliente: string
+  // Datos de contacto: los del catálogo de clientes y, si ahí faltan, los del prospecto de origen.
+  contacto: string     // persona de contacto
+  telefono: string
+  correo: string
   region: string       // estado de la república (entidad)
   ciudad: string       // ciudad destino
   vendedor: string
@@ -23,7 +27,8 @@ export interface VentaRow {
   anuncio: string      // anuncio individual de la campaña CTC (CCMR 101…) o ''
   etapa: string
   // Proceso comercial, leído del prospecto ligado (vacío si el proyecto se registró directo).
-  prospectoAlta: string        // alta del prospecto (fecha de origen) ISO 'YYYY-MM-DD'
+  prospectoFolio: string       // folio del prospecto de origen (PROS-0042)
+  prospectoAlta: string       // alta del prospecto (fecha de origen) ISO 'YYYY-MM-DD'
   prospectoAsignacion: string  // fecha de asignación del prospecto ISO 'YYYY-MM-DD'
   diasCierre: number | null    // días de la asignación (o alta) al registro de la venta
   monto: number        // subtotal de la venta (sin IVA)
@@ -302,12 +307,16 @@ export async function exportVentasExcel(opts: {
     { header: 'Proyecto', key: 'proyecto', width: 15 },
     { header: 'División', key: 'division', width: 15 },
     { header: 'Cliente', key: 'cliente', width: 30 },
+    { header: 'Contacto', key: 'contacto', width: 24 },
+    { header: 'Teléfono', key: 'telefono', width: 16 },
+    { header: 'Correo', key: 'correo', width: 28 },
     { header: 'Región', key: 'region', width: 18 },
     { header: 'Ciudad', key: 'ciudad', width: 18 },
     { header: 'Vendedor', key: 'vendedor', width: 22 },
     { header: 'Sistema', key: 'sistema', width: 18 },
     { header: 'Origen', key: 'origen', width: 18 },
     { header: 'Núm. anuncio', key: 'anuncio', width: 13 },
+    { header: 'Folio prospecto', key: 'prospectoFolio', width: 15 },
     { header: 'Alta prospecto', key: 'prospectoAlta', width: 15, kind: 'date' },
     { header: 'Asignación prospecto', key: 'prospectoAsignacion', width: 19, kind: 'date' },
     { header: 'Días a cierre', key: 'diasCierre', width: 13, kind: 'int' },
